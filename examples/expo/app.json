@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Better Auth Expo",
+    "slug": "betterauth-expo-example",
+    "scheme": "betterauth",
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
