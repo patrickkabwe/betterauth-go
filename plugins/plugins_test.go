@@ -1,0 +1,168 @@
+package plugins_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/patrickkabwe/betterauth-go/auth"
+	"github.com/patrickkabwe/betterauth-go/constants"
+	"github.com/patrickkabwe/betterauth-go/plugins"
+	"github.com/patrickkabwe/betterauth-go/store/memory"
+)
+
+func newTestAuth(t *testing.T, p ...auth.Plugin) *auth.Auth {
+	t.Helper()
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   memory.New(),
+		Plugins: p,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func post(t *testing.T, a *auth.Auth, path string, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func get(t *testing.T, a *auth.Auth, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func TestAnonymousSignIn(t *testing.T) {
+	a := newTestAuth(t, plugins.Anonymous(plugins.AnonymousOptions{}))
+	w := post(t, a, "/sign-in/anonymous", `{}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp["user"]; !ok {
+		t.Fatal("expected user in response")
+	}
+}
+
+func TestMagicLinkSend(t *testing.T) {
+	var sent bool
+	a := newTestAuth(t, plugins.MagicLink(plugins.MagicLinkOptions{
+		SendMagicLink: func(_ context.Context, _, _, _ string) error {
+			sent = true
+			return nil
+		},
+	}))
+	w := post(t, a, "/sign-in/magic-link", `{"email":"test@example.com"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	if !sent {
+		t.Fatal("expected magic link to be sent")
+	}
+}
+
+func TestUsernameAvailability(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/is-username-available", `{"username":"newuser"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	var resp struct {
+		Available bool `json:"available"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Available {
+		t.Fatal("expected username to be available")
+	}
+}
+
+func TestOneTimeTokenFlow(t *testing.T) {
+	a := newTestAuth(t, plugins.OneTimeToken(plugins.OneTimeTokenOptions{}))
+	// create user via anonymous first
+	w := post(t, a, "/sign-in/anonymous", `{}`)
+	var anon struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &anon)
+
+	// need session - anonymous plugin not loaded, use sign-up
+	a2, _ := auth.New(auth.Config{
+		Secret: "test-secret-key-32-chars-minimum!!", BaseURL: "http://localhost:8080",
+		Store: memory.New(),
+		Plugins: []auth.Plugin{
+			plugins.Anonymous(plugins.AnonymousOptions{}),
+			plugins.OneTimeToken(plugins.OneTimeTokenOptions{}),
+		},
+	})
+	w = post(t, a2, "/sign-in/anonymous", `{}`)
+	cookie := w.Header().Get("Set-Cookie")
+
+	req := httptest.NewRequest(http.MethodGet, "/one-time-token/generate", nil)
+	req.Header.Set("Cookie", cookie)
+	w2 := httptest.NewRecorder()
+	a2.Handler().ServeHTTP(w2, req)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("generate status %d", w2.Code)
+	}
+}
+
+func TestOpenAPISchema(t *testing.T) {
+	a := newTestAuth(t, plugins.OpenAPI(plugins.OpenAPIOptions{}))
+	w := get(t, a, "/open-api/generate-schema")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestOrganizationCreate(t *testing.T) {
+	a, _ := auth.New(auth.Config{
+		Secret: "test-secret-key-32-chars-minimum!!", BaseURL: "http://localhost:8080",
+		Store: memory.New(),
+		Plugins: []auth.Plugin{
+			plugins.Anonymous(plugins.AnonymousOptions{}),
+			plugins.Organization(plugins.OrganizationOptions{}),
+		},
+	})
+	w := post(t, a, "/sign-in/anonymous", `{}`)
+	cookie := w.Header().Get("Set-Cookie")
+	req := httptest.NewRequest(http.MethodPost, "/organization/create", strings.NewReader(`{"name":"Acme","slug":"acme"}`))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	req.Header.Set("Cookie", cookie)
+	w2 := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w2, req)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("create org status %d body %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestBearerPluginRegistered(t *testing.T) {
+	a := newTestAuth(t, plugins.Bearer(plugins.BearerOptions{}))
+	if len(a.Plugins()) != 1 || a.Plugins()[0].ID() != constants.PluginBearer {
+		t.Fatal("bearer plugin not registered")
+	}
+}
+
+func TestAllPluginsCount(t *testing.T) {
+	all := plugins.All(plugins.AllOptions{})
+	if len(all) != 24 {
+		t.Fatalf("expected 24 plugins, got %d", len(all))
+	}
+}
