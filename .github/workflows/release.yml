@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go test -race -count=1 ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build CLI binaries
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          platforms=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+            "windows/arm64"
+          )
+          for platform in "${platforms[@]}"; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            BIN="betterauth-${GOOS}-${GOARCH}"
+            if [ "$GOOS" = "windows" ]; then
+              BIN="${BIN}.exe"
+            fi
+            echo "Building ${BIN}..."
+            GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/${BIN}" \
+              ./cli
+          done
+          (cd dist && sha256sum betterauth-* > SHA256SUMS)
+
+      - name: Verify CLI install path
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          go build -o "$(go env GOPATH)/bin/betterauth" \
+            -ldflags "-s -w -X main.version=${VERSION}" ./cli
+          betterauth --version
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            dist/*
+
+      - name: Summary
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Release ${{ steps.version.outputs.tag }}
+
+          Go module (all packages share this tag):
+
+          \`\`\`bash
+          go get github.com/patrickkabwe/betterauth-go@${{ steps.version.outputs.tag }}
+          go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@${{ steps.version.outputs.tag }}
+          betterauth --version
+          \`\`\`
+
+          Import paths released under this tag:
+
+          | Package | Import path |
+          |---------|-------------|
+          | Core auth | \`github.com/patrickkabwe/betterauth-go/auth\` |
+          | CLI (library) | \`github.com/patrickkabwe/betterauth-go/cli/core\` |
+          | Go HTTP client | \`github.com/patrickkabwe/betterauth-go/client\` |
+          | Plugins | \`github.com/patrickkabwe/betterauth-go/plugins\` |
+          | Memory store | \`github.com/patrickkabwe/betterauth-go/store/memory\` |
+          | SQL store | \`github.com/patrickkabwe/betterauth-go/store/sql\` |
+          | CLI binary | \`github.com/patrickkabwe/betterauth-go/cli\` (install with \`go build -o …/bin/betterauth\`) |
+
+          pkg.go.dev will index the tag automatically within a few minutes.
+          EOF
