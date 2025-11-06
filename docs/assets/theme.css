@@ -1,0 +1,115 @@
+/* Shared tokens — aligned with better-auth.com (Fumadocs / neutral palette) */
+
+@import url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css");
+@import url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/style.min.css");
+
+:root {
+    --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --background: #ffffff;
+    --foreground: #171717;
+    --muted: #737373;
+    --border: rgba(23, 23, 23, 0.08);
+    --border-strong: rgba(23, 23, 23, 0.12);
+    --surface: rgba(23, 23, 23, 0.03);
+    --surface-hover: rgba(23, 23, 23, 0.05);
+    --code-bg: #f5f5f5;
+    --syn-base: #24292f;
+    --syn-keyword: #d73a49;
+    --syn-string: #032f62;
+    --syn-comment: #6a737d;
+    --syn-type: #6f42c1;
+    --syn-attr: #005cc5;
+    --syn-built-in: #e36209;
+    --syn-number: #005cc5;
+    --syn-function: #6f42c1;
+    --topbar-h: 52px;
+    --sidebar-w: min(22vw, 280px);
+    --toc-w: 220px;
+    --content-max: 720px;
+    --doc-column-gap: 56px;
+    --doc-outer-pad: clamp(16px, 3vw, 40px);
+    --radius: 8px;
+}
+
+html.dark {
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --muted: #a3a3a3;
+    --border: rgba(250, 250, 250, 0.08);
+    --border-strong: rgba(250, 250, 250, 0.12);
+    --surface: rgba(250, 250, 250, 0.04);
+    --surface-hover: rgba(250, 250, 250, 0.07);
+    --code-bg: #171717;
+    --syn-base: #c9d1d9;
+    --syn-keyword: #ff7b72;
+    --syn-string: #a5d6ff;
+    --syn-comment: #8b949e;
+    --syn-type: #d2a8ff;
+    --syn-attr: #79c0ff;
+    --syn-built-in: #ffa657;
+    --syn-number: #79c0ff;
+    --syn-function: #d2a8ff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not(.light) {
+        --background: #0a0a0a;
+        --foreground: #fafafa;
+        --muted: #a3a3a3;
+        --border: rgba(250, 250, 250, 0.08);
+        --border-strong: rgba(250, 250, 250, 0.12);
+        --surface: rgba(250, 250, 250, 0.04);
+        --surface-hover: rgba(250, 250, 250, 0.07);
+        --code-bg: #171717;
+        --syn-base: #c9d1d9;
+        --syn-keyword: #ff7b72;
+        --syn-string: #a5d6ff;
+        --syn-comment: #8b949e;
+        --syn-type: #d2a8ff;
+        --syn-attr: #79c0ff;
+        --syn-built-in: #ffa657;
+        --syn-number: #79c0ff;
+        --syn-function: #d2a8ff;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+    color-scheme: light dark;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: var(--background);
+    color: var(--foreground);
+    line-height: 1.6;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    transition:
+        background-color 0.25s ease,
+        color 0.25s ease;
+}
+
+a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: rgba(115, 115, 115, 0.45);
+}
+
+a:hover {
+    text-decoration-color: var(--foreground);
+}
+
+code,
+pre,
+.mono {
+    font-family: var(--font-mono);
+}

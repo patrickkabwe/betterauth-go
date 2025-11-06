@@ -1,0 +1,109 @@
+# Database & adapters
+
+Persistence is abstracted behind `store.Store`. Use the in-memory store for
+tests, the SQL adapter for production, or implement the interface for your ORM.
+
+## Store interface
+
+Core operations cover users, accounts, sessions, and verification tokens:
+
+```go
+type Store interface {
+    CreateUser(ctx context.Context, user *types.User) error
+    FindUserByEmail(ctx context.Context, email string) (*types.User, error)
+    FindUserByID(ctx context.Context, id string) (*types.User, error)
+    // … accounts, sessions, verification — see store/store.go
+}
+```
+
+Plugins that need extra tables (organization, two-factor, OIDC, etc.) require
+`store.ExtStore`. The SQL and memory adapters implement both.
+
+## SQL adapter
+
+The `store/sql` package is **driver-agnostic**. You open a `*sql.DB` with any
+driver and pass a dialect:
+
+```go
+import (
+    databasesql "database/sql"
+    sqlstore "github.com/patrickkabwe/betterauth-go/store/sql"
+    _ "modernc.org/sqlite"
+)
+
+db, _ := databasesql.Open("sqlite", "file:auth.db")
+st := sqlstore.New(db, sqlstore.SQLite) // or Postgres, MySQL
+
+ctx := context.Background()
+if err := st.Migrate(ctx); err != nil {
+    log.Fatal(err)
+}
+```
+
+### Dialects
+
+| Dialect | Constant | Typical driver |
+|---------|----------|----------------|
+| SQLite | `sqlstore.SQLite` | `modernc.org/sqlite`, `mattn/go-sqlite3` |
+| Postgres | `sqlstore.Postgres` | `lib/pq`, `jackc/pgx/v5/stdlib` |
+| MySQL | `sqlstore.MySQL` | `go-sql-driver/mysql` |
+
+Timestamps are stored as **unix milliseconds**; booleans as `0/1`. The schema
+is identical across dialects.
+
+### Core tables
+
+| Table | Purpose |
+|-------|---------|
+| `ba_user` | Users (`additional` JSON column for plugin/extra fields) |
+| `ba_account` | Credential and OAuth accounts |
+| `ba_session` | Active sessions |
+| `ba_verification` | Email verification, reset tokens, OAuth state |
+
+Plugin tables are created only when those plugins are enabled — see the
+[CLI](cli.md) and `betterauth generate`.
+
+## In-memory store
+
+```go
+import "github.com/patrickkabwe/betterauth-go/store/memory"
+
+st := memory.New()
+```
+
+Data is lost on process restart. Suitable for tests and prototypes.
+
+## Custom ORM integration
+
+Implement `store.Store` (and `store.ExtStore` if you use plugins):
+
+1. Map `types.User`, `types.Session`, etc. to your models.
+2. Store plugin-specific fields in a JSON `additional` column (same approach
+   as the SQL adapter).
+3. Pass your implementation to `auth.Config.Store`.
+
+See `store/store.go` and `store/extstore.go` for the full method list.
+
+## Additional user fields
+
+Define custom fields on the user object:
+
+```go
+User: auth.UserConfig{
+    AdditionalFields: map[string]auth.AdditionalFieldDef{
+        "company": {Type: "string", Required: false},
+    },
+},
+```
+
+Values are persisted in the `additional` JSON column rather than dedicated
+columns (unlike some TypeScript adapter setups). Clients can infer types via
+`GET /client-schema` and `inferAdditionalFields<Auth>()`.
+
+## Database hooks
+
+Run logic around store operations with
+[`DatabaseHooks`](hooks.md#database-hooks) — useful for syncing to Stripe,
+audit logs, or denormalized tables.
+
+Next: [Session management →](session-management.md)
