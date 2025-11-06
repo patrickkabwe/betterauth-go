@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify module
+        run: go mod verify
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build and install CLI
+        run: |
+          go build -o "$(go env GOPATH)/bin/betterauth" ./cli
+          betterauth --version

@@ -47,3 +47,4 @@ examples/*/dist/
 # Claude / local tooling
 .claude/
 
+tsconfig.tsbuildinfo

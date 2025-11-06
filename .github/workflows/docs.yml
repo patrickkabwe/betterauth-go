@@ -1,0 +1,46 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set docs version badge
+        run: |
+          if git describe --tags --exact-match HEAD 2>/dev/null; then
+            VERSION="$(git describe --tags --exact-match HEAD)"
+          elif VERSION="$(git describe --tags --abbrev=0 2>/dev/null)"; then
+            :
+          else
+            VERSION="dev"
+          fi
+          VERSION="${VERSION#v}"
+          echo "{\"version\":\"${VERSION}\"}" > docs/version.json
+          echo "Docs version: ${VERSION}"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
