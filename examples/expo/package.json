@@ -1,0 +1,21 @@
+{
+  "name": "betterauth-expo-example",
+  "private": true,
+  "version": "0.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.14",
+    "expo": "~53.0.0",
+    "expo-router": "~5.0.0",
+    "expo-secure-store": "~14.2.0",
+    "react": "19.0.0",
+    "react-native": "0.79.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
