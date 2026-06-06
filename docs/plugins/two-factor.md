@@ -25,7 +25,7 @@ createAuthClient({ plugins: [twoFactorClient()] });
 ## Schema
 
 ```bash
-betterauth generate --plugins two-factor --dialect sqlite
+betterauth-go generate --plugins two-factor --dialect sqlite
 ```
 
 ## Flow
