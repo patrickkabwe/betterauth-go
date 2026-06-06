@@ -78,6 +78,62 @@ jobs:
             -ldflags "-s -w -X main.version=${VERSION}" ./cli
           betterauth --version
 
+      - name: Generate release notes
+        id: notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PREV_TAG="$(git tag -l 'v*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
+
+          {
+            echo "## Better Auth for Go ${VERSION}"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Changes since [\`${PREV_TAG}\`](https://github.com/${{ github.repository }}/releases/tag/${PREV_TAG}):"
+            else
+              echo "First stable release of **betterauth-go** — a Go server compatible with Better Auth clients."
+            fi
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..${TAG}" --pretty=format:'- %s (%h)' --merges
+            else
+              git log "${TAG}" --pretty=format:'- %s (%h)' --merges
+            fi
+            echo
+            echo "## Install"
+            echo
+            echo "**Go module** (library + CLI):"
+            echo '```bash'
+            echo "go get github.com/patrickkabwe/betterauth-go@${TAG}"
+            echo "go install github.com/patrickkabwe/betterauth-go/cli@${TAG}"
+            echo "betterauth --version"
+            echo '```'
+            echo
+            echo "**Prebuilt CLI** — download the binary for your platform below, then:"
+            echo '```bash'
+            echo "chmod +x betterauth-<platform>   # macOS / Linux"
+            echo "./betterauth-<platform> secret"
+            echo '```'
+            echo
+            echo "## Assets"
+            echo
+            echo "| Platform | Binary |"
+            echo "|----------|--------|"
+            echo "| macOS (Apple Silicon) | \`betterauth-darwin-arm64\` |"
+            echo "| macOS (Intel) | \`betterauth-darwin-amd64\` |"
+            echo "| Linux (amd64) | \`betterauth-linux-amd64\` |"
+            echo "| Linux (arm64) | \`betterauth-linux-arm64\` |"
+            echo "| Windows (amd64) | \`betterauth-windows-amd64.exe\` |"
+            echo "| Windows (arm64) | \`betterauth-windows-arm64.exe\` |"
+            echo
+            echo "Verify downloads with \`SHA256SUMS\`."
+            echo
+            echo "**Full changelog:** https://github.com/${{ github.repository }}/commits/${TAG}"
+          } > release-notes.md
+
+          echo "path=release-notes.md" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -85,7 +141,7 @@ jobs:
         run: |
           gh release create "$TAG" \
             --title "$TAG" \
-            --generate-notes \
+            --notes-file "${{ steps.notes.outputs.path }}" \
             dist/*
 
       - name: Summary
