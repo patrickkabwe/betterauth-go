@@ -1,0 +1,75 @@
+[
+  {
+    "title": "Get started",
+    "items": [
+      { "title": "Introduction", "path": "introduction" },
+      { "title": "Installation", "path": "installation" },
+      { "title": "Basic usage", "path": "basic-usage" }
+    ]
+  },
+  {
+    "title": "Authentication",
+    "items": [
+      { "title": "Email & password", "path": "authentication/email-password" },
+      { "title": "Social providers", "path": "authentication/social-providers" },
+      { "title": "User management", "path": "authentication/user-management" },
+      { "title": "Account management", "path": "authentication/account-management" }
+    ]
+  },
+  {
+    "title": "Concepts",
+    "items": [
+      { "title": "Database & adapters", "path": "concepts/database" },
+      { "title": "Session management", "path": "concepts/session-management" },
+      { "title": "Cookies", "path": "concepts/cookies" },
+      { "title": "Client schema", "path": "concepts/client-schema" },
+      { "title": "Server-side API", "path": "concepts/server-api" },
+      { "title": "Hooks", "path": "concepts/hooks" },
+      { "title": "Rate limiting", "path": "concepts/rate-limit" },
+      { "title": "Security", "path": "concepts/security" },
+      { "title": "Errors", "path": "concepts/errors" },
+      { "title": "CLI", "path": "concepts/cli" }
+    ]
+  },
+  {
+    "title": "Plugins",
+    "items": [
+      { "title": "Overview", "path": "plugins/overview" },
+      { "title": "Bearer", "path": "plugins/bearer" },
+      { "title": "Organization", "path": "plugins/organization" },
+      { "title": "Two-factor", "path": "plugins/two-factor" },
+      { "title": "Admin", "path": "plugins/admin" },
+      { "title": "Magic link", "path": "plugins/magic-link" },
+      { "title": "Username", "path": "plugins/username" },
+      { "title": "Email OTP", "path": "plugins/email-otp" },
+      { "title": "OIDC provider", "path": "plugins/oidc-provider" },
+      { "title": "Other plugins", "path": "plugins/other-plugins" }
+    ]
+  },
+  {
+    "title": "Integrations",
+    "items": [
+      { "title": "Frameworks", "path": "integrations/frameworks" },
+      { "title": "Clients", "path": "integrations/clients" },
+      { "title": "Go client", "path": "integrations/go-client" }
+    ]
+  },
+  {
+    "title": "Guides",
+    "items": [
+      { "title": "Production", "path": "guides/production" },
+      { "title": "Examples", "path": "guides/examples" },
+      { "title": "Testing", "path": "guides/testing" },
+      { "title": "Migrating from TypeScript", "path": "guides/migrating-from-typescript" }
+    ]
+  },
+  {
+    "title": "Reference",
+    "items": [
+      { "title": "Configuration", "path": "reference/configuration" },
+      { "title": "API endpoints", "path": "reference/api-endpoints" },
+      { "title": "Store interface", "path": "reference/store-interface" },
+      { "title": "Error codes", "path": "reference/error-codes" }
+    ]
+  }
+]
