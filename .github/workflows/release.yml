@@ -57,7 +57,7 @@ jobs:
           for platform in "${platforms[@]}"; do
             GOOS="${platform%/*}"
             GOARCH="${platform#*/}"
-            BIN="betterauth-${GOOS}-${GOARCH}"
+            BIN="betterauth-go-${GOOS}-${GOARCH}"
             if [ "$GOOS" = "windows" ]; then
               BIN="${BIN}.exe"
             fi
@@ -66,17 +66,17 @@ jobs:
               -trimpath \
               -ldflags "-s -w -X main.version=${VERSION}" \
               -o "dist/${BIN}" \
-              ./cli
+              ./cmd/betterauth-go
           done
-          (cd dist && sha256sum betterauth-* > SHA256SUMS)
+          (cd dist && sha256sum betterauth-go-* > SHA256SUMS)
 
       - name: Verify CLI install path
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          go build -o "$(go env GOPATH)/bin/betterauth" \
-            -ldflags "-s -w -X main.version=${VERSION}" ./cli
-          betterauth --version
+          go build -o "$(go env GOPATH)/bin/betterauth-go" \
+            -ldflags "-s -w -X main.version=${VERSION}" ./cmd/betterauth-go
+          betterauth-go --version
 
       - name: Create GitHub release
         env:
@@ -97,8 +97,8 @@ jobs:
 
           \`\`\`bash
           go get github.com/patrickkabwe/betterauth-go@${{ steps.version.outputs.tag }}
-          go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@${{ steps.version.outputs.tag }}
-          betterauth --version
+          go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@${{ steps.version.outputs.tag }}
+          betterauth-go --version
           \`\`\`
 
           Import paths released under this tag:
@@ -111,7 +111,7 @@ jobs:
           | Plugins | \`github.com/patrickkabwe/betterauth-go/plugins\` |
           | Memory store | \`github.com/patrickkabwe/betterauth-go/store/memory\` |
           | SQL store | \`github.com/patrickkabwe/betterauth-go/store/sql\` |
-          | CLI binary | \`github.com/patrickkabwe/betterauth-go/cli\` (install with \`go build -o …/bin/betterauth\`) |
+          | CLI binary | \`github.com/patrickkabwe/betterauth-go/cmd/betterauth-go\` (\`go install …/cmd/betterauth-go@tag\`) |
 
           pkg.go.dev will index the tag automatically within a few minutes.
           EOF

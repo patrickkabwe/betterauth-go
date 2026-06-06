@@ -61,7 +61,7 @@ is identical across dialects.
 | `ba_verification` | Email verification, reset tokens, OAuth state |
 
 Plugin tables are created only when those plugins are enabled — see the
-[CLI](cli.md) and `betterauth generate`.
+[CLI](cli.md) and `betterauth-go generate`.
 
 ## In-memory store
 

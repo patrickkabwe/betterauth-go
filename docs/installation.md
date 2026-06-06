@@ -15,11 +15,11 @@ high-entropy string):
 
 ```bash
 # one-off (no install)
-go run github.com/patrickkabwe/betterauth-go/cli@latest secret
+go run github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest secret
 
-# or install as betterauth
-go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@latest
-betterauth secret
+# or install the CLI
+go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
+betterauth-go secret
 # → BETTER_AUTH_SECRET=…
 ```
 
@@ -54,7 +54,7 @@ import (
 
 db, _ := databasesql.Open("sqlite", "file:auth.db")
 st := sqlstore.New(db, sqlstore.SQLite)
-_ = st.Migrate(context.Background()) // or run `betterauth migrate`
+_ = st.Migrate(context.Background()) // or run `betterauth-go migrate`
 ```
 
 See [Database & adapters](concepts/database.md) for Postgres/MySQL and ORM

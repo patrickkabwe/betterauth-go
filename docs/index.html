@@ -332,12 +332,12 @@
                             </button>
                         </div>
                         <pre class="code"><code id="cli-code"><span class="com"># install the CLI</span>
-go build -o <span class="str">"$(go env GOPATH)/bin/betterauth"</span> github.com/patrickkabwe/betterauth-go/cli@latest
+go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
 
-betterauth secret                                <span class="com"># generate BETTER_AUTH_SECRET</span>
-betterauth generate --plugins organization       <span class="com"># schema for enabled features only</span>
-betterauth migrate  --database <span class="str">"file:auth.db"</span>     <span class="com"># apply it</span>
-betterauth init     --name <span class="str">"My App"</span>              <span class="com"># scaffold a project</span></code></pre>
+betterauth-go secret                                <span class="com"># generate BETTER_AUTH_SECRET</span>
+betterauth-go generate --plugins organization       <span class="com"># schema for enabled features only</span>
+betterauth-go migrate  --database <span class="str">"file:auth.db"</span>     <span class="com"># apply it</span>
+betterauth-go init     --name <span class="str">"My App"</span>              <span class="com"># scaffold a project</span></code></pre>
                     </div>
                     <p class="note">
                         Schema is <strong>feature-scoped</strong>: only the

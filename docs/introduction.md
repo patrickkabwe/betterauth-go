@@ -27,7 +27,7 @@ backend is Go.
 | Plugins | many | 24 core plugins |
 | Adapters | Kysely, Drizzle, Prisma, … | driver-agnostic SQL (Postgres/SQLite/MySQL) + `Store` interface |
 | Plugin/extra fields | dedicated columns | stored in a portable JSON `additional` column |
-| CLI | `@better-auth/cli` | `cli` binary + `cli/core` package |
+| CLI | `@better-auth/cli` | `betterauth-go` binary + `cli/core` package |
 
 See the [ROADMAP](../ROADMAP.md) for the full parity tracker.
 

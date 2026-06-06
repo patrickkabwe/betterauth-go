@@ -83,7 +83,7 @@ custom `Store` without `ExtStore` returns `EXT_STORE_REQUIRED` for those routes.
 Plugin tables are included in CLI output when the plugin is enabled:
 
 ```bash
-betterauth generate --plugins organization,two-factor --dialect postgres
+betterauth-go generate --plugins organization,two-factor --dialect postgres
 ```
 
 See [CLI →](../concepts/cli.md), [Other plugins](other-plugins.md), and the

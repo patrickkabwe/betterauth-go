@@ -17,7 +17,7 @@
 //		}
 //	}
 //
-// The bundled cli binary wires this up with a SQLite driver and the default
+// The bundled betterauth-go binary wires this up with a SQLite driver and the default
 // schema for config-less use.
 package core
 
@@ -97,7 +97,7 @@ func Run(args []string, opts Options) error {
 		if v == "" {
 			v = "dev"
 		}
-		fmt.Fprintln(opts.Stdout, "betterauth "+v)
+		fmt.Fprintln(opts.Stdout, "betterauth-go "+v)
 		return nil
 	default:
 		fmt.Fprintf(opts.Stderr, "unknown command %q\n\n", cmd)
@@ -107,10 +107,10 @@ func Run(args []string, opts Options) error {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `betterauth — Better Auth CLI for Go
+	fmt.Fprint(w, `betterauth-go — Better Auth CLI for Go
 
 Usage:
-  betterauth <command> [flags]
+  betterauth-go <command> [flags]
 
 Commands:
   generate   Generate the database schema required by Better Auth
@@ -119,7 +119,7 @@ Commands:
   info       Print diagnostic information about your setup
   init       Scaffold Better Auth into a new project
 
-Run "betterauth <command> --help" for command-specific flags.
+Run "betterauth-go <command> --help" for command-specific flags.
 `)
 }
 

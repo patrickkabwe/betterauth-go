@@ -1,22 +1,22 @@
-// Command betterauth is the Better Auth CLI for Go: generate, migrate, secret,
+// Command betterauth-go is the Better Auth CLI for Go: generate, migrate, secret,
 // info, and init.
 //
-// Install (binary named betterauth):
+// Install:
 //
-//	go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@latest
+//	go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
 //
 // Usage:
 //
-//	betterauth secret
-//	betterauth generate --dialect postgres --output schema.sql
-//	betterauth migrate  --database "file:auth.db" --dialect sqlite
-//	betterauth init      --name "My App" --database sqlite
-//	betterauth info
+//	betterauth-go secret
+//	betterauth-go generate --dialect postgres --output schema.sql
+//	betterauth-go migrate  --database "file:auth.db" --dialect sqlite
+//	betterauth-go init      --name "My App" --database sqlite
+//	betterauth-go info
 //
 // The SQLite driver (modernc.org/sqlite) is bundled, so `migrate --dialect
 // sqlite` works out of the box. To migrate Postgres or MySQL from a DSN, build
 // your own binary that imports the relevant driver and calls core.Run, or run
-// `betterauth generate` and apply the SQL with your usual migration tooling.
+// `betterauth-go generate` and apply the SQL with your usual migration tooling.
 package main
 
 import (

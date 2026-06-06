@@ -16,7 +16,7 @@ Plugins: []auth.Plugin{
 Requires `store.ExtStore`. Generates OIDC-related tables:
 
 ```bash
-betterauth generate --plugins oidc-provider --dialect postgres
+betterauth-go generate --plugins oidc-provider --dialect postgres
 ```
 
 ## Use cases

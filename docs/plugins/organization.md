@@ -29,7 +29,7 @@ createAuthClient({
 Generates organization-related tables. Include in migrations:
 
 ```bash
-betterauth generate --plugins organization --dialect postgres
+betterauth-go generate --plugins organization --dialect postgres
 ```
 
 ## Key endpoints

@@ -92,7 +92,7 @@ Core tables: `ba_user`, `ba_account`, `ba_session`, `ba_verification`.
 Generate full schema:
 
 ```bash
-betterauth generate --all --dialect postgres -o schema.sql
+betterauth-go generate --all --dialect postgres -o schema.sql
 ```
 
 See [Database & adapters](../concepts/database.md).
