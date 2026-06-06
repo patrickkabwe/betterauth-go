@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>better-auth.go — Better Auth for Go</title>
+        <meta
+            name="description"
+            content="A Go server implementation compatible with Better Auth clients: email/password, sessions, social OAuth, 24 plugins, SQL adapters, production middleware, and a CLI."
+        />
+        <script>
+            (function () {
+                try {
+                    var t = localStorage.getItem("ba-docs-theme");
+                    if (t === "dark") document.documentElement.classList.add("dark");
+                    if (t === "light") document.documentElement.classList.add("light");
+                } catch (_) {}
+            })();
+        </script>
+        <link rel="stylesheet" href="assets/landing.css" />
+    </head>
+    <body class="landing-page">
+        <header class="topbar">
+            <div class="topbar-inner">
+                <a class="topbar-brand" href="./">
+                    <span class="wordmark"
+                        >better-auth<span class="suffix">.go</span></span
+                    >
+                </a>
+                <nav class="topbar-tabs" aria-label="Site sections">
+                    <a class="topbar-tab active" href="./">Home</a>
+                    <a class="topbar-tab" href="guide/">Docs</a>
+                    <a class="topbar-tab" href="#setup">Setup</a>
+                    <a class="topbar-tab" href="#features">Features</a>
+                    <a class="topbar-tab" href="#cli">CLI</a>
+                    <a
+                        class="topbar-tab topbar-tab-external"
+                        href="https://better-auth.com/docs"
+                        target="_blank"
+                        rel="noopener"
+                        >Better Auth</a
+                    >
+                </nav>
+                <div class="topbar-actions">
+                    <button
+                        id="theme-toggle"
+                        class="icon-btn"
+                        type="button"
+                        aria-label="Toggle theme"
+                        title="Toggle theme"
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                        >
+                            <circle cx="12" cy="12" r="4" />
+                            <path
+                                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                            />
+                        </svg>
+                    </button>
+                    <a
+                        class="icon-btn"
+                        href="https://github.com/patrickkabwe/betterauth-go"
+                        target="_blank"
+                        rel="noopener"
+                        aria-label="GitHub"
+                        title="GitHub"
+                        ><svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path
+                                d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"
+                            /></svg
+                    ></a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-bg" aria-hidden="true"></div>
+                <div class="wrap hero-grid">
+                    <div class="hero-copy">
+                        <h1>Better Auth for Go</h1>
+                        <p class="lead">
+                            Email &amp; password, sessions, social OAuth, plugins,
+                            and a CLI — mount it on any Go server and point your
+                            Better Auth client at it.
+                        </p>
+                        <div class="cta">
+                            <a class="btn btn-primary" href="#setup"
+                                >Get started</a
+                            >
+                            <a class="btn btn-ghost" href="guide/"
+                                >Read the docs</a
+                            >
+                        </div>
+                        <div class="install">
+                            <span class="prompt">$</span>
+                            <code id="install-cmd">go get github.com/patrickkabwe/betterauth-go</code>
+                            <button class="copy-btn" data-copy="#install-cmd">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="hero-visual" aria-hidden="true">
+                        <div class="shield-scene">
+                            <div class="shield-glow"></div>
+                            <div class="orbit orbit-a">
+                                <span class="orbit-node">JWT</span>
+                            </div>
+                            <div class="orbit orbit-b">
+                                <span class="orbit-node">OAuth</span>
+                            </div>
+                            <div class="orbit orbit-c">
+                                <span class="orbit-node">Session</span>
+                            </div>
+                            <svg
+                                class="shield-core"
+                                viewBox="0 0 120 140"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    class="shield-body"
+                                    d="M60 8L16 28v38c0 32 18.8 61.6 44 66 25.2-4.4 44-34 44-66V28L60 8z"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
+                                />
+                                <path
+                                    class="shield-lock"
+                                    d="M52 58v-6a8 8 0 0 1 16 0v6"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
+                                    stroke-linecap="round"
+                                />
+                                <rect
+                                    class="shield-lock"
+                                    x="48"
+                                    y="58"
+                                    width="24"
+                                    height="16"
+                                    rx="3"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
+                                />
+                                <path
+                                    class="shield-check"
+                                    d="M52 78l8 8 16-18"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                            <div class="shield-status">
+                                <span class="status-dot"></span>
+                                <span>Authenticated</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="setup">
+                <div class="wrap">
+                    <div class="section-head">
+                        <h2>Setup in seconds</h2>
+                        <p>
+                            Create an instance, mount the handler. That's the
+                            whole server.
+                        </p>
+                    </div>
+
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">main.go</span>
+                            <button class="copy-btn" data-copy="#setup-code">
+                                Copy
+                            </button>
+                        </div>
+                        <pre class="code"><code id="setup-code"><span class="kw">package</span> <span class="pl">main</span>
+
+<span class="kw">import</span> (
+	<span class="str">"log"</span>
+	<span class="str">"net/http"</span>
+
+	<span class="str">"github.com/patrickkabwe/betterauth-go/auth"</span>
+	<span class="str">"github.com/patrickkabwe/betterauth-go/store/memory"</span>
+)
+
+<span class="kw">func</span> <span class="fn">main</span>() {
+	a, err := auth.<span class="fn">New</span>(auth.<span class="typ">Config</span>{
+		<span class="pl">Secret</span>:         <span class="str">"your-secret-at-least-32-chars-long"</span>,
+		<span class="pl">BaseURL</span>:        <span class="str">"http://localhost:8080"</span>,
+		<span class="pl">TrustedOrigins</span>: []<span class="typ">string</span>{<span class="str">"http://localhost:3000"</span>},
+		<span class="pl">Store</span>:          memory.<span class="fn">New</span>(), <span class="com">// or store/sql for Postgres/SQLite/MySQL</span>
+	})
+	<span class="kw">if</span> err != <span class="kw">nil</span> {
+		log.<span class="fn">Fatal</span>(err)
+	}
+
+	mux := http.<span class="fn">NewServeMux</span>()
+	<span class="com">// Mount every Better Auth endpoint under /api/auth</span>
+	mux.<span class="fn">Handle</span>(<span class="str">"/api/auth/"</span>, http.<span class="fn">StripPrefix</span>(<span class="str">"/api/auth"</span>, a.<span class="fn">Handler</span>()))
+
+	log.<span class="fn">Fatal</span>(http.<span class="fn">ListenAndServe</span>(<span class="str">":8080"</span>, mux))
+}</code></pre>
+                    </div>
+                    <p class="note">
+                        Works with <code>net/http</code>, chi, Gin, Echo, Fiber
+                        — anything that speaks <code>http.Handler</code>.
+                    </p>
+
+                    <div class="section-head" style="margin-top: 48px">
+                        <h2>Connect any Better Auth client</h2>
+                        <p>
+                            The wire format matches the official server, so
+                            existing clients just work.
+                        </p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">auth-client.ts</span>
+                            <button class="copy-btn" data-copy="#client-code">
+                                Copy
+                            </button>
+                        </div>
+                        <pre class="code"><code id="client-code"><span class="kw">import</span> { createAuthClient } <span class="kw">from</span> <span class="str">"better-auth/react"</span>;
+
+<span class="kw">export const</span> authClient = <span class="fn">createAuthClient</span>({
+  baseURL: <span class="str">"http://localhost:8080"</span>, <span class="com">// your Go server</span>
+});
+
+<span class="kw">await</span> authClient.signUp.<span class="fn">email</span>({ name: <span class="str">"Jane"</span>, email: <span class="str">"jane@example.com"</span>, password: <span class="str">"securepass"</span> });
+<span class="kw">const</span> { data: session } = <span class="kw">await</span> authClient.<span class="fn">getSession</span>();</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <section id="features" class="section-band">
+                <div class="wrap">
+                    <div class="section-head">
+                        <h2>Everything you need to ship auth</h2>
+                        <p>
+                            Feature parity with the TypeScript server, idiomatic
+                            Go.
+                        </p>
+                    </div>
+                    <div class="features">
+                        <div class="feature">
+                            <div class="ic">🔐</div>
+                            <h3>Email &amp; password</h3>
+                            <p>
+                                Sign-up/in/out, verification, password reset,
+                                scrypt hashing, enumeration protection.
+                            </p>
+                        </div>
+                        <div class="feature">
+                            <div class="ic">🍪</div>
+                            <h3>Sessions</h3>
+                            <p>
+                                Signed cookies, cookie cache, refresh,
+                                fresh-session checks, bearer tokens,
+                                multi-session.
+                            </p>
+                        </div>
+                        <div class="feature">
+                            <div class="ic">🌐</div>
+                            <h3>Social OAuth</h3>
+                            <p>
+                                Google &amp; GitHub built in, generic OAuth
+                                plugin, account linking, token refresh.
+                            </p>
+                        </div>
+                        <div class="feature">
+                            <div class="ic">🧩</div>
+                            <h3>24 plugins</h3>
+                            <p>
+                                Organization, admin, 2FA, magic link, email OTP,
+                                passkey-adjacent, OIDC provider &amp; more.
+                            </p>
+                        </div>
+                        <div class="feature">
+                            <div class="ic">🗄️</div>
+                            <h3>SQL adapters</h3>
+                            <p>
+                                Driver-agnostic Postgres / SQLite / MySQL, or
+                                bring any ORM via the
+                                <code>Store</code> interface.
+                            </p>
+                        </div>
+                        <div class="feature">
+                            <div class="ic">🛡️</div>
+                            <h3>Production middleware</h3>
+                            <p>
+                                CORS with wildcards, origin CSRF, per-path rate
+                                limiting, secret rotation, DB hooks.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="cli">
+                <div class="wrap">
+                    <div class="section-head">
+                        <h2>
+                            A CLI that matches <code>@better-auth/cli</code>
+                        </h2>
+                        <p>
+                            Generate a feature-scoped schema, migrate, scaffold,
+                            and more.
+                        </p>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-head">
+                            <span class="file">terminal</span>
+                            <button class="copy-btn" data-copy="#cli-code">
+                                Copy
+                            </button>
+                        </div>
+                        <pre class="code"><code id="cli-code"><span class="com"># install the CLI</span>
+go build -o <span class="str">"$(go env GOPATH)/bin/betterauth"</span> github.com/patrickkabwe/betterauth-go/cli@latest
+
+betterauth secret                                <span class="com"># generate BETTER_AUTH_SECRET</span>
+betterauth generate --plugins organization       <span class="com"># schema for enabled features only</span>
+betterauth migrate  --database <span class="str">"file:auth.db"</span>     <span class="com"># apply it</span>
+betterauth init     --name <span class="str">"My App"</span>              <span class="com"># scaffold a project</span></code></pre>
+                    </div>
+                    <p class="note">
+                        Schema is <strong>feature-scoped</strong>: only the
+                        tables your enabled plugins need are generated.
+                    </p>
+                </div>
+            </section>
+
+            <section style="padding-top: 0">
+                <div class="wrap">
+                    <div class="section-head">
+                        <h2>Client compatibility</h2>
+                    </div>
+                    <div class="chips">
+                        <span class="chip"
+                            ><span class="ok">✓</span> better-auth/react</span
+                        >
+                        <span class="chip"
+                            ><span class="ok">✓</span> better-auth/vue</span
+                        >
+                        <span class="chip"
+                            ><span class="ok">✓</span> better-auth/svelte</span
+                        >
+                        <span class="chip"
+                            ><span class="ok">✓</span> Expo (SecureStore)</span
+                        >
+                        <span class="chip"
+                            ><span class="ok">✓</span> better-auth/client</span
+                        >
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="wrap foot">
+                <div>
+                    better-auth.go — a Go server compatible with Better Auth
+                    clients.
+                </div>
+                <div>
+                    <a href="guide/">Docs</a> ·
+                    <a href="https://github.com/patrickkabwe/betterauth-go">GitHub</a>
+                    ·
+                    <a
+                        href="https://github.com/patrickkabwe/betterauth-go/blob/main/README.md"
+                        >README</a
+                    >
+                    ·
+                    <a
+                        href="https://github.com/patrickkabwe/betterauth-go/blob/main/ROADMAP.md"
+                        >Roadmap</a
+                    >
+                </div>
+            </div>
+        </footer>
+
+        <script src="assets/landing.js"></script>
+    </body>
+</html>
