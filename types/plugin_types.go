@@ -1,0 +1,124 @@
+package types
+
+import (
+	"time"
+
+	"github.com/patrickkabwe/betterauth-go/constants"
+)
+
+// Plugin user field keys (aliases for constants).
+const (
+	FieldRole              = constants.FieldRole
+	FieldBanned            = constants.FieldBanned
+	FieldBanReason         = constants.FieldBanReason
+	FieldBanExpires        = constants.FieldBanExpires
+	FieldIsAnonymous       = constants.FieldIsAnonymous
+	FieldUsername          = constants.FieldUsername
+	FieldDisplayUsername   = constants.FieldDisplayUsername
+	FieldPhoneNumber       = constants.FieldPhoneNumber
+	FieldPhoneVerified     = constants.FieldPhoneVerified
+	FieldTwoFactorEnabled  = constants.FieldTwoFactorEnabled
+	FieldLastLoginMethod   = constants.FieldLastLoginMethod
+)
+
+// Organization is a team/tenant container.
+type Organization struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	Logo      *string   `json:"logo,omitempty"`
+	Metadata  string    `json:"metadata,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Member links a user to an organization.
+type Member struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	UserID         string    `json:"userId"`
+	Role           string    `json:"role"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// Invitation is a pending organization invite.
+type Invitation struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	Email          string    `json:"email"`
+	Role           string    `json:"role"`
+	Status         string    `json:"status"`
+	InviterID      string    `json:"inviterId"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// Team is a sub-group within an organization.
+type Team struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	OrganizationID string    `json:"organizationId"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// TeamMember links a user to a team.
+type TeamMember struct {
+	ID        string    `json:"id"`
+	TeamID    string    `json:"teamId"`
+	UserID    string    `json:"userId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// TwoFactorRecord stores 2FA secrets for a user.
+type TwoFactorRecord struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"userId"`
+	Secret      string    `json:"secret"`
+	BackupCodes string    `json:"backupCodes"`
+	Verified    bool      `json:"verified"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// DeviceCode is an OAuth2 device authorization code.
+type DeviceCode struct {
+	ID         string    `json:"id"`
+	DeviceCode string    `json:"deviceCode"`
+	UserCode   string    `json:"userCode"`
+	UserID     string    `json:"userId,omitempty"`
+	Status     string    `json:"status"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	Interval   int       `json:"interval"`
+	ClientID   string    `json:"clientId,omitempty"`
+	Scope      string    `json:"scope,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// JWKSRecord stores a JSON Web Key Set entry.
+type JWKSRecord struct {
+	ID         string     `json:"id"`
+	PublicKey  string     `json:"publicKey"`
+	PrivateKey string     `json:"privateKey,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+}
+
+// OAuthApplication is a registered OAuth client.
+type OAuthApplication struct {
+	ID           string    `json:"id"`
+	ClientID     string    `json:"clientId"`
+	ClientSecret string    `json:"clientSecret,omitempty"`
+	Name         string    `json:"name"`
+	RedirectURLs string    `json:"redirectURLs"`
+	Type         string    `json:"type"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// WalletAddress links a blockchain wallet to a user.
+type WalletAddress struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"userId"`
+	Address   string    `json:"address"`
+	ChainID   int       `json:"chainId"`
+	IsPrimary bool      `json:"isPrimary"`
+	CreatedAt time.Time `json:"createdAt"`
+}
