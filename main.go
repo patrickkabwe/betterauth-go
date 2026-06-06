@@ -3,7 +3,7 @@
 //
 // Install:
 //
-//	go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
+//	go install github.com/patrickkabwe/betterauth-go@latest
 //
 // Usage:
 //

@@ -6,7 +6,7 @@ generate schema, migrate, create secrets, scaffold projects, and print diagnosti
 ## Install
 
 ```bash
-go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
+go install github.com/patrickkabwe/betterauth-go@latest
 ```
 
 Or download a prebuilt `betterauth-go-*` binary from
@@ -15,14 +15,14 @@ Or download a prebuilt `betterauth-go-*` binary from
 One-off without installing:
 
 ```bash
-go run github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest secret
+go run github.com/patrickkabwe/betterauth-go@latest secret
 ```
 
 ## Package layout
 
 | Path | Purpose |
 |------|---------|
-| `github.com/patrickkabwe/betterauth-go/cmd/betterauth-go` | Installable binary (`package main`) |
+| `github.com/patrickkabwe/betterauth-go` | Installable CLI binary (`package main` at module root) |
 | `github.com/patrickkabwe/betterauth-go/cli/core` | Embeddable library — `core.Run`, `core.Options` |
 
 Import `cli/core` when you embed the CLI in your own binary with a configured

@@ -124,7 +124,7 @@
     async function loadVersion() {
         if (!docsVersionEl) return;
 
-        const paths = ["../version.json", "../../cmd/betterauth-go/main.go"];
+        const paths = ["../version.json", "../../main.go"];
 
         for (const path of paths) {
             try {

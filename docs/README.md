@@ -36,7 +36,7 @@ the Go API.
 - [Rate limiting](concepts/rate-limit.md)
 - [Security & middleware](concepts/security.md) — CORS, CSRF, secret rotation, IP tracking
 - [Errors](concepts/errors.md) — API error format
-- [CLI](concepts/cli.md) — `go install …/cmd/betterauth-go@latest`; `generate`, `migrate`, `secret`, `info`, `init`
+- [CLI](concepts/cli.md) — `go install github.com/patrickkabwe/betterauth-go@latest`; `generate`, `migrate`, `secret`, `info`, `init`
 
 ## Plugins
 

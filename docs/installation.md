@@ -15,10 +15,10 @@ high-entropy string):
 
 ```bash
 # one-off (no install)
-go run github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest secret
+go run github.com/patrickkabwe/betterauth-go@latest secret
 
 # or install the CLI
-go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
+go install github.com/patrickkabwe/betterauth-go@latest
 betterauth-go secret
 # → BETTER_AUTH_SECRET=…
 ```

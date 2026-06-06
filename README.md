@@ -192,7 +192,7 @@ type Store interface {
 A Better Auth-compatible CLI ships as both an installable binary and an embeddable package, mirroring `npx @better-auth/cli`.
 
 ```bash
-go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@latest
+go install github.com/patrickkabwe/betterauth-go@latest
 
 betterauth-go secret                                   # generate BETTER_AUTH_SECRET
 betterauth-go generate --dialect postgres -o schema.sql # write the SQL schema

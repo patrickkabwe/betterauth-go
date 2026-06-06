@@ -66,7 +66,7 @@ jobs:
               -trimpath \
               -ldflags "-s -w -X main.version=${VERSION}" \
               -o "dist/${BIN}" \
-              ./cmd/betterauth-go
+              .
           done
           (cd dist && sha256sum betterauth-go-* > SHA256SUMS)
 
@@ -75,7 +75,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           go build -o "$(go env GOPATH)/bin/betterauth-go" \
-            -ldflags "-s -w -X main.version=${VERSION}" ./cmd/betterauth-go
+            -ldflags "-s -w -X main.version=${VERSION}" .
           betterauth-go --version
 
       - name: Create GitHub release
@@ -97,7 +97,7 @@ jobs:
 
           \`\`\`bash
           go get github.com/patrickkabwe/betterauth-go@${{ steps.version.outputs.tag }}
-          go install github.com/patrickkabwe/betterauth-go/cmd/betterauth-go@${{ steps.version.outputs.tag }}
+          go install github.com/patrickkabwe/betterauth-go@${{ steps.version.outputs.tag }}
           betterauth-go --version
           \`\`\`
 
@@ -111,7 +111,7 @@ jobs:
           | Plugins | \`github.com/patrickkabwe/betterauth-go/plugins\` |
           | Memory store | \`github.com/patrickkabwe/betterauth-go/store/memory\` |
           | SQL store | \`github.com/patrickkabwe/betterauth-go/store/sql\` |
-          | CLI binary | \`github.com/patrickkabwe/betterauth-go/cmd/betterauth-go\` (\`go install …/cmd/betterauth-go@tag\`) |
+          | CLI binary | \`go install github.com/patrickkabwe/betterauth-go@tag\` → \`betterauth-go\` |
 
           pkg.go.dev will index the tag automatically within a few minutes.
           EOF
