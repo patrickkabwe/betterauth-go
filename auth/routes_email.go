@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
+	"github.com/patrickkabwe/betterauth-go/internal/crypto"
 	"github.com/patrickkabwe/betterauth-go/internal/jwt"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
@@ -33,6 +34,10 @@ func handleSendVerificationEmail(c *Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if !crypto.ValidateEmail(email) {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidEmail))
+		return
+	}
 	if _, sessionUser, err := c.GetSession(); err == nil {
 		if strings.ToLower(sessionUser.Email) != email {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailMismatch))

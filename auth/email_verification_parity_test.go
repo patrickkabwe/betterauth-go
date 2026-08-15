@@ -62,6 +62,20 @@ func TestSendVerificationEmailWithoutSessionUsesMinimumDuration(t *testing.T) {
 	}
 }
 
+func TestSendVerificationEmailRejectsInvalidEmail(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return nil
+		}
+	})
+	resp, _ := doRequest(a, http.MethodPost, "/send-verification-email", map[string]any{
+		"email": "not-an-email",
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSendVerificationEmailRejectsSessionEmailMismatch(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
