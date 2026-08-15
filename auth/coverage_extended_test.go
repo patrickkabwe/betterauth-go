@@ -399,8 +399,11 @@ func TestVerifyPasswordWrong(t *testing.T) {
 func TestResetPasswordCallbackInvalid(t *testing.T) {
 	a := newTestAuth()
 	resp, _ := doRequest(a, http.MethodGet, "/reset-password/badtoken", nil, nil)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatal("invalid reset token should error")
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("invalid reset token should redirect, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "http://localhost:8080/api/auth/error?error=INVALID_TOKEN" {
+		t.Fatalf("location=%q", got)
 	}
 }
 
@@ -530,6 +533,27 @@ func TestResetPasswordCallbackWithRedirect(t *testing.T) {
 	resp, _ := doRequest(a, http.MethodGet, "/reset-password/"+resetData.Token+"?callbackURL=http://localhost:3000/done", nil, nil)
 	if resp.StatusCode != http.StatusFound {
 		t.Fatal("reset callback redirect failed")
+	}
+}
+
+func TestResetPasswordCallbackRequiresRedirect(t *testing.T) {
+	var resetData types.ResetPasswordEmailData
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, data types.ResetPasswordEmailData) error {
+			resetData = data
+			return nil
+		}
+	})
+	signUp(t, a, "rpcb-missing@example.com")
+	_, _ = doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "rpcb-missing@example.com",
+	}, nil)
+	resp, _ := doRequest(a, http.MethodGet, "/reset-password/"+resetData.Token, nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "http://localhost:8080/api/auth/error?error=INVALID_TOKEN" {
+		t.Fatalf("location=%q", got)
 	}
 }
 

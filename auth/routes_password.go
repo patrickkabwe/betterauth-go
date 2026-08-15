@@ -69,23 +69,19 @@ func handleRequestPasswordReset(c *Context) {
 func handleResetPasswordCallback(c *Context) {
 	token := c.Vars["token"]
 	callbackURL := c.R.URL.Query().Get("callbackURL")
+	if token == "" || callbackURL == "" {
+		c.Redirect(appendQuery(c.Auth.cfg.baseURL+c.Auth.cfg.basePath+"/error", "error", "INVALID_TOKEN"))
+		return
+	}
 	identifier := constants.VerificationResetPassword + token
 
 	v, err := c.Auth.cfg.store.FindVerificationByIdentifier(c.R.Context(), identifier)
 	if err != nil || time.Now().After(v.ExpiresAt) {
-		if callbackURL != "" {
-			c.Redirect(appendQuery(callbackURL, "error", "INVALID_TOKEN"))
-			return
-		}
-		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidToken))
+		c.Redirect(appendQuery(callbackURL, "error", "INVALID_TOKEN"))
 		return
 	}
 
-	if callbackURL != "" {
-		c.Redirect(appendQuery(callbackURL, "token", token))
-		return
-	}
-	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
+	c.Redirect(appendQuery(callbackURL, "token", token))
 }
 
 type resetPasswordBody struct {
