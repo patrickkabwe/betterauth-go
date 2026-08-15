@@ -88,7 +88,7 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 
 // TokensFromMap converts a token endpoint JSON body into OAuthTokens.
 func TokensFromMap(data map[string]any) *OAuthTokens {
-	tokens := &OAuthTokens{}
+	tokens := &OAuthTokens{Raw: cloneTokenData(data)}
 	if v, ok := data["access_token"].(string); ok {
 		tokens.AccessToken = v
 	}
@@ -106,6 +106,17 @@ func TokensFromMap(data map[string]any) *OAuthTokens {
 		tokens.AccessTokenExpiresAt = &t
 	}
 	return tokens
+}
+
+func cloneTokenData(data map[string]any) map[string]any {
+	if len(data) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(data))
+	for key, value := range data {
+		out[key] = value
+	}
+	return out
 }
 
 // BuildAuthURL constructs an OAuth2 authorization URL.

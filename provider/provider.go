@@ -29,6 +29,7 @@ type OAuthTokens struct {
 	IDToken               string
 	Scopes                []string
 	User                  map[string]any
+	Raw                   map[string]any
 }
 
 // AuthorizationURLOpts configures an OAuth authorization redirect.
