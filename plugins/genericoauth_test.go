@@ -191,6 +191,52 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthCallbackRedirectsProviderErrors(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+			},
+		},
+	}))
+
+	callback := get(t, a, "/oauth2/callback/oidc?error=access_denied&error_description=Denied")
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	location := callback.Header().Get("Location")
+	if location != "http://localhost:8080/api/auth/error?error=access_denied&error_description=Denied" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthCallbackRedirectsMissingCode(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+			},
+		},
+	}))
+
+	callback := get(t, a, "/oauth2/callback/oidc?state=state")
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	location := callback.Header().Get("Location")
+	if location != "http://localhost:8080/api/auth/error?error=oAuth_code_missing" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
 func TestGenericOAuthSignInUsesDiscoveryURL(t *testing.T) {
 	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Discovery") != "secret" {

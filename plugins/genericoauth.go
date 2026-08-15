@@ -90,9 +90,18 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 			}),
 			rt(http.MethodGet, "/oauth2/callback/{providerId}", func(c *auth.Context) {
 				providerID := c.Vars["providerId"]
-				code := c.R.URL.Query().Get("code")
-				state := c.R.URL.Query().Get("state")
-				if code == "" || state == "" {
+				query := c.R.URL.Query()
+				if errorCode := query.Get("error"); errorCode != "" {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), errorCode, query.Get("error_description"))
+					return
+				}
+				code := query.Get("code")
+				if code == "" {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "oAuth_code_missing", "")
+					return
+				}
+				state := query.Get("state")
+				if state == "" {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
 					return
 				}
@@ -268,6 +277,33 @@ func parseGenericOAuthStateValue(value string) (string, string, bool) {
 		return "", "", false
 	}
 	return providerID, callbackURL, true
+}
+
+func genericOAuthDefaultErrorURL(c *auth.Context) string {
+	return c.Auth.BaseURL() + c.Auth.BasePath() + "/error"
+}
+
+func redirectGenericOAuthError(c *auth.Context, errorURL string, code string, description string) {
+	target := appendGenericOAuthQuery(errorURL, "error", code)
+	if description != "" {
+		target = appendGenericOAuthQuery(target, "error_description", description)
+	}
+	c.Redirect(target)
+}
+
+func appendGenericOAuthQuery(rawURL string, key string, value string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		separator := "?"
+		if strings.Contains(rawURL, "?") {
+			separator = "&"
+		}
+		return rawURL + separator + url.QueryEscape(key) + "=" + url.QueryEscape(value)
+	}
+	query := parsed.Query()
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, scopes []string, codeVerifier string) url.Values {
