@@ -82,6 +82,19 @@ func (a *Auth) ValidatePasswords(password string) error {
 	return nil
 }
 
+// AllowSignInWithEmailVerification applies the configured sign-in email verification policy.
+func (a *Auth) AllowSignInWithEmailVerification(c *Context, user *types.User, callbackURL string) (bool, error) {
+	if !a.cfg.emailPassword.requireEmailVerification || user.EmailVerified {
+		return true, nil
+	}
+	if a.cfg.emailVerification.sendOnSignIn && a.cfg.emailVerification.sendVerificationEmail != nil {
+		if err := sendVerificationEmailToUser(c, user, callbackURL); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
 // PasswordLengthLimits returns the resolved password length policy.
 func (a *Auth) PasswordLengthLimits() (int, int) {
 	return a.cfg.minPassword, a.cfg.maxPassword

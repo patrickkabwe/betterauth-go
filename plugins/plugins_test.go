@@ -119,6 +119,61 @@ func TestUsernameSignInRejectsInvalidUsernameShape(t *testing.T) {
 	}
 }
 
+func TestUsernameSignInRequiresEmailVerification(t *testing.T) {
+	var sent bool
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   memory.New(),
+		EmailAndPassword: auth.EmailAndPasswordConfig{
+			RequireEmailVerification: true,
+		},
+		EmailVerification: auth.EmailVerificationConfig{
+			SendOnSignIn: true,
+			SendVerificationEmail: func(_ context.Context, _ types.VerificationEmailData) error {
+				sent = true
+				return nil
+			},
+		},
+		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createUsernameCredentialUser(t, a, "username-unverified-user", "username-unverified@example.com", "unverified", "password123", false)
+
+	w := post(t, a, "/sign-in/username", `{"username":"unverified","password":"password123","callbackURL":"http://localhost:3000/verify"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if !sent {
+		t.Fatal("expected verification email on username sign-in")
+	}
+}
+
+func TestUsernameSignInCallbackURL(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	createUsernameCredentialUser(t, a, "username-callback-user", "username-callback@example.com", "callbackuser", "password123", true)
+
+	w := post(t, a, "/sign-in/username", `{"username":"callbackuser","password":"password123","callbackURL":"http://localhost:3000/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Location") != "http://localhost:3000/dashboard" {
+		t.Fatalf("location %q", w.Header().Get("Location"))
+	}
+	var resp struct {
+		Redirect bool   `json:"redirect"`
+		URL      string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Redirect || resp.URL != "http://localhost:3000/dashboard" {
+		t.Fatalf("redirect=%t url=%q", resp.Redirect, resp.URL)
+	}
+}
+
 func TestPhoneNumberSendOTPRequiresSender(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
@@ -858,6 +913,41 @@ func TestAllPluginsCount(t *testing.T) {
 
 func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string) {
 	createPhoneCredentialUserWithVerification(t, a, userID, phoneNumber, password, true)
+}
+
+func createUsernameCredentialUser(t *testing.T, a *auth.Auth, userID string, email string, username string, password string, verified bool) {
+	t.Helper()
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            userID,
+		Name:          "Username User",
+		Email:         email,
+		EmailVerified: verified,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Additional: map[string]any{
+			constants.FieldUsername: username,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashedPassword, err := a.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID:         userID + "-account",
+		AccountID:  userID,
+		ProviderID: constants.ProviderCredential,
+		UserID:     userID,
+		Password:   hashedPassword,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func createPhoneCredentialUserWithVerification(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string, verified bool) {

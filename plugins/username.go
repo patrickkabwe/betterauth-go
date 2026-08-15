@@ -8,6 +8,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
@@ -48,9 +49,10 @@ func Username(opts UsernameOptions) auth.Plugin {
 			}),
 			rt(http.MethodPost, "/sign-in/username", func(c *auth.Context) {
 				var body struct {
-					Username   string `json:"username"`
-					Password   string `json:"password"`
-					RememberMe *bool  `json:"rememberMe"`
+					Username    string `json:"username"`
+					Password    string `json:"password"`
+					CallbackURL string `json:"callbackURL"`
+					RememberMe  *bool  `json:"rememberMe"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
@@ -80,6 +82,15 @@ func Username(opts UsernameOptions) auth.Plugin {
 					c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidEmailOrPassword, constants.MsgInvalidCredentials))
 					return
 				}
+				allowed, err := c.Auth.AllowSignInWithEmailVerification(c, user, body.CallbackURL)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				if !allowed {
+					c.WriteError(apierror.WithCode(http.StatusForbidden, apierror.CodeEmailNotVerified))
+					return
+				}
 				remember := true
 				if body.RememberMe != nil {
 					remember = *body.RememberMe
@@ -89,10 +100,14 @@ func Username(opts UsernameOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeFailedToCreateSession))
 					return
 				}
-				c.WriteJSON(http.StatusOK, map[string]any{
-					"redirect": false,
-					"token":    sess.Token,
-					"user":     user,
+				if body.CallbackURL != "" {
+					c.W.Header().Set("Location", body.CallbackURL)
+				}
+				c.WriteJSON(http.StatusOK, types.SignInResponse{
+					Redirect: body.CallbackURL != "",
+					Token:    sess.Token,
+					URL:      body.CallbackURL,
+					User:     *user,
 				})
 			}),
 		},
