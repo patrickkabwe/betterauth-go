@@ -89,7 +89,22 @@ func sendVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		sendOTP(c, opts, auth.NormalizeEmail(body.Email), body.Type)
+		if opts.SendOTP == nil {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
+			return
+		}
+		email := auth.NormalizeEmail(body.Email)
+		_, err := c.Auth.Store().FindUserByEmail(c.R.Context(), email)
+		if errors.Is(err, berrors.ErrNotFound) {
+			if body.Type != constants.EmailOTPTypeSignIn || opts.DisableSignUp {
+				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				return
+			}
+		} else if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		sendOTP(c, opts, email, body.Type)
 	}
 }
 

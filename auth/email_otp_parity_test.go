@@ -115,6 +115,61 @@ func TestEmailOTPPluginSendVerificationOTPRejectsChangeEmailType(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOTPDoesNotSendVerificationForUnknownUser(t *testing.T) {
+	var sent bool
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				sent = true
+				return nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "unknown-verification@example.com",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if sent {
+		t.Fatal("email verification OTP should not be sent for unknown user")
+	}
+	_, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":unknown-verification@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
+	}
+}
+
+func TestEmailOTPPluginSendVerificationOTPDoesNotSendSignInWhenSignUpDisabled(t *testing.T) {
+	var sent bool
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			DisableSignUp: true,
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				sent = true
+				return nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "disabled-unknown@example.com",
+		"type":  "sign-in",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if sent {
+		t.Fatal("sign-in OTP should not be sent for unknown user when sign-up is disabled")
+	}
+	_, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":disabled-unknown@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
+	}
+}
+
 func TestEmailOTPPluginPasswordResetDoesNotSendForUnknownEmail(t *testing.T) {
 	var sent bool
 	a := newTestAuth(func(c *auth.Config) {
