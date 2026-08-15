@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -36,6 +37,33 @@ func TestExchangeAuthorizationCodeRefusesRedirect(t *testing.T) {
 	}
 	if internalHit {
 		t.Fatal("redirect target was reached")
+	}
+}
+
+func TestRefreshAccessTokenOmitsEmptyClientSecret(t *testing.T) {
+	var formValues url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access"}`))
+	}))
+	defer server.Close()
+
+	tokens, err := RefreshAccessToken(context.Background(), server.URL, "client", "", "refresh-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "new-access" {
+		t.Fatalf("tokens=%+v", tokens)
+	}
+	if formValues.Get("grant_type") != "refresh_token" || formValues.Get("refresh_token") != "refresh-token" || formValues.Get("client_id") != "client" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if _, ok := formValues["client_secret"]; ok {
+		t.Fatalf("form=%v", formValues)
 	}
 }
 

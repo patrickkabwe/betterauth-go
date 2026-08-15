@@ -177,14 +177,17 @@ func BuildAuthURL(endpoint string, params url.Values) string {
 
 // RefreshAccessToken performs a refresh_token grant.
 func RefreshAccessToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (*OAuthTokens, error) {
+	params := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": refreshToken,
+		"client_id":     clientID,
+	}
+	if clientSecret != "" {
+		params["client_secret"] = clientSecret
+	}
 	data, err := ExchangeAuthorizationCode(ctx, CodeExchangeOpts{
-		TokenURL: tokenURL,
-		ExtraParams: map[string]string{
-			"grant_type":    "refresh_token",
-			"refresh_token": refreshToken,
-			"client_id":     clientID,
-			"client_secret": clientSecret,
-		},
+		TokenURL:    tokenURL,
+		ExtraParams: params,
 	})
 	if err != nil {
 		return nil, err
