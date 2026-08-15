@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -31,6 +32,34 @@ func TestGoogleAuthURLIncludesHostedDomain(t *testing.T) {
 	}
 	if !strings.Contains(authURL, "hd=example.com") {
 		t.Fatalf("url=%s", authURL)
+	}
+}
+
+func TestGoogleAuthURLCanDisableDefaultScopes(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"calendar.readonly"}})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := googleAuthURLQuery(t, authURL)
+	if query.Get("scope") != "calendar.readonly" {
+		t.Fatalf("scope=%q", query.Get("scope"))
+	}
+}
+
+func TestGoogleAuthURLOmitsScopeWhenDefaultScopesDisabled(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := googleAuthURLQuery(t, authURL)
+	if _, ok := query["scope"]; ok {
+		t.Fatalf("query=%s", query.Encode())
 	}
 }
 
@@ -102,4 +131,13 @@ func TestGoogleSignUpPolicy(t *testing.T) {
 func googleTestIDToken(claims map[string]any) string {
 	raw, _ := json.Marshal(claims)
 	return "hdr." + base64.RawURLEncoding.EncodeToString(raw) + ".sig"
+}
+
+func googleAuthURLQuery(t *testing.T, authURL string) url.Values {
+	t.Helper()
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Query()
 }

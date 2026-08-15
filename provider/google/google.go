@@ -26,6 +26,7 @@ type Config struct {
 	AccessType               string
 	Prompt                   string
 	HD                       string
+	DisableDefaultScope      bool
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
@@ -50,7 +51,10 @@ func (p *Provider) DisableSignUp() bool { return p.cfg.DisableSignUp }
 func (p *Provider) OverrideUserInfoOnSignIn() bool { return p.cfg.OverrideUserInfoOnSignIn }
 
 func (p *Provider) defaultScopes(extra []string) []string {
-	base := []string{"email", "profile", "openid"}
+	base := []string{}
+	if !p.cfg.DisableDefaultScope {
+		base = append(base, "email", "profile", "openid")
+	}
 	if len(p.cfg.Scopes) > 0 {
 		base = append(base, p.cfg.Scopes...)
 	}
@@ -79,7 +83,10 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("client_id", p.cfg.ClientID)
 	params.Set("response_type", "code")
 	params.Set("redirect_uri", opts.RedirectURI)
-	params.Set("scope", strings.Join(p.defaultScopes(opts.Scopes), " "))
+	scopes := p.defaultScopes(opts.Scopes)
+	if len(scopes) > 0 {
+		params.Set("scope", strings.Join(scopes, " "))
+	}
 	params.Set("state", opts.State)
 	params.Set("code_challenge", oauth2pkg.CodeChallengeS256(opts.CodeVerifier))
 	params.Set("code_challenge_method", "S256")

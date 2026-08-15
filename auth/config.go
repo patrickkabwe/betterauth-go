@@ -76,6 +76,7 @@ type GoogleProviderConfig struct {
 	AccessType               string
 	Prompt                   string
 	HD                       string
+	DisableDefaultScope      bool
 	Disabled                 bool
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
@@ -87,6 +88,7 @@ type GitHubProviderConfig struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	DisableDefaultScope      bool
 	Disabled                 bool
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
@@ -549,6 +551,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 		providers[constants.ProviderGoogle] = google.New(google.Config{
 			ClientID: opts.Google.ClientID, ClientSecret: opts.Google.ClientSecret, Scopes: opts.Google.Scopes,
 			AccessType: opts.Google.AccessType, Prompt: opts.Google.Prompt, HD: opts.Google.HD,
+			DisableDefaultScope:   opts.Google.DisableDefaultScope,
 			DisableImplicitSignUp: opts.Google.DisableImplicitSignUp, DisableSignUp: opts.Google.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.Google.OverrideUserInfoOnSignIn,
 		})
@@ -556,6 +559,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
 		providers[constants.ProviderGitHub] = github.New(github.Config{
 			ClientID: opts.GitHub.ClientID, ClientSecret: opts.GitHub.ClientSecret, Scopes: opts.GitHub.Scopes,
+			DisableDefaultScope:   opts.GitHub.DisableDefaultScope,
 			DisableImplicitSignUp: opts.GitHub.DisableImplicitSignUp, DisableSignUp: opts.GitHub.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.GitHub.OverrideUserInfoOnSignIn,
 		})
