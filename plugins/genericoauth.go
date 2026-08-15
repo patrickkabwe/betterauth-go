@@ -42,6 +42,7 @@ type GenericOAuthProviderConfig struct {
 	Prompt                  string
 	AccessType              string
 	AccessTokenExpiresIn    int
+	AuthorizationHeaders    map[string]string
 	AuthorizationURLParams  map[string]string
 }
 
@@ -372,6 +373,7 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 		RedirectURI:    genericOAuthRedirectURI(c, p),
 		CodeVerifier:   codeVerifier,
 		Authentication: provider.OAuthClientAuthenticationPost,
+		Headers:        p.AuthorizationHeaders,
 	})
 	if err != nil {
 		return nil, err

@@ -379,6 +379,71 @@ func TestGenericOAuthCallbackAppliesAccessTokenExpiresInFallback(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthCallbackSendsAuthorizationHeaders(t *testing.T) {
+	tokenHeaderSeen := false
+	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			if r.Header.Get("X-Custom-Header") != "test-value" {
+				http.Error(w, "custom header", http.StatusBadRequest)
+				return
+			}
+			tokenHeaderSeen = true
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-token"}`))
+		case "/userinfo":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"sub":"header-account","name":"Header User","email":"generic-oauth-header@example.com","email_verified":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+				UserInfoURL:      oauthServer.URL + "/userinfo",
+				AuthorizationHeaders: map[string]string{
+					"X-Custom-Header": "test-value",
+				},
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if !tokenHeaderSeen {
+		t.Fatal("expected custom token header")
+	}
+}
+
 func TestGenericOAuthCallbackRedirectsProviderErrors(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
