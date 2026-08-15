@@ -543,6 +543,114 @@ func TestOAuthCallbackOverridesUserInfoOnSignIn(t *testing.T) {
 	}
 }
 
+func TestSignInSocialFlattensAdditionalDataInOAuthState(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-additional", Email: "oauth-additional@example.com", EmailVerified: true, Name: "OAuth Additional"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+		"additionalData": map[string]any{
+			"invitedBy": "user-123",
+		},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var signIn types.SocialSignInResponse
+	if err := json.Unmarshal(data, &signIn); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationOAuthState+state)
+	if err != nil {
+		t.Fatalf("find state: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(verification.Value), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["invitedBy"] != "user-123" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if _, ok := payload["additionalData"]; ok {
+		t.Fatalf("additionalData should be flattened: %+v", payload)
+	}
+	if payload["callbackURL"] != "http://localhost:3000/done" || payload["oauthState"] != state {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestSignInSocialAdditionalDataCannotOverrideOAuthState(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-reserved", Email: "oauth-reserved@example.com", EmailVerified: true, Name: "OAuth Reserved"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":         "mock",
+		"callbackURL":      "http://localhost:3000/done",
+		"errorCallbackURL": "http://localhost:3000/error",
+		"disableRedirect":  disable,
+		"additionalData": map[string]any{
+			"codeVerifier":  "bad-code-verifier",
+			"callbackURL":   "bad-callback",
+			"errorURL":      "bad-error",
+			"newUserURL":    "bad-new-user",
+			"link":          map[string]any{"email": "bad@example.com", "userId": "bad-user"},
+			"requestSignUp": true,
+			"expiresAt":     "bad-expiry",
+			"oauthState":    "bad-state",
+		},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var signIn types.SocialSignInResponse
+	if err := json.Unmarshal(data, &signIn); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationOAuthState+state)
+	if err != nil {
+		t.Fatalf("find state: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(verification.Value), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["callbackURL"] != "http://localhost:3000/done" || payload["errorURL"] != "http://localhost:3000/error" || payload["oauthState"] != state {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload["codeVerifier"] == "bad-code-verifier" || payload["newUserURL"] == "bad-new-user" || payload["requestSignUp"] == true || payload["expiresAt"] == "bad-expiry" {
+		t.Fatalf("reserved fields were overridden: %+v", payload)
+	}
+	if _, ok := payload["link"]; ok {
+		t.Fatalf("link should not be overridden: %+v", payload)
+	}
+}
+
 func TestOAuthCallbackProviderErrorUsesStateErrorCallbackURL(t *testing.T) {
 	p := &staticOAuthProvider{
 		id:   "mock",

@@ -24,6 +24,7 @@ type oauthStatePayload struct {
 	Link           *oauthLinkState `json:"link,omitempty"`
 	RequestSignUp  bool            `json:"requestSignUp,omitempty"`
 	AdditionalData map[string]any  `json:"additionalData,omitempty"`
+	OAuthState     string          `json:"oauthState,omitempty"`
 	ExpiresAt      time.Time       `json:"expiresAt"`
 }
 
@@ -57,10 +58,11 @@ func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state stri
 		NewUserURL:     input.NewUserCallbackURL,
 		Link:           input.Link,
 		RequestSignUp:  input.RequestSignUp,
-		AdditionalData: input.AdditionalData,
+		AdditionalData: sanitizeOAuthStateAdditionalData(input.AdditionalData),
+		OAuthState:     state,
 		ExpiresAt:      now.Add(10 * time.Minute),
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := marshalOAuthStatePayload(payload)
 	if err != nil {
 		return "", "", err
 	}
@@ -75,6 +77,58 @@ func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state stri
 		return "", "", err
 	}
 	return state, codeVerifier, nil
+}
+
+func sanitizeOAuthStateAdditionalData(additional map[string]any) map[string]any {
+	if len(additional) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(additional))
+	for key, value := range additional {
+		if isReservedOAuthStateKey(key) {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isReservedOAuthStateKey(key string) bool {
+	switch key {
+	case "callbackURL", "codeVerifier", "errorURL", "newUserURL", "link", "requestSignUp", "expiresAt", "oauthState":
+		return true
+	default:
+		return false
+	}
+}
+
+func marshalOAuthStatePayload(payload oauthStatePayload) ([]byte, error) {
+	data := make(map[string]any, len(payload.AdditionalData)+8)
+	for key, value := range payload.AdditionalData {
+		data[key] = value
+	}
+	data["callbackURL"] = payload.CallbackURL
+	data["codeVerifier"] = payload.CodeVerifier
+	if payload.ErrorURL != "" {
+		data["errorURL"] = payload.ErrorURL
+	}
+	if payload.NewUserURL != "" {
+		data["newUserURL"] = payload.NewUserURL
+	}
+	if payload.Link != nil {
+		data["link"] = payload.Link
+	}
+	if payload.RequestSignUp {
+		data["requestSignUp"] = payload.RequestSignUp
+	}
+	if payload.OAuthState != "" {
+		data["oauthState"] = payload.OAuthState
+	}
+	data["expiresAt"] = payload.ExpiresAt
+	return json.Marshal(data)
 }
 
 func (a *Auth) parseOAuthState(c *Context, state string) (*oauthStatePayload, error) {
