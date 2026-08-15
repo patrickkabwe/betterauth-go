@@ -85,6 +85,7 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           PREV_TAG="$(git tag -l 'v*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
 
@@ -94,60 +95,108 @@ jobs:
             RANGE="${TAG}"
           fi
 
+          LOG_ARGS=( "${RANGE}" --reverse )
+          RELEASE_DATE="$(date -u +%Y-%m-%d)"
+          SECTIONS_DIR="$(mktemp -d)"
+          CONVENTIONAL_COMMIT_RE='^([a-z]+)(\([^)]+\))?(!)?:[[:space:]](.+)$'
+
+          section_file() {
+            case "$1" in
+              feat) echo "${SECTIONS_DIR}/features.md" ;;
+              fix) echo "${SECTIONS_DIR}/bug-fixes.md" ;;
+              perf) echo "${SECTIONS_DIR}/performance.md" ;;
+              refactor) echo "${SECTIONS_DIR}/refactoring.md" ;;
+              docs) echo "${SECTIONS_DIR}/documentation.md" ;;
+              build) echo "${SECTIONS_DIR}/build.md" ;;
+              ci) echo "${SECTIONS_DIR}/ci.md" ;;
+              test) echo "${SECTIONS_DIR}/tests.md" ;;
+              style) echo "${SECTIONS_DIR}/styles.md" ;;
+              chore) echo "${SECTIONS_DIR}/chores.md" ;;
+              revert) echo "${SECTIONS_DIR}/reverts.md" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          append_section() {
+            local title="$1"
+            local file="$2"
+            if [ ! -s "$file" ]; then
+              return 0
+            fi
+            echo "### ${title}"
+            echo
+            cat "$file"
+            echo
+          }
+
+          git log "${LOG_ARGS[@]}" --format='%H%x1f%h%x1f%s%x1e' |
+            while IFS=$'\x1f' read -r -d $'\x1e' hash short_hash subject; do
+              if [[ ! "$subject" =~ $CONVENTIONAL_COMMIT_RE ]]; then
+                continue
+              fi
+
+              type="${BASH_REMATCH[1]}"
+              scope="${BASH_REMATCH[2]}"
+              breaking="${BASH_REMATCH[3]}"
+              description="${BASH_REMATCH[4]}"
+              file="$(section_file "$type" || true)"
+              if [ -z "$file" ]; then
+                continue
+              fi
+
+              scope="${scope#(}"
+              scope="${scope%)}"
+              if [ -n "$scope" ]; then
+                entry="* **${scope}:** ${description} ([${short_hash}](https://github.com/${REPOSITORY}/commit/${hash}))"
+              else
+                entry="* ${description} ([${short_hash}](https://github.com/${REPOSITORY}/commit/${hash}))"
+              fi
+
+              echo "$entry" >> "$file"
+              if [ -n "$breaking" ] || git log -1 --format=%B "$hash" | grep -Eq '^BREAKING[ -]CHANGE:'; then
+                echo "$entry" >> "${SECTIONS_DIR}/breaking.md"
+              fi
+            done
+
+          CONVENTIONAL_CHANGE_COUNT="$(
+            find "$SECTIONS_DIR" -type f -name '*.md' -exec cat {} + 2>/dev/null |
+              wc -l |
+              tr -d ' '
+          )"
+
+          git log "${LOG_ARGS[@]}" --format='%aN' |
+            sort -fu |
+            while read -r contributor; do
+              if [ -n "$contributor" ]; then
+                echo "* ${contributor}"
+              fi
+            done > "${SECTIONS_DIR}/contributors.md"
+
           {
-            echo "## Better Auth for Go ${VERSION}"
-            echo
             if [ -n "$PREV_TAG" ]; then
-              echo "Changes since [\`${PREV_TAG}\`](https://github.com/${{ github.repository }}/releases/tag/${PREV_TAG}):"
+              echo "## [${VERSION}](https://github.com/${REPOSITORY}/compare/${PREV_TAG}...${TAG}) (${RELEASE_DATE})"
             else
-              echo "First stable release of **betterauth-go** — a Go server compatible with Better Auth clients."
+              echo "## ${VERSION} (${RELEASE_DATE})"
             fi
             echo
-            if [ -n "$PREV_TAG" ]; then
-              LOG_ARGS=( "${RANGE}" )
+            if [ "${CONVENTIONAL_CHANGE_COUNT}" -gt 0 ]; then
+              append_section "Breaking Changes" "${SECTIONS_DIR}/breaking.md"
+              append_section "Features" "${SECTIONS_DIR}/features.md"
+              append_section "Bug Fixes" "${SECTIONS_DIR}/bug-fixes.md"
+              append_section "Performance Improvements" "${SECTIONS_DIR}/performance.md"
+              append_section "Code Refactoring" "${SECTIONS_DIR}/refactoring.md"
+              append_section "Documentation" "${SECTIONS_DIR}/documentation.md"
+              append_section "Build System" "${SECTIONS_DIR}/build.md"
+              append_section "Continuous Integration" "${SECTIONS_DIR}/ci.md"
+              append_section "Tests" "${SECTIONS_DIR}/tests.md"
+              append_section "Styles" "${SECTIONS_DIR}/styles.md"
+              append_section "Chores" "${SECTIONS_DIR}/chores.md"
+              append_section "Reverts" "${SECTIONS_DIR}/reverts.md"
             else
-              LOG_ARGS=( "${RANGE}" --merges --reverse )
-            fi
-            CHANGE_COUNT="$(git rev-list --count "${LOG_ARGS[@]}" 2>/dev/null || echo 0)"
-            if [ "${CHANGE_COUNT}" -gt 0 ]; then
-              echo "### What's new"
-              echo
-              git log "${LOG_ARGS[@]}" --pretty=format:'- %s (%h)'
-              echo
-              echo
-            else
-              echo "_No changes in this release._"
+              echo "_No conventional commits in this release._"
               echo
             fi
-            echo "## Install"
-            echo
-            echo "**Go module** (library + CLI):"
-            echo '```bash'
-            echo "go get github.com/patrickkabwe/betterauth-go@${TAG}"
-            echo "go install github.com/patrickkabwe/betterauth-go/cli@${TAG}"
-            echo "betterauth --version"
-            echo '```'
-            echo
-            echo "**Prebuilt CLI** — download the binary for your platform below, then:"
-            echo '```bash'
-            echo "chmod +x betterauth-<platform>   # macOS / Linux"
-            echo "./betterauth-<platform> secret"
-            echo '```'
-            echo
-            echo "## Assets"
-            echo
-            echo "| Platform | Binary |"
-            echo "|----------|--------|"
-            echo "| macOS (Apple Silicon) | \`betterauth-darwin-arm64\` |"
-            echo "| macOS (Intel) | \`betterauth-darwin-amd64\` |"
-            echo "| Linux (amd64) | \`betterauth-linux-amd64\` |"
-            echo "| Linux (arm64) | \`betterauth-linux-arm64\` |"
-            echo "| Windows (amd64) | \`betterauth-windows-amd64.exe\` |"
-            echo "| Windows (arm64) | \`betterauth-windows-arm64.exe\` |"
-            echo
-            echo "Verify downloads with \`SHA256SUMS\`."
-            echo
-            echo "**Full changelog:** https://github.com/${{ github.repository }}/commits/${TAG}"
+            append_section "Contributors" "${SECTIONS_DIR}/contributors.md"
           } > release-notes.md
 
           echo "path=release-notes.md" >> "$GITHUB_OUTPUT"
