@@ -26,6 +26,9 @@ import (
 // GenericOAuthGetUserInfo fetches user info from custom provider token data.
 type GenericOAuthGetUserInfo func(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error)
 
+// GenericOAuthMapProfileToUser maps a provider profile into Better Auth user fields.
+type GenericOAuthMapProfileToUser func(ctx context.Context, profile map[string]any) (provider.OAuthUserMapping, error)
+
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
 type GenericOAuthProviderConfig struct {
 	ProviderID              string
@@ -51,6 +54,7 @@ type GenericOAuthProviderConfig struct {
 	TokenURLParams          map[string]string
 	Authentication          provider.OAuthClientAuthentication
 	GetUserInfo             GenericOAuthGetUserInfo
+	MapProfileToUser        GenericOAuthMapProfileToUser
 }
 
 // GenericOAuthOptions configures the generic OAuth plugin.
@@ -441,7 +445,7 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 		if info == nil {
 			return provider.OAuthUser{}, errors.New("user info is missing")
 		}
-		return normalizeGenericOAuthUser(info.User)
+		return genericOAuthMappedUser(c, p, info.User, genericOAuthProfileFromUserInfo(info))
 	}
 	userInfoURL, err := genericOAuthUserInfoEndpoint(c, p)
 	if err != nil {
@@ -469,10 +473,10 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 	if err := json.Unmarshal(body, &data); err != nil {
 		return provider.OAuthUser{}, err
 	}
-	return genericOAuthUserFromMap(data)
+	return genericOAuthUserFromMap(c, p, data)
 }
 
-func genericOAuthUserFromMap(data map[string]any) (provider.OAuthUser, error) {
+func genericOAuthUserFromMap(c *auth.Context, p GenericOAuthProviderConfig, data map[string]any) (provider.OAuthUser, error) {
 	accountID := firstGenericOAuthString(data, "id", "sub")
 	name := firstGenericOAuthString(data, "name")
 	imageValue := firstGenericOAuthString(data, "image", "picture", "avatar_url")
@@ -481,9 +485,48 @@ func genericOAuthUserFromMap(data map[string]any) (provider.OAuthUser, error) {
 		image = &imageValue
 	}
 	emailVerified, _ := data["email_verified"].(bool)
-	return normalizeGenericOAuthUser(provider.OAuthUser{
+	return genericOAuthMappedUser(c, p, provider.OAuthUser{
 		ID: accountID, Name: name, Email: firstGenericOAuthString(data, "email"), Image: image, EmailVerified: emailVerified,
-	})
+	}, data)
+}
+
+func genericOAuthMappedUser(c *auth.Context, p GenericOAuthProviderConfig, user provider.OAuthUser, profile map[string]any) (provider.OAuthUser, error) {
+	if p.MapProfileToUser != nil {
+		mapping, err := p.MapProfileToUser(c.R.Context(), cloneGenericOAuthProfile(profile))
+		if err != nil {
+			return provider.OAuthUser{}, err
+		}
+		user = provider.ApplyOAuthUserMapping(user, mapping)
+	}
+	return normalizeGenericOAuthUser(user)
+}
+
+func genericOAuthProfileFromUserInfo(info *provider.UserInfo) map[string]any {
+	profile := cloneGenericOAuthProfile(info.Data)
+	if _, ok := profile["id"]; !ok && info.User.ID != "" {
+		profile["id"] = info.User.ID
+	}
+	if _, ok := profile["name"]; !ok && info.User.Name != "" {
+		profile["name"] = info.User.Name
+	}
+	if _, ok := profile["email"]; !ok && info.User.Email != "" {
+		profile["email"] = info.User.Email
+	}
+	if _, ok := profile["email_verified"]; !ok {
+		profile["email_verified"] = info.User.EmailVerified
+	}
+	if _, ok := profile["image"]; !ok && info.User.Image != nil {
+		profile["image"] = *info.User.Image
+	}
+	return profile
+}
+
+func cloneGenericOAuthProfile(profile map[string]any) map[string]any {
+	out := make(map[string]any, len(profile))
+	for key, value := range profile {
+		out[key] = value
+	}
+	return out
 }
 
 func normalizeGenericOAuthUser(user provider.OAuthUser) (provider.OAuthUser, error) {
