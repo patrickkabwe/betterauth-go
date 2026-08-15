@@ -92,6 +92,30 @@ func TestUsernameAvailability(t *testing.T) {
 	}
 }
 
+func TestUsernameAvailabilityRejectsInvalidDefaultUsername(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/is-username-available", `{"username":"new-user"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameAvailabilityRejectsWhitespaceUsername(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/is-username-available", `{"username":" newuser"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameSignInRejectsInvalidUsernameShape(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/sign-in/username", `{"username":"bad-user","password":"password123"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestOneTimeTokenFlow(t *testing.T) {
 	a := newTestAuth(t, plugins.OneTimeToken(plugins.OneTimeTokenOptions{}))
 	// create user via anonymous first

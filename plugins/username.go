@@ -10,7 +10,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 )
 
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
 
 // UsernameOptions configures username sign-in.
 type UsernameOptions struct {
@@ -36,7 +36,11 @@ func Username(opts UsernameOptions) auth.Plugin {
 					Username string `json:"username"`
 				}
 				if err := c.ParseJSON(&body); err != nil || body.Username == "" {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidUsername))
+					c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, constants.CodeInvalidUsername))
+					return
+				}
+				if len(body.Username) < minLen || len(body.Username) > maxLen || !usernamePattern.MatchString(body.Username) {
+					c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, constants.CodeInvalidUsername))
 					return
 				}
 				_, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldUsername, strings.ToLower(body.Username))
@@ -52,11 +56,15 @@ func Username(opts UsernameOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
 					return
 				}
-				username := strings.ToLower(strings.TrimSpace(body.Username))
-				if len(username) < minLen || len(username) > maxLen || !usernamePattern.MatchString(username) {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidUsername))
+				if body.Username == "" || body.Password == "" {
+					c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidEmailOrPassword, constants.MsgInvalidCredentials))
 					return
 				}
+				if len(body.Username) < minLen || len(body.Username) > maxLen || !usernamePattern.MatchString(body.Username) {
+					c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, constants.CodeInvalidUsername))
+					return
+				}
+				username := strings.ToLower(body.Username)
 				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldUsername, username)
 				if err != nil {
 					c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidEmailOrPassword, constants.MsgInvalidCredentials))
