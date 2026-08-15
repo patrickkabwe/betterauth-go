@@ -144,25 +144,30 @@ func handleOAuthCallback(c *Context) {
 	}
 
 	q := c.R.URL.Query()
-	if errParam := q.Get("error"); errParam != "" {
-		redirectOAuthError(c, defaultErrorURL, errParam)
-		return
-	}
 	code := q.Get("code")
 	state := q.Get("state")
-	if code == "" || state == "" {
-		redirectOAuthError(c, defaultErrorURL, "no_code")
-		return
+
+	var stateData *oauthStatePayload
+	if state != "" {
+		parsed, err := c.Auth.parseOAuthState(c, state)
+		if err != nil {
+			redirectOAuthError(c, defaultErrorURL, "state_mismatch")
+			return
+		}
+		stateData = parsed
 	}
 
-	stateData, err := c.Auth.parseOAuthState(c, state)
-	if err != nil {
-		redirectOAuthError(c, defaultErrorURL, "state_mismatch")
+	errorURL := defaultErrorURL
+	if stateData != nil && stateData.ErrorURL != "" {
+		errorURL = stateData.ErrorURL
+	}
+	if errParam := q.Get("error"); errParam != "" {
+		redirectOAuthError(c, errorURL, errParam)
 		return
 	}
-	errorURL := stateData.ErrorURL
-	if errorURL == "" {
-		errorURL = defaultErrorURL
+	if code == "" || state == "" {
+		redirectOAuthError(c, errorURL, "no_code")
+		return
 	}
 	if stateData.CallbackURL == "" {
 		redirectOAuthError(c, errorURL, "no_callback_url")

@@ -152,6 +152,41 @@ func TestOAuthCallbackCreatesSession(t *testing.T) {
 	}
 }
 
+func TestOAuthCallbackProviderErrorUsesStateErrorCallbackURL(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-err", Email: "oauth-error@example.com", EmailVerified: true, Name: "OAuth Error"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":         "mock",
+		"callbackURL":      "http://localhost:3000/done",
+		"errorCallbackURL": "http://localhost:3000/oauth-error",
+		"disableRedirect":  disable,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?error=access_denied&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=access_denied") {
+		t.Fatalf("redirect=%s", location)
+	}
+}
+
 func TestOAuthPostCallbackRedirectsToGet(t *testing.T) {
 	p := &staticOAuthProvider{
 		id: "mock",
