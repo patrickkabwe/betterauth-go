@@ -1,4 +1,4 @@
-package github_test
+package oauth2provider_test
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/patrickkabwe/betterauth-go/provider"
-	"github.com/patrickkabwe/betterauth-go/provider/github"
+	"github.com/patrickkabwe/betterauth-go/provider/oauth2provider"
 )
 
 func TestGitHubAuthURL(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	url, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github",
 	})
@@ -23,7 +23,7 @@ func TestGitHubAuthURL(t *testing.T) {
 }
 
 func TestGitHubAuthURLCanDisableDefaultScopes(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"repo"}})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"repo"}})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github",
 	})
@@ -37,7 +37,7 @@ func TestGitHubAuthURLCanDisableDefaultScopes(t *testing.T) {
 }
 
 func TestGitHubAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
-	p := github.New(github.Config{
+	p := oauth2provider.GitHub(oauth2provider.Options{
 		ClientID:              "id",
 		ClientSecret:          "secret",
 		AuthorizationEndpoint: "https://github.example.com/login/oauth/authorize",
@@ -62,7 +62,7 @@ func TestGitHubAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
 }
 
 func TestGitHubAuthURLIncludesPromptAndLoginHint(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", Prompt: "select_account"})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", Prompt: "select_account"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github", LoginHint: "octocat",
 	})
@@ -76,7 +76,7 @@ func TestGitHubAuthURLIncludesPromptAndLoginHint(t *testing.T) {
 }
 
 func TestGitHubAuthURLUsesEmptyScopeWhenDefaultScopesDisabled(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github",
 	})
@@ -91,7 +91,7 @@ func TestGitHubAuthURLUsesEmptyScopeWhenDefaultScopesDisabled(t *testing.T) {
 }
 
 func TestGitHubGetUserInfoUsesOverride(t *testing.T) {
-	p := github.New(github.Config{
+	p := oauth2provider.GitHub(oauth2provider.Options{
 		ClientID: "id", ClientSecret: "secret",
 		GetUserInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
 			return &provider.UserInfo{
@@ -129,7 +129,7 @@ func TestGitHubGetUserInfoMapsProfileToUser(t *testing.T) {
 
 	mappedName := "Mapped GitHub"
 	mappedEmail := "mapped@example.com"
-	p := github.New(github.Config{
+	p := oauth2provider.GitHub(oauth2provider.Options{
 		ClientID: "id", ClientSecret: "secret",
 		MapProfileToUser: func(_ context.Context, profile map[string]any) (provider.OAuthUserMapping, error) {
 			if profile["login"] != "octo" {
@@ -178,7 +178,7 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 		http.DefaultTransport = transport
 	}()
 
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "token"})
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 }
 
 func TestGitHubSignUpPolicy(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
+	p := oauth2provider.GitHub(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
 		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
 	}

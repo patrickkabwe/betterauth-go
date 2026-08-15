@@ -1,4 +1,4 @@
-package google_test
+package oauth2provider_test
 
 import (
 	"context"
@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/provider"
-	"github.com/patrickkabwe/betterauth-go/provider/google"
+	"github.com/patrickkabwe/betterauth-go/provider/oauth2provider"
 )
 
 func TestGoogleAuthURLRequiresPKCE(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	_, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb",
 	})
@@ -31,7 +31,7 @@ func TestGoogleAuthURLRequiresPKCE(t *testing.T) {
 }
 
 func TestGoogleAuthURLIncludesHostedDomain(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -44,7 +44,7 @@ func TestGoogleAuthURLIncludesHostedDomain(t *testing.T) {
 }
 
 func TestGoogleAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
-	p := google.New(google.Config{
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{
 		ClientID:              "id",
 		ClientSecret:          "secret",
 		AuthorizationEndpoint: "https://accounts.example.com/oauth/auth",
@@ -69,7 +69,7 @@ func TestGoogleAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
 }
 
 func TestGoogleAuthURLIncludesDisplay(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", Display: "popup"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", Display: "popup"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -83,7 +83,7 @@ func TestGoogleAuthURLIncludesDisplay(t *testing.T) {
 }
 
 func TestGoogleAuthURLOmitsAccessTypeByDefault(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -97,7 +97,7 @@ func TestGoogleAuthURLOmitsAccessTypeByDefault(t *testing.T) {
 }
 
 func TestGoogleAuthURLIncludesConfiguredAccessType(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", AccessType: "offline"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", AccessType: "offline"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -111,7 +111,7 @@ func TestGoogleAuthURLIncludesConfiguredAccessType(t *testing.T) {
 }
 
 func TestGoogleAuthURLDisplayOptionOverridesConfig(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", Display: "popup"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", Display: "popup"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier", Display: "touch",
 	})
@@ -125,7 +125,7 @@ func TestGoogleAuthURLDisplayOptionOverridesConfig(t *testing.T) {
 }
 
 func TestGoogleAuthURLCanDisableDefaultScopes(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"calendar.readonly"}})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"calendar.readonly"}})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -139,7 +139,7 @@ func TestGoogleAuthURLCanDisableDefaultScopes(t *testing.T) {
 }
 
 func TestGoogleAuthURLUsesEmptyScopeWhenDefaultScopesDisabled(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
 	})
@@ -159,7 +159,7 @@ func TestGoogleGetUserInfoFromIDToken(t *testing.T) {
 		"name": "G User", "picture": "http://img",
 	}
 	token := googleTestIDToken(claims)
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{IDToken: token})
 	if err != nil || info.User.Email != "g@example.com" || info.User.ID != "google-sub" {
 		t.Fatalf("info=%+v err=%v", info, err)
@@ -167,7 +167,7 @@ func TestGoogleGetUserInfoFromIDToken(t *testing.T) {
 }
 
 func TestGoogleGetUserInfoUsesOverride(t *testing.T) {
-	p := google.New(google.Config{
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{
 		ClientID: "id", ClientSecret: "secret",
 		GetUserInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
 			return &provider.UserInfo{
@@ -192,7 +192,7 @@ func TestGoogleGetUserInfoMapsProfileToUser(t *testing.T) {
 	}
 	mappedName := "Mapped Google"
 	mappedVerified := true
-	p := google.New(google.Config{
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{
 		ClientID: "id", ClientSecret: "secret",
 		MapProfileToUser: func(_ context.Context, profile map[string]any) (provider.OAuthUserMapping, error) {
 			if profile["sub"] != "google-sub" {
@@ -215,7 +215,7 @@ func TestGoogleGetUserInfoRejectsHostedDomainMismatch(t *testing.T) {
 		"sub": "google-sub", "email": "g@example.com", "email_verified": true,
 		"name": "G User", "hd": "other.com",
 	})
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
 	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{IDToken: token})
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestGoogleGetUserInfoAllowsAnyHostedDomain(t *testing.T) {
 		"sub": "google-sub", "email": "g@example.com", "email_verified": true,
 		"name": "G User", "hd": "workspace.com",
 	})
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "*"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "*"})
 	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{IDToken: token})
 	if err != nil || info == nil || info.User.Email != "g@example.com" {
 		t.Fatalf("info=%+v err=%v", info, err)
@@ -242,7 +242,7 @@ func TestGoogleGetUserInfoRequiresHostedDomainClaim(t *testing.T) {
 		"sub": "google-sub", "email": "g@example.com", "email_verified": true,
 		"name": "G User",
 	})
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "*"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "*"})
 	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{IDToken: token})
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestGoogleVerifyIDTokenAcceptsValidToken(t *testing.T) {
 	restore := mockGoogleJWKS(t, jwks)
 	defer restore()
 
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
 	valid, err := p.VerifyIDToken(context.Background(), token, "nonce-value")
 	if err != nil || !valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -276,7 +276,7 @@ func TestGoogleVerifyIDTokenRejectsNonceMismatch(t *testing.T) {
 	restore := mockGoogleJWKS(t, jwks)
 	defer restore()
 
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	valid, err := p.VerifyIDToken(context.Background(), token, "other-nonce")
 	if err != nil || valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -290,7 +290,7 @@ func TestGoogleVerifyIDTokenRejectsAudienceMismatch(t *testing.T) {
 	restore := mockGoogleJWKS(t, jwks)
 	defer restore()
 
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	valid, err := p.VerifyIDToken(context.Background(), token, "")
 	if err != nil || valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -305,7 +305,7 @@ func TestGoogleVerifyIDTokenRejectsHostedDomainMismatch(t *testing.T) {
 	restore := mockGoogleJWKS(t, jwks)
 	defer restore()
 
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
 	valid, err := p.VerifyIDToken(context.Background(), token, "")
 	if err != nil || valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -320,7 +320,7 @@ func TestGoogleVerifyIDTokenRejectsFutureNotBefore(t *testing.T) {
 	restore := mockGoogleJWKS(t, jwks)
 	defer restore()
 
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret"})
 	valid, err := p.VerifyIDToken(context.Background(), token, "")
 	if err != nil || valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -329,7 +329,7 @@ func TestGoogleVerifyIDTokenRejectsFutureNotBefore(t *testing.T) {
 
 func TestGoogleVerifyIDTokenCanBeDisabled(t *testing.T) {
 	token, _ := signedGoogleIDToken(t, map[string]any{"aud": "id"})
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableIDTokenSignIn: true})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableIDTokenSignIn: true})
 	valid, err := p.VerifyIDToken(context.Background(), token, "")
 	if err != nil || valid {
 		t.Fatalf("valid=%v err=%v", valid, err)
@@ -337,7 +337,7 @@ func TestGoogleVerifyIDTokenCanBeDisabled(t *testing.T) {
 }
 
 func TestGoogleSignUpPolicy(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
+	p := oauth2provider.GoogleWithIDToken(oauth2provider.Options{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
 		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
 	}
@@ -409,7 +409,7 @@ func signedGoogleIDToken(t *testing.T, claims map[string]any) (string, string) {
 func mockGoogleJWKS(t *testing.T, jwks string) func() {
 	t.Helper()
 	transport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	http.DefaultTransport = googleRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.String() != "https://www.googleapis.com/oauth2/v3/certs" {
 			t.Fatalf("unexpected request URL: %s", req.URL.String())
 		}
@@ -434,8 +434,8 @@ func googleAuthURLQuery(t *testing.T, authURL string) url.Values {
 	return parsed.Query()
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+type googleRoundTripFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+func (f googleRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
