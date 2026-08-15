@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -23,6 +25,7 @@ type PhoneNumberOptions struct {
 	CallbackOnVerification func(ctx context.Context, phone string, user *types.User) error
 	SignUpOnVerification   *PhoneNumberSignUpOnVerificationOptions
 	ExpiresIn              time.Duration
+	AllowedAttempts        int
 }
 
 // PhoneNumberSignUpOnVerificationOptions configures user creation on phone verification.
@@ -34,6 +37,9 @@ type PhoneNumberSignUpOnVerificationOptions struct {
 const (
 	codePhoneNumberExists = "PHONE_NUMBER_EXIST"
 	codeFailedUpdateUser  = "FAILED_TO_UPDATE_USER"
+	codeOTPNotFound       = "OTP_NOT_FOUND"
+	codeOTPExpired        = "OTP_EXPIRED"
+	codeTooManyAttempts   = "TOO_MANY_ATTEMPTS"
 )
 
 // PhoneNumber adds phone number OTP authentication.
@@ -41,6 +47,10 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 	expires := opts.ExpiresIn
 	if expires == 0 {
 		expires = 5 * time.Minute
+	}
+	allowedAttempts := opts.AllowedAttempts
+	if allowedAttempts == 0 {
+		allowedAttempts = 3
 	}
 	return basePlugin{
 		id: constants.PluginPhoneNumber,
@@ -62,7 +72,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
-				if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp, expires); err != nil {
+				if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp+":0", expires); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
@@ -83,7 +93,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 					return
 				}
-				if !verifyPhoneOTP(c, opts.VerifyOTP, body.PhoneNumber, body.Code) {
+				if !verifyPhoneOTP(c, opts.VerifyOTP, body.PhoneNumber, body.Code, allowedAttempts) {
 					return
 				}
 				if body.UpdatePhoneNumber {
@@ -208,7 +218,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					return
 				}
 				identifier := body.PhoneNumber + "-request-password-reset"
-				if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp, expires); err != nil {
+				if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp+":0", expires); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
@@ -240,9 +250,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					return
 				}
 				identifier := body.PhoneNumber + "-request-password-reset"
-				v, err := c.Auth.ConsumeVerification(c.R.Context(), identifier)
-				if err != nil || v.Value != body.OTP {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+				if !consumePhoneOTP(c, identifier, body.OTP, allowedAttempts) {
 					return
 				}
 				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
@@ -329,14 +337,9 @@ func decodePhoneBool(raw map[string]json.RawMessage, key string, dst *bool) erro
 	return json.Unmarshal(value, dst)
 }
 
-func verifyPhoneOTP(c *auth.Context, verifyOTP func(context.Context, string, string) (bool, error), phoneNumber string, code string) bool {
+func verifyPhoneOTP(c *auth.Context, verifyOTP func(context.Context, string, string) (bool, error), phoneNumber string, code string, allowedAttempts int) bool {
 	if verifyOTP == nil {
-		v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationPhoneOTP+phoneNumber)
-		if err != nil || v.Value != code {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
-			return false
-		}
-		return true
+		return consumePhoneOTP(c, constants.VerificationPhoneOTP+phoneNumber, code, allowedAttempts)
 	}
 	ok, err := verifyOTP(c.R.Context(), phoneNumber, code)
 	if err != nil {
@@ -348,6 +351,69 @@ func verifyPhoneOTP(c *auth.Context, verifyOTP func(context.Context, string, str
 		return false
 	}
 	_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), constants.VerificationPhoneOTP+phoneNumber)
+	return true
+}
+
+func consumePhoneOTP(c *auth.Context, identifier string, code string, allowedAttempts int) bool {
+	verification, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
+	if err != nil {
+		c.WriteError(apierror.New(http.StatusBadRequest, codeOTPNotFound, "OTP not found"))
+		return false
+	}
+	if time.Now().After(verification.ExpiresAt) {
+		if err := c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return false
+		}
+		c.WriteError(apierror.New(http.StatusBadRequest, codeOTPExpired, "OTP expired"))
+		return false
+	}
+	otp, attempts := splitPhoneOTPValue(verification.Value)
+	if attempts >= allowedAttempts {
+		if err := c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return false
+		}
+		c.WriteError(apierror.New(http.StatusForbidden, codeTooManyAttempts, "Too many attempts"))
+		return false
+	}
+	if otp != code {
+		if !savePhoneOTPAttempts(c, verification, attempts+1) {
+			return false
+		}
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		return false
+	}
+	if err := c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	return true
+}
+
+func splitPhoneOTPValue(value string) (string, int) {
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) == 1 {
+		return parts[0], 0
+	}
+	attempts, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return parts[0], 0
+	}
+	return parts[0], attempts
+}
+
+func savePhoneOTPAttempts(c *auth.Context, verification *types.Verification, attempts int) bool {
+	otp, _ := splitPhoneOTPValue(verification.Value)
+	now := time.Now()
+	err := c.Auth.Store().CreateVerification(c.R.Context(), &types.Verification{
+		ID: verification.ID, Identifier: verification.Identifier, Value: otp + ":" + strconv.Itoa(attempts),
+		ExpiresAt: verification.ExpiresAt, CreatedAt: verification.CreatedAt, UpdatedAt: now,
+	})
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
 	return true
 }
 

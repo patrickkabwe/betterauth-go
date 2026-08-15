@@ -347,6 +347,46 @@ func TestPhoneNumberVerifyUpdatesCurrentUserPhoneNumber(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberVerifyTracksOTPAttempts(t *testing.T) {
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
+		},
+		AllowedAttempts: 2,
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
+	}
+	wrongCode := "000000"
+	if sentCode == wrongCode {
+		wrongCode = "111111"
+	}
+	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("first verify status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("second verify status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("third verify status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "TOO_MANY_ATTEMPTS" {
+		t.Fatalf("code %q", resp.Code)
+	}
+}
+
 func TestPhoneNumberVerifyRejectsOTPShape(t *testing.T) {
 	sentCode := ""
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
@@ -429,11 +469,15 @@ func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(verification.Value) != 6 {
-		t.Fatalf("verification code length %d", len(verification.Value))
+	storedCode := strings.SplitN(verification.Value, ":", 2)[0]
+	if len(storedCode) != 6 {
+		t.Fatalf("verification code length %d", len(storedCode))
 	}
-	if !isDigitString(verification.Value) {
+	if !isDigitString(storedCode) {
 		t.Fatalf("verification code should be numeric: %q", verification.Value)
+	}
+	if !strings.HasSuffix(verification.Value, ":0") {
+		t.Fatalf("verification attempts not initialized: %q", verification.Value)
 	}
 }
 
