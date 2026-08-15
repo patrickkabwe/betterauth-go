@@ -3,6 +3,7 @@ package oauth2provider
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -42,6 +43,68 @@ func TestProviderAuthorizationURLUsesScopesAndPKCE(t *testing.T) {
 	}
 }
 
+func TestGoogleProviderAuthorizationURLUsesSharedProviderPath(t *testing.T) {
+	p := Google(Options{
+		ClientID:            "client-id",
+		ClientSecret:        "client-secret",
+		DisableDefaultScope: true,
+		Scopes:              []string{"calendar.readonly"},
+		Display:             "popup",
+		HD:                  "example.com",
+	})
+	rawURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "state-1", RedirectURI: "https://app.example.test/callback", CodeVerifier: "verifier-1", Display: "touch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("scope") != "calendar.readonly" || query.Get("display") != "touch" || query.Get("hd") != "example.com" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("code_challenge") == "" || query.Get("include_granted_scopes") != "true" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+}
+
+func TestGitHubProviderFetchesFlatProfileAndEmails(t *testing.T) {
+	transport := http.DefaultTransport
+	http.DefaultTransport = oauth2ProviderRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `[]`
+		if req.URL.Path == "/user" {
+			body = `{"id":42,"login":"octo","name":"","email":"","avatar_url":"https://img.example.com/octo.png"}`
+		}
+		if req.URL.Path == "/user/emails" {
+			body = `[{"email":"primary@example.com","primary":true,"verified":true}]`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+	defer func() {
+		http.DefaultTransport = transport
+	}()
+
+	p := GitHub(Options{ClientID: "id", ClientSecret: "secret"})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.ID != "42" || info.User.Name != "octo" || info.User.Email != "primary@example.com" || !info.User.EmailVerified {
+		t.Fatalf("user=%+v", info.User)
+	}
+	if info.Data["email"] != "primary@example.com" || info.Data["login"] != "octo" {
+		t.Fatalf("data=%+v", info.Data)
+	}
+}
+
 func TestProviderFetchesAndMapsDiscordProfile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer access-token" {
@@ -69,6 +132,12 @@ func TestProviderFetchesAndMapsDiscordProfile(t *testing.T) {
 	if info.User.Image == nil || !strings.Contains(*info.User.Image, "/avatars/123456789/avatar-hash.png") {
 		t.Fatalf("image=%v", info.User.Image)
 	}
+}
+
+type oauth2ProviderRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f oauth2ProviderRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestNotionExtractsNestedUserProfile(t *testing.T) {

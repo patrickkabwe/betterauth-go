@@ -31,16 +31,19 @@ type Config struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	AdditionalScopes         []string
 	DisableDefaultScope      bool
 	AuthorizationEndpoint    string
 	TokenEndpoint            string
 	UserInfoEndpoint         string
+	AlwaysSendScope          bool
 	UserInfoMethod           string
 	UserInfoBody             string
 	UserInfoHeaders          map[string]string
 	RedirectURI              string
 	Prompt                   string
 	AuthorizationParams      map[string]string
+	AuthorizationParamsFunc  func(provider.AuthorizationURLOpts) map[string]string
 	UsePKCE                  bool
 	TokenAuthentication      provider.OAuthClientAuthentication
 	DisableImplicitSignUp    bool
@@ -89,7 +92,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("redirect_uri", p.redirectURI(opts.RedirectURI))
 	params.Set("state", opts.State)
 	scopes := p.defaultScopes(opts.Scopes)
-	if len(scopes) > 0 {
+	if len(scopes) > 0 || p.cfg.AlwaysSendScope {
 		params.Set("scope", strings.Join(scopes, " "))
 	}
 	if p.cfg.UsePKCE {
@@ -104,6 +107,11 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	}
 	for key, value := range p.cfg.AuthorizationParams {
 		params.Set(key, value)
+	}
+	if p.cfg.AuthorizationParamsFunc != nil {
+		for key, value := range p.cfg.AuthorizationParamsFunc(opts) {
+			params.Set(key, value)
+		}
 	}
 	return provider.BuildAuthURL(p.cfg.AuthorizationEndpoint, params), nil
 }
@@ -186,6 +194,9 @@ func (p *Provider) defaultScopes(extra []string) []string {
 	base := []string{}
 	if !p.cfg.DisableDefaultScope {
 		base = append(base, p.cfg.Scopes...)
+	}
+	if len(p.cfg.AdditionalScopes) > 0 {
+		base = append(base, p.cfg.AdditionalScopes...)
 	}
 	if len(extra) > 0 {
 		base = append(base, extra...)
