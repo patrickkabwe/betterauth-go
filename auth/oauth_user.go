@@ -90,7 +90,11 @@ func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo pr
 
 	if userInfo.EmailVerified && !user.EmailVerified && strings.EqualFold(userInfo.Email, user.Email) {
 		verified := true
-		user, _ = a.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
+		updated, err := a.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
+		if err != nil {
+			return nil, err
+		}
+		user = updated
 	}
 
 	sess, err := a.createSession(c, user.ID, true)
