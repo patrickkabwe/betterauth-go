@@ -34,12 +34,18 @@ func handleUpdateUser(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeEmailCanNotBeUpdated))
 		return
 	}
+	phoneAdditional, phoneErr := c.Auth.phoneNumberAdditionalFromRaw(body)
+	if phoneErr != nil {
+		c.WriteError(phoneErr)
+		return
+	}
 
 	update, _, fieldErr := mergeUserUpdateFromBody(body, c.Auth.cfg.user.additionalFields)
 	if fieldErr != nil {
 		c.WriteError(fieldErr)
 		return
 	}
+	update.Additional = mergeAdditionalUpdate(update.Additional, phoneAdditional)
 	if update.Name == nil && update.Image == nil && len(update.Additional) == 0 {
 		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeBodyMustBeAnObject, constants.MsgNoFieldsToUpdate))
 		return
@@ -52,6 +58,46 @@ func handleUpdateUser(c *Context) {
 	}
 	c.Auth.syncUserSession(c, sess, updated)
 	c.WriteJSON(http.StatusOK, types.UpdateUserResponse{Status: true})
+}
+
+func (a *Auth) phoneNumberAdditionalFromRaw(raw map[string]json.RawMessage) (map[string]any, *apierror.Error) {
+	if !a.phoneNumberPluginEnabled() {
+		return nil, nil
+	}
+	value, ok := raw[constants.FieldPhoneNumber]
+	if !ok {
+		return nil, nil
+	}
+	if string(value) != "null" {
+		return nil, apierror.New(http.StatusBadRequest, "PHONE_NUMBER_CANNOT_BE_UPDATED", "Phone number cannot be updated")
+	}
+	return map[string]any{
+		constants.FieldPhoneNumber:   nil,
+		constants.FieldPhoneVerified: false,
+	}, nil
+}
+
+func (a *Auth) phoneNumberPluginEnabled() bool {
+	for _, plugin := range a.cfg.plugins {
+		if plugin.ID() == constants.PluginPhoneNumber {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeAdditionalUpdate(base map[string]any, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	out := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
 }
 
 type changePasswordBody struct {

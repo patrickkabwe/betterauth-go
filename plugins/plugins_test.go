@@ -714,6 +714,55 @@ func TestPhoneNumberSignInUsesValidator(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberPluginUpdateUserRejectsDirectPhoneNumberChange(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	createPhoneCredentialUser(t, a, "phone-update-block-user", "+1234567890", "password123")
+	cookie := signInPhoneNumberCookie(t, a, "+1234567890", "password123")
+
+	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"phoneNumber":"+1234567891"}`))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "PHONE_NUMBER_CANNOT_BE_UPDATED" {
+		t.Fatalf("code %q", resp.Code)
+	}
+}
+
+func TestPhoneNumberPluginUpdateUserAllowsClearingPhoneNumber(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	createPhoneCredentialUser(t, a, "phone-update-clear-user", "+1234567890", "password123")
+	cookie := signInPhoneNumberCookie(t, a, "+1234567890", "password123")
+
+	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"phoneNumber":null}`))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	user, err := a.Store().FindUserByID(context.Background(), "phone-update-clear-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Additional[constants.FieldPhoneNumber] != nil {
+		t.Fatalf("phoneNumber not cleared: %+v", user.Additional)
+	}
+	if user.Additional[constants.FieldPhoneVerified] != false {
+		t.Fatalf("phoneNumberVerified not reset: %+v", user.Additional)
+	}
+}
+
 func TestOneTimeTokenFlow(t *testing.T) {
 	a := newTestAuth(t, plugins.OneTimeToken(plugins.OneTimeTokenOptions{}))
 	// create user via anonymous first
@@ -818,6 +867,19 @@ func createPhoneCredentialUserWithVerification(t *testing.T, a *auth.Auth, userI
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func signInPhoneNumberCookie(t *testing.T, a *auth.Auth, phoneNumber string, password string) string {
+	t.Helper()
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"`+phoneNumber+`","password":"`+password+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("sign in status %d body %s", w.Code, w.Body.String())
+	}
+	cookie := w.Header().Get("Set-Cookie")
+	if cookie == "" {
+		t.Fatal("expected session cookie")
+	}
+	return cookie
 }
 
 func isDigitString(value string) bool {
