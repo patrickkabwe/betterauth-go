@@ -13,7 +13,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/plugins"
 )
 
-func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, email string) (*httptest.Server, *bool) {
+func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, email string, tokenResponse string) (*httptest.Server, *bool) {
 	t.Helper()
 	tokenRequestSeen := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, 
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`))
+			_, _ = w.Write([]byte(tokenResponse))
 		case "/userinfo":
 			if r.Header.Get("Authorization") != "Bearer access-token" {
 				http.Error(w, "authorization", http.StatusUnauthorized)
@@ -196,7 +196,7 @@ func TestGenericOAuthLinkReturnsAuthorizationURL(t *testing.T) {
 }
 
 func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
-	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "oidc-account", "OIDC User", "OIDC@EXAMPLE.COM")
+	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "oidc-account", "OIDC User", "OIDC@EXAMPLE.COM", `{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`)
 	defer oauthServer.Close()
 
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
@@ -261,7 +261,7 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 }
 
 func TestGenericOAuthCallbackLinksAccount(t *testing.T) {
-	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "link-account", "Link User", "generic-oauth-link-callback@example.com")
+	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "link-account", "Link User", "generic-oauth-link-callback@example.com", `{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`)
 	defer oauthServer.Close()
 
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
@@ -320,6 +320,62 @@ func TestGenericOAuthCallbackLinksAccount(t *testing.T) {
 	}
 	if account.UserID != user.ID || account.AccessToken != "access-token" {
 		t.Fatalf("account=%+v user=%+v", account, user)
+	}
+}
+
+func TestGenericOAuthCallbackAppliesAccessTokenExpiresInFallback(t *testing.T) {
+	oauthServer, _ := newGenericOAuthCallbackServer(t, "expires-account", "Expires User", "generic-oauth-expires@example.com", `{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email"}`)
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:           "oidc",
+				ClientID:             "client",
+				ClientSecret:         "secret",
+				AuthorizationURL:     "https://idp.example.com/oauth/authorize",
+				TokenURL:             oauthServer.URL + "/token",
+				UserInfoURL:          oauthServer.URL + "/userinfo",
+				AccessTokenExpiresIn: 3600,
+			},
+		},
+	}))
+
+	beforeCallback := time.Now()
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "expires-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.AccessTokenExpiresAt == nil {
+		t.Fatalf("access token expiry missing: %+v", account)
+	}
+	minExpiresAt := beforeCallback.Add(3590 * time.Second)
+	maxExpiresAt := beforeCallback.Add(3610 * time.Second)
+	if account.AccessTokenExpiresAt.Before(minExpiresAt) || account.AccessTokenExpiresAt.After(maxExpiresAt) {
+		t.Fatalf("access token expiry=%s, want between %s and %s", account.AccessTokenExpiresAt.Format(time.RFC3339), minExpiresAt.Format(time.RFC3339), maxExpiresAt.Format(time.RFC3339))
 	}
 }
 

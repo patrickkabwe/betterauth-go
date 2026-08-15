@@ -41,6 +41,7 @@ type GenericOAuthProviderConfig struct {
 	PKCE                    bool
 	Prompt                  string
 	AccessType              string
+	AccessTokenExpiresIn    int
 	AuthorizationURLParams  map[string]string
 }
 
@@ -375,7 +376,12 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 	if err != nil {
 		return nil, err
 	}
-	return provider.TokensFromMap(data), nil
+	tokens := provider.TokensFromMap(data)
+	if tokens.AccessTokenExpiresAt == nil && p.AccessTokenExpiresIn > 0 {
+		expiresAt := time.Now().Add(time.Duration(p.AccessTokenExpiresIn) * time.Second)
+		tokens.AccessTokenExpiresAt = &expiresAt
+	}
+	return tokens, nil
 }
 
 func genericOAuthTokenEndpoint(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
