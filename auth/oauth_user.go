@@ -83,7 +83,9 @@ func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo pr
 			user = updated
 		}
 	} else {
-		_ = a.updateOAuthAccountTokens(c, linked.ID, account)
+		if err := a.updateOAuthAccountTokens(c, linked.ID, account); err != nil {
+			return nil, err
+		}
 	}
 
 	if userInfo.EmailVerified && !user.EmailVerified && strings.EqualFold(userInfo.Email, user.Email) {

@@ -59,6 +59,9 @@ func (f *failStore) CreateAccount(ctx context.Context, account *types.Account) e
 }
 
 func (f *failStore) UpdateAccount(ctx context.Context, id string, update store.AccountUpdate) (*types.Account, error) {
+	if f.failOn == "UpdateAccount" {
+		return nil, berrors.ErrInjected
+	}
 	return f.inner.UpdateAccount(ctx, id, update)
 }
 

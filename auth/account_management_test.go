@@ -152,6 +152,41 @@ func TestSignInSocialIDTokenPreservesStoredAccountTokens(t *testing.T) {
 	t.Fatalf("linked account not found")
 }
 
+func TestSignInSocialLinkedAccountUpdateFails(t *testing.T) {
+	fs := wrapStore("UpdateAccount").(*failStore)
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.Store = fs
+		c.SocialProviders = map[string]provider.SocialProvider{
+			"google": &testSocialProvider{
+				id:          "google",
+				verifyToken: func(_ context.Context, _, _ string) (bool, error) { return true, nil },
+			},
+		}
+	})
+	cookies := signUp(t, a, "linker@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":       "old-id-token",
+			"accessToken": "old-at",
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+
+	resp, _ = doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":       "new-id-token",
+			"accessToken": "new-at",
+		},
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestLinkSocialDoesNotUpdateUserInfoByDefault(t *testing.T) {
 	a := testAuthWithGoogle(t, func(c *auth.Config) {
 		c.SocialProviders = map[string]provider.SocialProvider{
