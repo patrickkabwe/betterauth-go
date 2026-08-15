@@ -365,7 +365,7 @@ func TestGetAccessTokenAutoRefresh(t *testing.T) {
 	}
 	var result types.AccessTokenResponse
 	_ = json.Unmarshal(data, &result)
-	if result.AccessToken != "new-access" || len(result.Scopes) != 1 || result.Scopes[0] != "read" {
+	if result.AccessToken != "new-access" || len(result.Scopes) != 0 {
 		t.Fatalf("expected refreshed token, got %+v", result)
 	}
 }

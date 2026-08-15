@@ -99,10 +99,6 @@ func (a *Auth) getValidAccessToken(c *Context, userID, providerID, accountID str
 		if newTokens.IDToken != "" {
 			update.IDToken = &newTokens.IDToken
 		}
-		if len(newTokens.Scopes) > 0 {
-			scope := strings.Join(newTokens.Scopes, ",")
-			update.Scope = &scope
-		}
 		updated, err := a.cfg.store.UpdateAccount(c.R.Context(), account.ID, update)
 		if err != nil {
 			return nil, apierror.New(http.StatusBadRequest, apierror.CodeFailedToGetAccessToken, constants.MsgFailedValidAccessToken)
