@@ -21,6 +21,7 @@ type GenericOAuthProviderConfig struct {
 	AuthorizationURL       string
 	TokenURL               string
 	UserInfoURL            string
+	RedirectURI            string
 	Scopes                 []string
 	ResponseType           string
 	ResponseMode           string
@@ -116,7 +117,7 @@ func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConf
 	q := url.Values{
 		"client_id":     {p.ClientID},
 		"response_type": {responseType},
-		"redirect_uri":  {c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID},
+		"redirect_uri":  {genericOAuthRedirectURI(c, p)},
 		"scope":         {joinScopes(scopes)},
 		"state":         {state},
 	}
@@ -133,6 +134,13 @@ func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConf
 		q.Set(key, value)
 	}
 	return q
+}
+
+func genericOAuthRedirectURI(c *auth.Context, p GenericOAuthProviderConfig) string {
+	if p.RedirectURI != "" {
+		return p.RedirectURI
+	}
+	return c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID
 }
 
 func genericOAuthScopes(requestScopes []string, configuredScopes []string) []string {

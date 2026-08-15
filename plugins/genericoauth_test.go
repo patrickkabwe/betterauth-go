@@ -22,6 +22,7 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 				AuthorizationURL: "https://idp.example.com/oauth/authorize?prompt=old&tenant=workspace",
 				TokenURL:         "https://idp.example.com/oauth/token",
 				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+				RedirectURI:      "https://app.example.com/oauth/callback",
 				Scopes:           []string{"openid", "email"},
 				ResponseType:     "id_token",
 				ResponseMode:     "form_post",
@@ -66,7 +67,7 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	if query.Get("response_mode") != "form_post" || query.Get("access_type") != "offline" {
 		t.Fatalf("query=%s", query.Encode())
 	}
-	if query.Get("redirect_uri") != "http://localhost:8080/api/auth/oauth2/callback/oidc" {
+	if query.Get("redirect_uri") != "https://app.example.com/oauth/callback" {
 		t.Fatalf("redirect_uri=%q", query.Get("redirect_uri"))
 	}
 	if query.Get("state") == "" {
