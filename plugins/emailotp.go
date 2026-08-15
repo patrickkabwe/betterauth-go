@@ -13,6 +13,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
+	internalcrypto "github.com/patrickkabwe/betterauth-go/internal/crypto"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
@@ -25,6 +26,13 @@ type EmailOTPOptions struct {
 	OTPLength       int
 	DisableSignUp   bool
 	AllowedAttempts int
+	ChangeEmail     EmailOTPChangeEmailOptions
+}
+
+// EmailOTPChangeEmailOptions configures the change-email OTP flow.
+type EmailOTPChangeEmailOptions struct {
+	Enabled            bool
+	VerifyCurrentEmail bool
 }
 
 const (
@@ -65,7 +73,7 @@ func EmailOTP(opts EmailOTPOptions) auth.Plugin {
 			rt(http.MethodPost, "/email-otp/request-password-reset", requestPasswordResetEmailOTPHandler(opts)),
 			rt(http.MethodPost, "/forget-password/email-otp", requestPasswordResetEmailOTPHandler(opts)),
 			rt(http.MethodPost, "/email-otp/reset-password", resetPasswordOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/request-email-change", sendOTPHandler(opts, constants.EmailOTPTypeEmailChange)),
+			rt(http.MethodPost, "/email-otp/request-email-change", requestEmailChangeOTPHandler(opts)),
 			rt(http.MethodPost, "/email-otp/change-email", changeEmailOTPHandler(opts)),
 		},
 	}
@@ -139,6 +147,79 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp+":0", opts.expires())
 	_ = opts.SendOTP(c.R.Context(), email, otp, typ)
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool) {
+	raw, err := id.Generate(opts.length())
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return "", false
+	}
+	otp := raw[:opts.length()]
+	if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp+":0", opts.expires()); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return "", false
+	}
+	return otp, true
+}
+
+func requestEmailChangeOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
+	return func(c *auth.Context) {
+		if !opts.ChangeEmail.Enabled {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeChangeEmailDisabled))
+			return
+		}
+		_, user, ok := c.RequireSession()
+		if !ok {
+			return
+		}
+		var body struct {
+			NewEmail string `json:"newEmail"`
+			OTP      string `json:"otp"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.NewEmail == "" {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidEmail))
+			return
+		}
+		newEmail := auth.NormalizeEmail(body.NewEmail)
+		if !internalcrypto.ValidateEmail(newEmail) {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidEmail))
+			return
+		}
+		currentEmail := auth.NormalizeEmail(user.Email)
+		if newEmail == currentEmail {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailIsTheSame))
+			return
+		}
+		if opts.ChangeEmail.VerifyCurrentEmail {
+			if body.OTP == "" {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+				return
+			}
+			if !verifyStoredOTP(c, opts, constants.EmailOTPTypeVerification, currentEmail, body.OTP, true) {
+				return
+			}
+		}
+		identifier := otpIdentifier(constants.EmailOTPTypeEmailChange, currentEmail+"-"+newEmail)
+		if _, err := c.Auth.Store().FindUserByEmail(c.R.Context(), newEmail); err == nil {
+			_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier)
+			c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+			return
+		} else if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		if opts.SendOTP == nil {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
+			return
+		}
+		otp, ok := createEmailOTP(c, opts, identifier)
+		if !ok {
+			return
+		}
+		_ = opts.SendOTP(c.R.Context(), newEmail, otp, constants.EmailOTPTypeEmailChange)
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+	}
 }
 
 func requestPasswordResetEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
@@ -451,23 +532,57 @@ func resetPasswordOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 
 func changeEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
-		_, user, ok := c.RequireSession()
+		if !opts.ChangeEmail.Enabled {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeChangeEmailDisabled))
+			return
+		}
+		sess, user, ok := c.RequireSession()
 		if !ok {
 			return
 		}
 		var body struct {
-			Email string `json:"email"`
-			OTP   string `json:"otp"`
+			NewEmail string `json:"newEmail"`
+			OTP      string `json:"otp"`
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeEmailChange, body.Email, body.OTP, true) {
+		newEmail := auth.NormalizeEmail(body.NewEmail)
+		if !internalcrypto.ValidateEmail(newEmail) {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidEmail))
 			return
 		}
-		email := auth.NormalizeEmail(body.Email)
-		user, _ = c.Auth.Store().UpdateUser(c.R.Context(), user.ID, store.UserUpdate{Email: &email})
-		c.WriteJSON(http.StatusOK, map[string]any{"user": user})
+		currentEmail := auth.NormalizeEmail(user.Email)
+		if newEmail == currentEmail {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailIsTheSame))
+			return
+		}
+		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeEmailChange, currentEmail+"-"+newEmail, body.OTP, true) {
+			return
+		}
+		if _, err := c.Auth.Store().FindUserByEmail(c.R.Context(), currentEmail); err != nil {
+			if errors.Is(err, berrors.ErrNotFound) {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeUserNotFound))
+				return
+			}
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		if _, err := c.Auth.Store().FindUserByEmail(c.R.Context(), newEmail); err == nil {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidEmail, "Email already in use"))
+			return
+		} else if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		verified := true
+		user, err := c.Auth.Store().UpdateUser(c.R.Context(), user.ID, store.UserUpdate{Email: &newEmail, EmailVerified: &verified})
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.Auth.SyncUserSession(c, sess, user)
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }

@@ -412,3 +412,82 @@ func TestEmailOTPPluginResetPasswordCreatesCredentialAndVerifiesEmail(t *testing
 		t.Fatal("expected reset password to mark email verified")
 	}
 }
+
+func TestEmailOTPPluginChangeEmailUsesNewEmailAndCurrentEmailBinding(t *testing.T) {
+	var sentEmail string
+	var sentOTP string
+	var sentType string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			ChangeEmail: plugins.EmailOTPChangeEmailOptions{Enabled: true},
+			SendOTP: func(_ context.Context, email string, otp string, typ string) error {
+				sentEmail = email
+				sentOTP = otp
+				sentType = typ
+				return nil
+			},
+		})}
+	})
+	cookies := signUp(t, a, "change-current@example.com")
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/request-email-change", map[string]any{
+		"newEmail": "change-next@example.com",
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("request status=%d body=%s", resp.StatusCode, data)
+	}
+	if sentEmail != "change-next@example.com" || sentType != constants.EmailOTPTypeEmailChange || sentOTP == "" {
+		t.Fatalf("sent email=%q type=%q otp=%q", sentEmail, sentType, sentOTP)
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeEmailChange+":change-current@example.com-change-next@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != sentOTP+":0" {
+		t.Fatalf("verification value %q", verification.Value)
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/email-otp/change-email", map[string]any{
+		"newEmail": "change-next@example.com",
+		"otp":      sentOTP,
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("change status=%d body=%s", resp.StatusCode, data)
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "change-next@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.EmailVerified {
+		t.Fatal("expected changed email to be verified")
+	}
+}
+
+func TestEmailOTPPluginRequestEmailChangeSkipsExistingEmail(t *testing.T) {
+	var sent bool
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			ChangeEmail: plugins.EmailOTPChangeEmailOptions{Enabled: true},
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				sent = true
+				return nil
+			},
+		})}
+	})
+	cookies := signUp(t, a, "change-skip-current@example.com")
+	_ = signUp(t, a, "change-skip-existing@example.com")
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/request-email-change", map[string]any{
+		"newEmail": "change-skip-existing@example.com",
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if sent {
+		t.Fatal("existing target email should not receive change-email OTP")
+	}
+	_, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeEmailChange+":change-skip-current@example.com-change-skip-existing@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
+	}
+}
