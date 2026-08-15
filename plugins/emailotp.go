@@ -21,6 +21,7 @@ import (
 // EmailOTPOptions configures email OTP flows.
 type EmailOTPOptions struct {
 	SendOTP         func(ctx context.Context, email, otp, typ string) error
+	GenerateOTP     EmailOTPGenerateOTP
 	ExpiresIn       time.Duration
 	OTPLength       int
 	DisableSignUp   bool
@@ -28,6 +29,9 @@ type EmailOTPOptions struct {
 	ChangeEmail     EmailOTPChangeEmailOptions
 	ResendStrategy  EmailOTPResendStrategy
 }
+
+// EmailOTPGenerateOTP generates an OTP for an email OTP flow.
+type EmailOTPGenerateOTP func(ctx context.Context, email, typ string) (string, error)
 
 // EmailOTPChangeEmailOptions configures the change-email OTP flow.
 type EmailOTPChangeEmailOptions struct {
@@ -158,7 +162,7 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
 		return
 	}
-	otp, ok := createEmailOTP(c, opts, otpIdentifier(typ, email))
+	otp, ok := createEmailOTP(c, opts, email, typ, otpIdentifier(typ, email))
 	if !ok {
 		return
 	}
@@ -169,7 +173,7 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 }
 
-func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool) {
+func createEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, identifier string) (string, bool) {
 	if opts.ResendStrategy == EmailOTPResendStrategyReuse {
 		otp, reused, ok := reuseEmailOTP(c, opts, identifier)
 		if !ok {
@@ -179,7 +183,7 @@ func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (s
 			return otp, true
 		}
 	}
-	otp, err := numericOTP(opts.length())
+	otp, err := generateEmailOTP(c.R.Context(), opts, email, typ)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return "", false
@@ -189,6 +193,19 @@ func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (s
 		return "", false
 	}
 	return otp, true
+}
+
+func generateEmailOTP(ctx context.Context, opts EmailOTPOptions, email, typ string) (string, error) {
+	if opts.GenerateOTP != nil {
+		otp, err := opts.GenerateOTP(ctx, email, typ)
+		if err != nil {
+			return "", err
+		}
+		if otp != "" {
+			return otp, nil
+		}
+	}
+	return numericOTP(opts.length())
 }
 
 func reuseEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool, bool) {
@@ -273,7 +290,7 @@ func requestEmailChangeOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
 			return
 		}
-		otp, ok := createEmailOTP(c, opts, identifier)
+		otp, ok := createEmailOTP(c, opts, newEmail, constants.EmailOTPTypeEmailChange, identifier)
 		if !ok {
 			return
 		}

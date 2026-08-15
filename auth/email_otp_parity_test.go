@@ -160,6 +160,99 @@ func TestEmailOTPPluginSendVerificationOTPGeneratesNumericCode(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOTPUsesCustomGenerator(t *testing.T) {
+	var generatedEmail string
+	var generatedType string
+	var sentOTP string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			GenerateOTP: func(_ context.Context, email string, typ string) (string, error) {
+				generatedEmail = email
+				generatedType = typ
+				return "custom-code", nil
+			},
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentOTP = otp
+				return nil
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-custom-generator",
+		Name:          "Custom Generator",
+		Email:         "custom-generator@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "CUSTOM-GENERATOR@example.com",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if generatedEmail != "custom-generator@example.com" {
+		t.Fatalf("generated email=%q", generatedEmail)
+	}
+	if generatedType != constants.EmailOTPTypeVerification {
+		t.Fatalf("generated type=%q", generatedType)
+	}
+	if sentOTP != "custom-code" {
+		t.Fatalf("sent otp=%q", sentOTP)
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":custom-generator@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != "custom-code:0" {
+		t.Fatalf("verification value=%q", verification.Value)
+	}
+}
+
+func TestEmailOTPPluginSendVerificationOTPReturnsGeneratorError(t *testing.T) {
+	sendCalled := false
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			GenerateOTP: func(_ context.Context, _ string, _ string) (string, error) {
+				return "", errors.New("generator failed")
+			},
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				sendCalled = true
+				return nil
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-generator-error",
+		Name:          "Generator Error",
+		Email:         "generator-error@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "generator-error@example.com",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if sendCalled {
+		t.Fatal("send should not be called after generator error")
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
 	var sentCodes []string
 	a := newTestAuth(func(c *auth.Config) {
