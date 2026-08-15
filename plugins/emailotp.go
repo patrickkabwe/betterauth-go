@@ -14,7 +14,6 @@ import (
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	internalcrypto "github.com/patrickkabwe/betterauth-go/internal/crypto"
-	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -142,20 +141,22 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
 		return
 	}
-	raw, _ := id.Generate(opts.length())
-	otp := raw[:opts.length()]
+	otp, err := numericOTP(opts.length())
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return
+	}
 	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp+":0", opts.expires())
 	_ = opts.SendOTP(c.R.Context(), email, otp, typ)
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 }
 
 func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool) {
-	raw, err := id.Generate(opts.length())
+	otp, err := numericOTP(opts.length())
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return "", false
 	}
-	otp := raw[:opts.length()]
 	if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp+":0", opts.expires()); err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return "", false

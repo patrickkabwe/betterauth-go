@@ -92,6 +92,47 @@ func TestEmailOTPPluginSendVerificationOTPSignInTypeCanSignIn(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOTPGeneratesNumericCode(t *testing.T) {
+	var sentOTP string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			OTPLength: 8,
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentOTP = otp
+				return nil
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-numeric",
+		Name:          "Numeric",
+		Email:         "numeric@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "numeric@example.com",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if len(sentOTP) != 8 {
+		t.Fatalf("otp length=%d value=%q", len(sentOTP), sentOTP)
+	}
+	for _, char := range sentOTP {
+		if char < '0' || char > '9' {
+			t.Fatalf("otp should be numeric: %q", sentOTP)
+		}
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPRejectsChangeEmailType(t *testing.T) {
 	var sent bool
 	a := newTestAuth(func(c *auth.Config) {
