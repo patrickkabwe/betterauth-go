@@ -52,9 +52,12 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 		if c.Auth.cfg.emailVerification.sendVerificationEmail != nil {
 			target := types.CloneUser(user)
 			target.Email = updateTo
-			_ = c.Auth.cfg.emailVerification.sendVerificationEmail(c.R.Context(), types.VerificationEmailData{
+			if err := c.Auth.cfg.emailVerification.sendVerificationEmail(c.R.Context(), types.VerificationEmailData{
 				User: target, URL: verifyURL, Token: newToken,
-			})
+			}); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+				return true
+			}
 		}
 		if callbackURL != "" {
 			c.Redirect(callbackURL)
@@ -94,7 +97,10 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 			return true
 		}
 		if c.Auth.cfg.emailVerification.sendVerificationEmail != nil {
-			_ = sendVerificationEmailToUser(c, updated, callbackURL)
+			if err := sendVerificationEmailToUser(c, updated, callbackURL); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+				return true
+			}
 		}
 		if sess != nil {
 			c.Auth.syncUserSession(c, sess, updated)

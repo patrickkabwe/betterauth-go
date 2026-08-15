@@ -762,6 +762,48 @@ func TestVerifyEmailUpdateFails(t *testing.T) {
 	}
 }
 
+func TestVerifyEmailChangeConfirmationSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	signUp(t, a, "verify-change-confirm-fail@example.com")
+	verifyUserEmail(t, a, "verify-change-confirm-fail@example.com")
+	token, err := jwt.SignHS256(testSecret, map[string]any{
+		"email":       "verify-change-confirm-fail@example.com",
+		"updateTo":    "verify-change-confirm-fail-new@example.com",
+		"requestType": "change-email-confirmation",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	resp, _ := doRequest(a, http.MethodGet, "/verify-email?token="+token, nil, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestVerifyEmailChangeLegacySendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	signUp(t, a, "verify-change-legacy-fail@example.com")
+	token, err := jwt.SignHS256(testSecret, map[string]any{
+		"email":    "verify-change-legacy-fail@example.com",
+		"updateTo": "verify-change-legacy-fail-new@example.com",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	resp, _ := doRequest(a, http.MethodGet, "/verify-email?token="+token, nil, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSetPasswordTooShort(t *testing.T) {
 	a := newTestAuth()
 	cookies := oauthOnlySession(t, a)
