@@ -24,15 +24,14 @@ func (a *Auth) linkingAllowed(providerID string, emailVerified bool) bool {
 }
 
 func (a *Auth) applyUserInfoOnLink(c *Context, userID string, info provider.OAuthUser) {
-	user, err := a.cfg.store.FindUserByID(c.R.Context(), userID)
-	if err != nil {
+	if !a.cfg.account.updateUserInfoOnLink {
 		return
 	}
 	update := store.UserUpdate{}
-	if user.Name == "" && info.Name != "" {
+	if info.Name != "" {
 		update.Name = &info.Name
 	}
-	if user.Image == nil && info.Image != nil {
+	if info.Image != nil {
 		update.Image = &info.Image
 	}
 	if update.Name == nil && update.Image == nil {

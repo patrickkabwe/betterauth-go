@@ -100,6 +100,96 @@ func TestLinkSocialWithIDToken(t *testing.T) {
 	}
 }
 
+func TestLinkSocialDoesNotUpdateUserInfoByDefault(t *testing.T) {
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{
+			"google": &testSocialProvider{
+				id: "google",
+				userInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+					return &provider.UserInfo{
+						User: provider.OAuthUser{ID: "gh-default-profile", Name: "Provider Profile", Email: "link-default-profile@example.com", EmailVerified: true},
+					}, nil
+				},
+			},
+		}
+	})
+	cookies := signUp(t, a, "link-default-profile@example.com")
+	resp, data := doRequest(a, http.MethodGet, "/get-session?disableCookieCache=true", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d %s", resp.StatusCode, data)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	emptyName := ""
+	if _, err := a.Store().UpdateUser(context.Background(), sess.User.ID, store.UserUpdate{Name: &emptyName}); err != nil {
+		t.Fatalf("update user: %v", err)
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token": "valid-id-token",
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+
+	resp, data = doRequest(a, http.MethodGet, "/get-session?disableCookieCache=true", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d %s", resp.StatusCode, data)
+	}
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.User.Name != "" {
+		t.Fatalf("name=%q", sess.User.Name)
+	}
+}
+
+func TestLinkSocialUpdatesUserInfoWhenEnabled(t *testing.T) {
+	image := "https://example.com/avatar.png"
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.Account.AccountLinking.UpdateUserInfoOnLink = true
+		c.SocialProviders = map[string]provider.SocialProvider{
+			"google": &testSocialProvider{
+				id: "google",
+				userInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+					return &provider.UserInfo{
+						User: provider.OAuthUser{
+							ID: "gh-profile", Name: "Provider Profile", Email: "link-profile@example.com", EmailVerified: true, Image: &image,
+						},
+					}, nil
+				},
+			},
+		}
+	})
+	cookies := signUp(t, a, "link-profile@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token": "valid-id-token",
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+
+	resp, data = doRequest(a, http.MethodGet, "/get-session?disableCookieCache=true", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d %s", resp.StatusCode, data)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.User.Name != "Provider Profile" || sess.User.Image == nil || *sess.User.Image != image {
+		t.Fatalf("user=%+v", sess.User)
+	}
+}
+
 func TestLinkSocialDifferentEmailRejected(t *testing.T) {
 	a := testAuthWithGoogle(t, func(c *auth.Config) {
 		c.SocialProviders = map[string]provider.SocialProvider{

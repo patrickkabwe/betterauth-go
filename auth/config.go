@@ -96,6 +96,7 @@ type AccountLinkingConfig struct {
 	TrustedProviders     []string
 	AllowDifferentEmails bool
 	AllowUnlinkingAll    bool
+	UpdateUserInfoOnLink bool
 }
 
 // EmailAndPasswordConfig configures email/password authentication.
@@ -249,6 +250,7 @@ type accountResolved struct {
 	trustedProviders     map[string]bool
 	allowDifferentEmails bool
 	allowUnlinkingAll    bool
+	updateUserInfoOnLink bool
 }
 
 func resolveConfig(opts Config) resolved {
@@ -478,6 +480,7 @@ func resolveConfig(opts Config) resolved {
 			trustedProviders:     toTrustedProviderSet(opts.Account.AccountLinking.TrustedProviders),
 			allowDifferentEmails: opts.Account.AccountLinking.AllowDifferentEmails,
 			allowUnlinkingAll:    opts.Account.AccountLinking.AllowUnlinkingAll,
+			updateUserInfoOnLink: opts.Account.AccountLinking.UpdateUserInfoOnLink,
 		},
 		socialProviders:     buildSocialProviders(opts),
 		plugins:             opts.Plugins,
