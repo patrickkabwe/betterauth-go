@@ -29,10 +29,14 @@ type EmailOTPOptions struct {
 	ChangeEmail     EmailOTPChangeEmailOptions
 	ResendStrategy  EmailOTPResendStrategy
 	StoreOTP        EmailOTPStoreOTP
+	HashOTP         EmailOTPHashOTP
 }
 
 // EmailOTPGenerateOTP generates an OTP for an email OTP flow.
 type EmailOTPGenerateOTP func(ctx context.Context, email, typ string) (string, error)
+
+// EmailOTPHashOTP hashes an OTP for storage and verification.
+type EmailOTPHashOTP func(ctx context.Context, otp string) (string, error)
 
 // EmailOTPStoreOTP controls how OTP values are persisted.
 type EmailOTPStoreOTP string
@@ -212,6 +216,14 @@ func storeGeneratedEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, i
 }
 
 func storeEmailOTPValue(c *auth.Context, opts EmailOTPOptions, otp string) (string, bool) {
+	if opts.HashOTP != nil {
+		hash, err := opts.HashOTP(c.R.Context(), otp)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		return hash, true
+	}
 	if opts.StoreOTP != EmailOTPStoreOTPHashed {
 		return otp, true
 	}
@@ -263,7 +275,7 @@ func getVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteJSON(http.StatusOK, map[string]*string{"otp": nil})
 			return
 		}
-		if opts.StoreOTP == EmailOTPStoreOTPHashed {
+		if emailOTPValueIsUnrecoverable(opts) {
 			c.WriteError(apierror.New(http.StatusBadRequest, "BAD_REQUEST", "OTP is hashed, cannot return the plain text OTP"))
 			return
 		}
@@ -286,7 +298,7 @@ func generateEmailOTP(ctx context.Context, opts EmailOTPOptions, email, typ stri
 }
 
 func reuseEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool, bool) {
-	if opts.StoreOTP == EmailOTPStoreOTPHashed {
+	if emailOTPValueIsUnrecoverable(opts) {
 		return "", false, true
 	}
 	verification, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
@@ -538,6 +550,14 @@ func consumeStoredEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier str
 }
 
 func verifyEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP, otp string) (bool, bool) {
+	if opts.HashOTP != nil {
+		hash, err := opts.HashOTP(c.R.Context(), otp)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return false, false
+		}
+		return hash == storedOTP, true
+	}
 	if opts.StoreOTP != EmailOTPStoreOTPHashed {
 		return storedOTP == otp, true
 	}
@@ -547,6 +567,10 @@ func verifyEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP, otp s
 		return false, false
 	}
 	return matches, true
+}
+
+func emailOTPValueIsUnrecoverable(opts EmailOTPOptions) bool {
+	return opts.StoreOTP == EmailOTPStoreOTPHashed || opts.HashOTP != nil
 }
 
 func splitEmailOTPValue(value string) (string, int) {
