@@ -218,8 +218,12 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					return
 				}
 				account, err := c.Auth.Store().FindAccountByUserAndProvider(c.R.Context(), user.ID, constants.ProviderCredential)
-				if err != nil || account.Password == "" {
+				if err != nil {
 					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
+				}
+				if account.Password == "" {
+					c.WriteError(apierror.New(http.StatusUnauthorized, "UNEXPECTED_ERROR", "Unexpected error"))
 					return
 				}
 				ok, _ := c.Auth.VerifyPassword(account.Password, body.Password)

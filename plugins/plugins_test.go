@@ -649,6 +649,42 @@ func TestPhoneNumberSignInAllowsVerifiedPhoneWhenRequired(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberSignInReturnsUnexpectedErrorWithoutPassword(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID: "phone-empty-password-user", Name: "Phone User", Email: "empty-password@example.com",
+		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
+		Additional: map[string]any{
+			constants.FieldPhoneNumber:   "+1234567890",
+			constants.FieldPhoneVerified: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "phone-empty-password-account", AccountID: "phone-empty-password-user", ProviderID: constants.ProviderCredential,
+		UserID: "phone-empty-password-user", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "UNEXPECTED_ERROR" {
+		t.Fatalf("code %q", resp.Code)
+	}
+}
+
 func TestPhoneNumberSignInRejectsOTPShape(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","otp":"123456"}`)
