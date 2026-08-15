@@ -59,6 +59,8 @@ type GenericOAuthProviderConfig struct {
 	Prompt                  string
 	AccessType              string
 	AccessTokenExpiresIn    int
+	DisableImplicitSignUp   bool
+	DisableSignUp           bool
 	AuthorizationHeaders    map[string]string
 	AuthorizationURLParams  map[string]string
 	TokenURLParams          map[string]string
@@ -84,10 +86,13 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/sign-in/oauth2", func(c *auth.Context) {
 				var body struct {
-					ProviderID      string   `json:"providerId"`
-					CallbackURL     string   `json:"callbackURL"`
-					DisableRedirect bool     `json:"disableRedirect"`
-					Scopes          []string `json:"scopes"`
+					ProviderID         string   `json:"providerId"`
+					CallbackURL        string   `json:"callbackURL"`
+					NewUserCallbackURL string   `json:"newUserCallbackURL"`
+					ErrorCallbackURL   string   `json:"errorCallbackURL"`
+					DisableRedirect    bool     `json:"disableRedirect"`
+					Scopes             []string `json:"scopes"`
+					RequestSignUp      bool     `json:"requestSignUp"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
@@ -104,9 +109,12 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					return
 				}
 				state, codeVerifier, err := createGenericOAuthState(c, genericOAuthStateInput{
-					ProviderID:  body.ProviderID,
-					CallbackURL: body.CallbackURL,
-					UsePKCE:     p.PKCE,
+					ProviderID:    body.ProviderID,
+					CallbackURL:   body.CallbackURL,
+					NewUserURL:    body.NewUserCallbackURL,
+					ErrorURL:      body.ErrorCallbackURL,
+					RequestSignUp: body.RequestSignUp,
+					UsePKCE:       p.PKCE,
 				})
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -152,32 +160,36 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				if callbackURL == "" {
 					callbackURL = c.Auth.BaseURL()
 				}
-				if !genericOAuthIssuerAllowed(c, p) {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+				errorURL := genericOAuthCallbackErrorURL(c, stateData)
+				if issuerError := genericOAuthIssuerError(c, p); issuerError != "" {
+					redirectGenericOAuthError(c, errorURL, issuerError, "")
 					return
 				}
 				tokens, err := genericOAuthExchangeAuthorizationCode(c, p, code, stateData.CodeVerifier)
 				if err != nil {
-					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "oauth_code_verification_failed", "")
+					redirectGenericOAuthError(c, errorURL, "oauth_code_verification_failed", "")
 					return
 				}
 				userInfo, err := genericOAuthUserInfo(c, p, tokens)
 				if err != nil {
-					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_get_user_info", "")
+					redirectGenericOAuthError(c, errorURL, "unable_to_get_user_info", "")
 					return
 				}
 				if stateData.LinkUserID != "" {
 					handleGenericOAuthLinkCallback(c, stateData, userInfo, tokens)
 					return
 				}
-				user, _, err := genericOAuthSignInUser(c, p, userInfo, tokens)
+				user, isRegister, err := genericOAuthSignInUser(c, p, stateData, userInfo, tokens)
 				if err != nil {
-					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), strings.ReplaceAll(err.Error(), " ", "_"), "")
+					redirectGenericOAuthError(c, errorURL, strings.ReplaceAll(err.Error(), " ", "_"), "")
 					return
 				}
 				if _, err := c.Auth.NewSession(c, user.ID, true); err != nil {
-					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_create_session", "")
+					redirectGenericOAuthError(c, errorURL, "unable_to_create_session", "")
 					return
+				}
+				if isRegister && stateData.NewUserURL != "" {
+					callbackURL = stateData.NewUserURL
 				}
 				c.Redirect(callbackURL)
 			}),
@@ -209,6 +221,7 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				state, codeVerifier, err := createGenericOAuthState(c, genericOAuthStateInput{
 					ProviderID:  body.ProviderID,
 					CallbackURL: body.CallbackURL,
+					ErrorURL:    body.ErrorCallbackURL,
 					LinkUserID:  user.ID,
 					LinkEmail:   user.Email,
 					UsePKCE:     p.PKCE,
@@ -298,16 +311,25 @@ func genericOAuthDiscovery(c *auth.Context, p GenericOAuthProviderConfig) (*gene
 	return &discovery, nil
 }
 
-func genericOAuthIssuerAllowed(c *auth.Context, p GenericOAuthProviderConfig) bool {
+func genericOAuthIssuerError(c *auth.Context, p GenericOAuthProviderConfig) string {
 	expectedIssuer, err := genericOAuthExpectedIssuer(c, p)
 	if err != nil || expectedIssuer == "" {
-		return err == nil && !p.RequireIssuerValidation
+		if err == nil && !p.RequireIssuerValidation {
+			return ""
+		}
+		return "issuer_missing"
 	}
 	issuer := c.R.URL.Query().Get("iss")
 	if issuer == "" {
-		return !p.RequireIssuerValidation
+		if p.RequireIssuerValidation {
+			return "issuer_missing"
+		}
+		return ""
 	}
-	return issuer == expectedIssuer
+	if issuer != expectedIssuer {
+		return "issuer_mismatch"
+	}
+	return ""
 }
 
 func genericOAuthExpectedIssuer(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
@@ -337,19 +359,25 @@ func parseGenericOAuthStateValue(value string) (genericOAuthStatePayload, bool) 
 }
 
 type genericOAuthStateInput struct {
-	ProviderID  string
-	CallbackURL string
-	LinkUserID  string
-	LinkEmail   string
-	UsePKCE     bool
+	ProviderID    string
+	CallbackURL   string
+	NewUserURL    string
+	ErrorURL      string
+	LinkUserID    string
+	LinkEmail     string
+	RequestSignUp bool
+	UsePKCE       bool
 }
 
 type genericOAuthStatePayload struct {
-	ProviderID   string `json:"providerId"`
-	CallbackURL  string `json:"callbackURL"`
-	CodeVerifier string `json:"codeVerifier,omitempty"`
-	LinkUserID   string `json:"linkUserId,omitempty"`
-	LinkEmail    string `json:"linkEmail,omitempty"`
+	ProviderID    string `json:"providerId"`
+	CallbackURL   string `json:"callbackURL"`
+	NewUserURL    string `json:"newUserURL,omitempty"`
+	ErrorURL      string `json:"errorURL,omitempty"`
+	CodeVerifier  string `json:"codeVerifier,omitempty"`
+	LinkUserID    string `json:"linkUserId,omitempty"`
+	LinkEmail     string `json:"linkEmail,omitempty"`
+	RequestSignUp bool   `json:"requestSignUp,omitempty"`
 }
 
 func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (string, string, error) {
@@ -366,11 +394,14 @@ func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (str
 		return "", "", err
 	}
 	payload := genericOAuthStatePayload{
-		ProviderID:   input.ProviderID,
-		CallbackURL:  input.CallbackURL,
-		CodeVerifier: codeVerifier,
-		LinkUserID:   input.LinkUserID,
-		LinkEmail:    input.LinkEmail,
+		ProviderID:    input.ProviderID,
+		CallbackURL:   input.CallbackURL,
+		NewUserURL:    input.NewUserURL,
+		ErrorURL:      input.ErrorURL,
+		CodeVerifier:  codeVerifier,
+		LinkUserID:    input.LinkUserID,
+		LinkEmail:     input.LinkEmail,
+		RequestSignUp: input.RequestSignUp,
 	}
 	value, err := json.Marshal(payload)
 	if err != nil {
@@ -593,7 +624,7 @@ func firstGenericOAuthString(data map[string]any, keys ...string) string {
 	return ""
 }
 
-func genericOAuthSignInUser(c *auth.Context, p GenericOAuthProviderConfig, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) (*types.User, bool, error) {
+func genericOAuthSignInUser(c *auth.Context, p GenericOAuthProviderConfig, stateData genericOAuthStatePayload, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) (*types.User, bool, error) {
 	account, err := c.Auth.Store().FindAccountByProviderAndAccountID(c.R.Context(), p.ProviderID, userInfo.ID)
 	if err == nil {
 		if err := updateGenericOAuthAccount(c, account.ID, tokens); err != nil {
@@ -611,6 +642,9 @@ func genericOAuthSignInUser(c *auth.Context, p GenericOAuthProviderConfig, userI
 	}
 	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
 		return nil, false, err
+	}
+	if p.DisableSignUp || p.DisableImplicitSignUp && !stateData.RequestSignUp {
+		return nil, false, errors.New("signup disabled")
 	}
 	user, err := createGenericOAuthUser(c, userInfo)
 	if err != nil {
@@ -683,29 +717,30 @@ func updateGenericOAuthAccount(c *auth.Context, accountID string, tokens *provid
 }
 
 func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthStatePayload, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) {
+	errorURL := genericOAuthCallbackErrorURL(c, stateData)
 	if !strings.EqualFold(stateData.LinkEmail, userInfo.Email) {
-		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "email_doesn't_match", "")
+		redirectGenericOAuthError(c, errorURL, "email_doesn't_match", "")
 		return
 	}
 	existing, err := c.Auth.Store().FindAccountByProviderAndAccountID(c.R.Context(), stateData.ProviderID, userInfo.ID)
 	if err == nil {
 		if existing.UserID != stateData.LinkUserID {
-			redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "account_already_linked_to_different_user", "")
+			redirectGenericOAuthError(c, errorURL, "account_already_linked_to_different_user", "")
 			return
 		}
 		if err := updateGenericOAuthAccount(c, existing.ID, tokens); err != nil {
-			redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+			redirectGenericOAuthError(c, errorURL, "unable_to_link_account", "")
 			return
 		}
 		c.Redirect(stateData.CallbackURL)
 		return
 	}
 	if !errors.Is(err, berrors.ErrNotFound) {
-		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+		redirectGenericOAuthError(c, errorURL, "unable_to_link_account", "")
 		return
 	}
 	if err := createGenericOAuthAccount(c, stateData.ProviderID, stateData.LinkUserID, userInfo.ID, tokens); err != nil {
-		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+		redirectGenericOAuthError(c, errorURL, "unable_to_link_account", "")
 		return
 	}
 	c.Redirect(stateData.CallbackURL)
@@ -713,6 +748,13 @@ func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthState
 
 func genericOAuthDefaultErrorURL(c *auth.Context) string {
 	return c.Auth.BaseURL() + c.Auth.BasePath() + "/error"
+}
+
+func genericOAuthCallbackErrorURL(c *auth.Context, stateData genericOAuthStatePayload) string {
+	if stateData.ErrorURL != "" {
+		return stateData.ErrorURL
+	}
+	return genericOAuthDefaultErrorURL(c)
 }
 
 func redirectGenericOAuthError(c *auth.Context, errorURL string, code string, description string) {
