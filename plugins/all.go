@@ -31,6 +31,7 @@ type AllOptions struct {
 	APIKey          APIKeyOptions
 	I18n            I18nOptions
 	SCIM            SCIMOptions
+	Stripe          StripeOptions
 }
 
 // All returns every core Better Auth plugin.
@@ -63,5 +64,6 @@ func All(opts AllOptions) []auth.Plugin {
 		APIKey(opts.APIKey),
 		I18n(opts.I18n),
 		SCIM(opts.SCIM),
+		Stripe(opts.Stripe),
 	}
 }

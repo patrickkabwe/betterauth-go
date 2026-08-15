@@ -151,6 +151,7 @@ const (
 	PluginAPIKey            = "api-key"
 	PluginI18n              = "i18n"
 	PluginSCIM              = "scim"
+	PluginStripe            = "stripe"
 )
 
 // API error codes.
