@@ -206,7 +206,11 @@ func handleVerifyPassword(c *Context) {
 	}
 
 	valid, err := c.Auth.cfg.hasher.Verify(account.Password, body.Password)
-	if err != nil || !valid {
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
+	if !valid {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidPassword))
 		return
 	}

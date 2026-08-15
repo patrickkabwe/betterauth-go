@@ -60,6 +60,19 @@ func TestChangePasswordHashFails(t *testing.T) {
 	}
 }
 
+func TestChangePasswordVerifyFails(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	cookies := signUp(t, a1, "chverifyfail@example.com")
+	a2 := newTestAuth(func(c *auth.Config) { c.Store = mem; c.Hasher = verifyErrorHasher{} })
+	resp, _ := doRequest(a2, http.MethodPost, "/change-password", map[string]any{
+		"currentPassword": "password123", "newPassword": "newpass123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestChangePasswordUpdatePasswordFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("UpdateAccountPassword") })
 	cookies := signUp(t, a, "uppassfail@example.com")
@@ -275,6 +288,19 @@ func TestVerifyPasswordNoCredential(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordVerifyFails(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	cookies := signUp(t, a1, "vpverifyfail@example.com")
+	a2 := newTestAuth(func(c *auth.Config) { c.Store = mem; c.Hasher = verifyErrorHasher{} })
+	resp, _ := doRequest(a2, http.MethodPost, "/verify-password", map[string]any{
+		"password": "password123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestChangePasswordNewPasswordTooShort(t *testing.T) {
 	a := newTestAuth()
 	cookies := signUp(t, a, "cpshort@example.com")
@@ -449,6 +475,19 @@ func TestDeleteUserWrongPassword(t *testing.T) {
 		"password": "wrongpassword",
 	}, cookies)
 	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserVerifyPasswordFails(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	cookies := signUp(t, a1, "delverifyfail@example.com")
+	a2 := newTestAuth(func(c *auth.Config) { c.Store = mem; c.Hasher = verifyErrorHasher{} })
+	resp, _ := doRequest(a2, http.MethodPost, "/delete-user", map[string]any{
+		"password": "password123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }

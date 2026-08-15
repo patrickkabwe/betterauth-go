@@ -162,3 +162,13 @@ func (errorHasher) Hash(_ string) (string, error) { return "", berrors.ErrHashFa
 func (errorHasher) Verify(hash, password string) (bool, error) {
 	return crypto.ScryptHasher{}.Verify(hash, password)
 }
+
+type verifyErrorHasher struct{}
+
+func (verifyErrorHasher) Hash(password string) (string, error) {
+	return crypto.ScryptHasher{}.Hash(password)
+}
+
+func (verifyErrorHasher) Verify(_ string, _ string) (bool, error) {
+	return false, berrors.ErrInjected
+}

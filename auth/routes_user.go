@@ -89,7 +89,11 @@ func handleChangePassword(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeCredentialAccountNotFound))
 		return
 	}
-	valid, _ := c.Auth.cfg.hasher.Verify(account.Password, body.CurrentPassword)
+	valid, err := c.Auth.cfg.hasher.Verify(account.Password, body.CurrentPassword)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	if !valid {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidPassword))
 		return
@@ -302,7 +306,11 @@ func handleDeleteUser(c *Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeCredentialAccountNotFound))
 			return
 		}
-		valid, _ := c.Auth.cfg.hasher.Verify(account.Password, body.Password)
+		valid, err := c.Auth.cfg.hasher.Verify(account.Password, body.Password)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		if !valid {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidPassword))
 			return
