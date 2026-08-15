@@ -3,10 +3,12 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"strings"
 	"time"
 
+	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/provider"
@@ -60,6 +62,39 @@ func (a *Auth) ValidatePasswords(password string) error {
 		}
 	}
 	return nil
+}
+
+// PasswordLengthLimits returns the resolved password length policy.
+func (a *Auth) PasswordLengthLimits() (int, int) {
+	return a.cfg.minPassword, a.cfg.maxPassword
+}
+
+// SetCredentialPassword creates or updates the user's credential account.
+func (a *Auth) SetCredentialPassword(ctx context.Context, userID string, password string) error {
+	_, err := a.cfg.store.FindAccountByUserAndProvider(ctx, userID, constants.ProviderCredential)
+	if err == nil {
+		return a.cfg.store.UpdateAccountPassword(ctx, userID, constants.ProviderCredential, password)
+	}
+	if !errors.Is(err, berrors.ErrNotFound) {
+		return err
+	}
+	now := time.Now()
+	accountID, err := id.Generate(32)
+	if err != nil {
+		return err
+	}
+	return a.cfg.store.CreateAccount(ctx, &types.Account{
+		ID: accountID, AccountID: userID, ProviderID: constants.ProviderCredential,
+		UserID: userID, Password: password, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+// RevokeSessionsOnPasswordReset removes user sessions when configured.
+func (a *Auth) RevokeSessionsOnPasswordReset(ctx context.Context, userID string) error {
+	if !a.cfg.emailPassword.revokeSessionsOnPasswordReset {
+		return nil
+	}
+	return a.cfg.store.DeleteAllSessionsByUserID(ctx, userID)
 }
 
 // CreateVerification stores a verification token.

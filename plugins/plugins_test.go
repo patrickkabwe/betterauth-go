@@ -291,6 +291,53 @@ func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) 
 	}
 }
 
+func TestPhoneNumberResetPasswordUpdatesCredentialPassword(t *testing.T) {
+	resetCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendPasswordResetOTP: func(_ context.Context, _ string, otp string) error {
+			resetCode = otp
+			return nil
+		},
+	}))
+	createPhoneCredentialUser(t, a, "phone-reset-user", "+1234567890", "password123")
+
+	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("request status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/phone-number/reset-password", `{"phoneNumber":"+1234567890","otp":"`+resetCode+`","newPassword":"updatedpassword123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reset status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status bool `json:"status"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Status {
+		t.Fatal("expected reset status")
+	}
+	account, err := a.Store().FindAccountByUserAndProvider(context.Background(), "phone-reset-user", constants.ProviderCredential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := a.VerifyPassword(account.Password, "updatedpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !valid {
+		t.Fatal("expected updated password to verify")
+	}
+	valid, err = a.VerifyPassword(account.Password, "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid {
+		t.Fatal("old password should not verify")
+	}
+}
+
 func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	createPhoneCredentialUser(t, a, "phone-signin-user", "+1234567890", "password123")

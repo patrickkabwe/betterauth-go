@@ -147,7 +147,57 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
 			}),
 			rt(http.MethodPost, "/phone-number/reset-password", func(c *auth.Context) {
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				var body struct {
+					PhoneNumber string `json:"phoneNumber"`
+					OTP         string `json:"otp"`
+					NewPassword string `json:"newPassword"`
+				}
+				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" || body.OTP == "" {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+					return
+				}
+				identifier := body.PhoneNumber + "-request-password-reset"
+				v, err := c.Auth.ConsumeVerification(c.R.Context(), identifier)
+				if err != nil || v.Value != body.OTP {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+					return
+				}
+				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
+				if err != nil {
+					if errors.Is(err, berrors.ErrNotFound) {
+						c.WriteError(apierror.New(http.StatusBadRequest, "UNEXPECTED_ERROR", "Unexpected error"))
+						return
+					}
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				minPassword, maxPassword := c.Auth.PasswordLengthLimits()
+				if len(body.NewPassword) < minPassword {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodePasswordTooShort))
+					return
+				}
+				if len(body.NewPassword) > maxPassword {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodePasswordTooLong))
+					return
+				}
+				if err := c.Auth.ValidatePasswords(body.NewPassword); err != nil {
+					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidPassword, err.Error()))
+					return
+				}
+				hashedPassword, err := c.Auth.HashPassword(body.NewPassword)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				if err := c.Auth.SetCredentialPassword(c.R.Context(), user.ID, hashedPassword); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				if err := c.Auth.RevokeSessionsOnPasswordReset(c.R.Context(), user.ID); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
 			}),
 		},
 	}
