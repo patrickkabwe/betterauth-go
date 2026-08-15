@@ -28,5 +28,5 @@ jobs:
 
       - name: Build and install CLI
         run: |
-          go build -o "$(go env GOPATH)/bin/betterauth" ./cli
-          betterauth --version
+          go build -o "$(go env GOPATH)/bin/betterauth-go" .
+          betterauth-go --version

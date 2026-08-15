@@ -67,7 +67,7 @@ func runMigrate(args []string, opts Options) error {
 			return nil
 		}
 		if database == "" {
-			return fmt.Errorf("the configured store does not support automatic migration; pass --database to migrate a SQL database, or run `betterauth generate` and apply the SQL yourself")
+			return fmt.Errorf("the configured store does not support automatic migration; pass --database to migrate a SQL database, or run `betterauth-go generate` and apply the SQL yourself")
 		}
 	}
 

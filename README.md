@@ -196,13 +196,13 @@ type Store interface {
 A Better Auth-compatible CLI ships as both an installable binary and an embeddable package, mirroring `npx @better-auth/cli`.
 
 ```bash
-go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@latest
+go install github.com/patrickkabwe/betterauth-go@latest
 
-betterauth secret                                   # generate BETTER_AUTH_SECRET
-betterauth generate --dialect postgres -o schema.sql # write the SQL schema
-betterauth migrate  --database "file:auth.db" --dialect sqlite
-betterauth init     --name "My App" --database sqlite
-betterauth info
+betterauth-go secret                                   # generate BETTER_AUTH_SECRET
+betterauth-go generate --dialect postgres -o schema.sql # write the SQL schema
+betterauth-go migrate  --database "file:auth.db" --dialect sqlite
+betterauth-go init     --name "My App" --database sqlite
+betterauth-go info
 ```
 
 | Command | Description | Flags |

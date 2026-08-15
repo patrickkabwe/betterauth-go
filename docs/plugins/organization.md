@@ -83,7 +83,7 @@ createAuthClient({
 Generates organization-related tables. Include team schema only when teams are enabled:
 
 ```bash
-betterauth generate --plugins organization,organization-teams,organization-roles --dialect postgres
+betterauth-go generate --plugins organization,organization-teams,organization-roles --dialect postgres
 ```
 
 ## Key endpoints

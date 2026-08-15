@@ -1,26 +1,28 @@
 # CLI
 
-The `betterauth` CLI mirrors [`@better-auth/cli`](https://better-auth.com/docs/concepts/cli):
+The `betterauth-go` CLI mirrors [`@better-auth/cli`](https://better-auth.com/docs/concepts/cli):
 generate schema, migrate, create secrets, scaffold projects, and print diagnostics.
 
 ## Install
 
 ```bash
-go build -o "$(go env GOPATH)/bin/betterauth" github.com/patrickkabwe/betterauth-go/cli@latest
+go install github.com/patrickkabwe/betterauth-go@latest
 ```
 
-Go names `go install` binaries after the last path segment (`cli`), so we use
-`go build -o` to install the tool as `betterauth`. One-off without installing:
+Or download a prebuilt `betterauth-go-*` binary from
+[GitHub Releases](https://github.com/patrickkabwe/betterauth-go/releases).
+
+One-off without installing:
 
 ```bash
-go run github.com/patrickkabwe/betterauth-go/cli@latest secret
+go run github.com/patrickkabwe/betterauth-go@latest secret
 ```
 
 ## Package layout
 
 | Path | Purpose |
 |------|---------|
-| `github.com/patrickkabwe/betterauth-go/cli` | Installable binary (`package main`) |
+| `github.com/patrickkabwe/betterauth-go` | Installable CLI binary (`package main` at module root) |
 | `github.com/patrickkabwe/betterauth-go/cli/core` | Embeddable library — `core.Run`, `core.Options` |
 
 Import `cli/core` when you embed the CLI in your own binary with a configured
@@ -39,7 +41,7 @@ Import `cli/core` when you embed the CLI in your own binary with a configured
 ### secret
 
 ```bash
-betterauth secret
+betterauth-go secret
 # BETTER_AUTH_SECRET=…
 ```
 
@@ -48,9 +50,9 @@ betterauth secret
 Write feature-scoped SQL (core tables + enabled plugins only):
 
 ```bash
-betterauth generate --dialect postgres -o schema.sql
-betterauth generate --plugins organization,two-factor --dialect sqlite
-betterauth generate --all --yes
+betterauth-go generate --dialect postgres -o schema.sql
+betterauth-go generate --plugins organization,two-factor --dialect sqlite
+betterauth-go generate --all --yes
 ```
 
 | Flag | Description |
@@ -64,8 +66,8 @@ betterauth generate --all --yes
 ### migrate
 
 ```bash
-betterauth migrate --database "file:auth.db" --dialect sqlite
-betterauth migrate --database "$DATABASE_URL" --dialect postgres --plugins organization
+betterauth-go migrate --database "file:auth.db" --dialect sqlite
+betterauth-go migrate --database "$DATABASE_URL" --dialect postgres --plugins organization
 ```
 
 The bundled binary embeds a SQLite driver. For Postgres/MySQL, pass your
@@ -74,7 +76,7 @@ configured `*auth.Auth` via an embedded CLI (below).
 ### init
 
 ```bash
-betterauth init --name "My App" --database sqlite --yes
+betterauth-go init --name "My App" --database sqlite --yes
 ```
 
 Creates a starter project with `.env` and a minimal `betterauth.go`.
@@ -82,8 +84,8 @@ Creates a starter project with `.env` and a minimal `betterauth.go`.
 ### info
 
 ```bash
-betterauth info
-betterauth info --json
+betterauth-go info
+betterauth-go info --json
 ```
 
 ## Feature-scoped schema
@@ -122,8 +124,8 @@ Build and run (from a directory with your `main.go` above):
 
 ```bash
 go build -o myauth-cli .
-./myauth-betterauth migrate
-./myauth-betterauth info
+./myauth-cli migrate
+./myauth-cli info
 ```
 
 For Postgres/MySQL, import the driver in your `main.go` (e.g. `_ "github.com/lib/pq"`)

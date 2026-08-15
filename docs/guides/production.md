@@ -17,7 +17,7 @@ Go-specific considerations.
 Generate a secret:
 
 ```bash
-betterauth secret
+betterauth-go secret
 ```
 
 Never commit secrets to source control.

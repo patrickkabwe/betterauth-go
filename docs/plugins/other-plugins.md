@@ -46,7 +46,7 @@ Plugins: []auth.Plugin{
 Include plugin tables in migrations:
 
 ```bash
-betterauth generate --plugins jwt,siwe,device-authorization --dialect sqlite
+betterauth-go generate --plugins jwt,siwe,device-authorization --dialect sqlite
 ```
 
 ## Client pairing

@@ -51,7 +51,7 @@ Plugins: []auth.Plugin{
 Generate schema for your plugin set:
 
 ```bash
-betterauth generate --plugins organization,two-factor --dialect postgres
+betterauth-go generate --plugins organization,two-factor --dialect postgres
 ```
 
 ### 4. Point clients at Go
