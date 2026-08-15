@@ -96,11 +96,9 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("code_challenge", oauth2pkg.CodeChallengeS256(opts.CodeVerifier))
 	params.Set("code_challenge_method", "S256")
 	params.Set("include_granted_scopes", "true")
-	accessType := p.cfg.AccessType
-	if accessType == "" {
-		accessType = "offline"
+	if p.cfg.AccessType != "" {
+		params.Set("access_type", p.cfg.AccessType)
 	}
-	params.Set("access_type", accessType)
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
 	}

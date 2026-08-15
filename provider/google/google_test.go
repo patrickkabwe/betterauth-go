@@ -74,6 +74,34 @@ func TestGoogleAuthURLIncludesDisplay(t *testing.T) {
 	}
 }
 
+func TestGoogleAuthURLOmitsAccessTypeByDefault(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := googleAuthURLQuery(t, authURL)
+	if _, ok := query["access_type"]; ok {
+		t.Fatalf("query=%s", query.Encode())
+	}
+}
+
+func TestGoogleAuthURLIncludesConfiguredAccessType(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", AccessType: "offline"})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := googleAuthURLQuery(t, authURL)
+	if query.Get("access_type") != "offline" {
+		t.Fatalf("access_type=%q", query.Get("access_type"))
+	}
+}
+
 func TestGoogleAuthURLDisplayOptionOverridesConfig(t *testing.T) {
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", Display: "popup"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
