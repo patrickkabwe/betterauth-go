@@ -35,7 +35,7 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 		},
 	}))
 
-	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"/dashboard","disableRedirect":true}`)
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"/dashboard","disableRedirect":true,"scopes":["calendar"]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
@@ -57,7 +57,7 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 		t.Fatalf("url=%s", body.URL)
 	}
 	query := parsed.Query()
-	if query.Get("client_id") != "client" || query.Get("response_type") != "code" || query.Get("scope") != "openid email" {
+	if query.Get("client_id") != "client" || query.Get("response_type") != "code" || query.Get("scope") != "calendar openid email" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 	if query.Get("prompt") != "select_account" || query.Get("tenant") != "workspace" || query.Get("audience") != "api" {

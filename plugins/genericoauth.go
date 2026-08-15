@@ -45,9 +45,10 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/sign-in/oauth2", func(c *auth.Context) {
 				var body struct {
-					ProviderID      string `json:"providerId"`
-					CallbackURL     string `json:"callbackURL"`
-					DisableRedirect bool   `json:"disableRedirect"`
+					ProviderID      string   `json:"providerId"`
+					CallbackURL     string   `json:"callbackURL"`
+					DisableRedirect bool     `json:"disableRedirect"`
+					Scopes          []string `json:"scopes"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
@@ -60,7 +61,7 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				}
 				state, _ := id.Generate(32)
 				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
-				q := genericOAuthAuthorizationValues(c, p, state)
+				q := genericOAuthAuthorizationValues(c, p, state, body.Scopes)
 				redirectURL := provider.BuildAuthURL(p.AuthorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
 			}),
@@ -106,16 +107,17 @@ func parseGenericOAuthStateValue(value string) (string, string, bool) {
 	return providerID, callbackURL, true
 }
 
-func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string) url.Values {
+func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, requestScopes []string) url.Values {
 	responseType := p.ResponseType
 	if responseType == "" {
 		responseType = "code"
 	}
+	scopes := genericOAuthScopes(requestScopes, p.Scopes)
 	q := url.Values{
 		"client_id":     {p.ClientID},
 		"response_type": {responseType},
 		"redirect_uri":  {c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID},
-		"scope":         {joinScopes(p.Scopes)},
+		"scope":         {joinScopes(scopes)},
 		"state":         {state},
 	}
 	if p.Prompt != "" {
@@ -131,6 +133,16 @@ func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConf
 		q.Set(key, value)
 	}
 	return q
+}
+
+func genericOAuthScopes(requestScopes []string, configuredScopes []string) []string {
+	if len(requestScopes) == 0 {
+		return configuredScopes
+	}
+	scopes := make([]string, 0, len(requestScopes)+len(configuredScopes))
+	scopes = append(scopes, requestScopes...)
+	scopes = append(scopes, configuredScopes...)
+	return scopes
 }
 
 func joinScopes(scopes []string) string {
