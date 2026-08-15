@@ -100,6 +100,58 @@ func TestLinkSocialWithIDToken(t *testing.T) {
 	}
 }
 
+func TestSignInSocialIDTokenPreservesStoredAccountTokens(t *testing.T) {
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{
+			"google": &testSocialProvider{
+				id:          "google",
+				verifyToken: func(_ context.Context, _, _ string) (bool, error) { return true, nil },
+			},
+		}
+	})
+	cookies := signUp(t, a, "linker@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":        "old-id-token",
+			"accessToken":  "old-at",
+			"refreshToken": "old-rt",
+			"scopes":       []string{"profile", "email"},
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+	userID := mustUserID(t, a, cookies)
+	accountID := linkedAccountID(t, a, cookies, "google")
+
+	resp, data = doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":       "new-id-token",
+			"accessToken": "new-at",
+		},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign-in status=%d %s", resp.StatusCode, data)
+	}
+
+	accounts, err := a.Store().ListAccountsByUserID(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("list accounts: %v", err)
+	}
+	for _, account := range accounts {
+		if account.ProviderID != "google" || account.AccountID != accountID {
+			continue
+		}
+		if account.AccessToken != "new-at" || account.RefreshToken != "old-rt" || account.IDToken != "old-id-token" || account.Scope != "profile,email" {
+			t.Fatalf("account=%+v", account)
+		}
+		return
+	}
+	t.Fatalf("linked account not found")
+}
+
 func TestLinkSocialDoesNotUpdateUserInfoByDefault(t *testing.T) {
 	a := testAuthWithGoogle(t, func(c *auth.Config) {
 		c.SocialProviders = map[string]provider.SocialProvider{

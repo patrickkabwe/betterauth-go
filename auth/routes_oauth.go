@@ -104,7 +104,12 @@ func handleSocialIDTokenSignIn(c *Context, p provider.SocialProvider, body signI
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeFailedToGetUserInfo))
 		return
 	}
-	result, err := c.Auth.handleOAuthUserInfo(c, info.User, oauthAccountFromTokens(p.ID(), info.User.ID, &tokens), false)
+	account := oauthAccountInput{
+		ProviderID:  p.ID(),
+		AccountID:   info.User.ID,
+		AccessToken: tokens.AccessToken,
+	}
+	result, err := c.Auth.handleOAuthUserInfo(c, info.User, account, false)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return

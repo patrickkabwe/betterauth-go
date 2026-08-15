@@ -142,9 +142,27 @@ func (a *Auth) saveOAuthAccount(c *Context, userID string, account oauthAccountI
 
 func (a *Auth) updateOAuthAccountTokens(c *Context, accountID string, account oauthAccountInput) error {
 	update := store.AccountUpdate{
-		AccessToken: &account.AccessToken, RefreshToken: &account.RefreshToken,
 		AccessTokenExpiresAt: account.AccessTokenExpiresAt, RefreshTokenExpiresAt: account.RefreshTokenExpiresAt,
-		IDToken: &account.IDToken, Scope: &account.Scope,
+	}
+	hasUpdate := account.AccessTokenExpiresAt != nil || account.RefreshTokenExpiresAt != nil
+	if account.AccessToken != "" {
+		update.AccessToken = &account.AccessToken
+		hasUpdate = true
+	}
+	if account.RefreshToken != "" {
+		update.RefreshToken = &account.RefreshToken
+		hasUpdate = true
+	}
+	if account.IDToken != "" {
+		update.IDToken = &account.IDToken
+		hasUpdate = true
+	}
+	if account.Scope != "" {
+		update.Scope = &account.Scope
+		hasUpdate = true
+	}
+	if !hasUpdate {
+		return nil
 	}
 	_, err := a.cfg.store.UpdateAccount(c.R.Context(), accountID, update)
 	return err
