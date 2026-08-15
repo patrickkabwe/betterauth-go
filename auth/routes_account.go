@@ -300,18 +300,7 @@ func handleAccountInfo(c *Context) {
 	}
 
 	var account *types.Account
-	if accountID == "" {
-		accounts, err := c.Auth.cfg.store.ListAccountsByUserID(c.R.Context(), userID)
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-			return
-		}
-		if len(accounts) == 1 {
-			account = &accounts[0]
-		} else if providerID != "" {
-			account = findUserAccount(accounts, providerID, "")
-		}
-	} else {
+	if accountID != "" {
 		accounts, err := c.Auth.cfg.store.ListAccountsByUserID(c.R.Context(), userID)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))

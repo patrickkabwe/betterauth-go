@@ -279,7 +279,8 @@ func TestAccountInfo(t *testing.T) {
 		t.Fatalf("link status=%d %s", resp.StatusCode, data)
 	}
 
-	resp, data = doRequest(a, http.MethodGet, "/account-info?providerId=google", nil, cookies)
+	accountID := linkedAccountID(t, a, cookies, "google")
+	resp, data = doRequest(a, http.MethodGet, "/account-info?providerId=google&accountId="+accountID, nil, cookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d %s", resp.StatusCode, data)
 	}
@@ -287,6 +288,20 @@ func TestAccountInfo(t *testing.T) {
 	_ = json.Unmarshal(data, &result)
 	if result.User.ID != "gh-123" || result.Data["login"] != "linker" {
 		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestAccountInfoRequiresAccountID(t *testing.T) {
+	a := testAuthWithGoogle(t)
+	cookies := signUp(t, a, "linker@example.com")
+	resp, data := linkGoogleAccount(t, a, cookies, "at-info", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+
+	resp, _ = doRequest(a, http.MethodGet, "/account-info?providerId=google", nil, cookies)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }
 
@@ -339,6 +354,25 @@ func linkGoogleAccount(t testingT, a *auth.Auth, cookies []*http.Cookie, accessT
 		idToken["refreshToken"] = refreshToken
 	}
 	return doRequest(a, http.MethodPost, "/link-social", body, cookies)
+}
+
+func linkedAccountID(t testingT, a *auth.Auth, cookies []*http.Cookie, providerID string) string {
+	t.Helper()
+	resp, data := doRequest(a, http.MethodGet, "/list-accounts", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status=%d %s", resp.StatusCode, data)
+	}
+	var accounts []types.AccountResponse
+	if err := json.Unmarshal(data, &accounts); err != nil {
+		t.Fatalf("decode accounts: %v", err)
+	}
+	for _, account := range accounts {
+		if account.ProviderID == providerID {
+			return account.AccountID
+		}
+	}
+	t.Fatalf("provider account not found: %s", providerID)
+	return ""
 }
 
 func mustUserID(t *testing.T, a *auth.Auth, cookies []*http.Cookie) string {
