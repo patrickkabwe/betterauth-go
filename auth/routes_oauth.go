@@ -248,26 +248,25 @@ func handleOAuthLinkCallback(c *Context, stateData *oauthStatePayload, userInfo 
 	}
 
 	existing, err := c.Auth.cfg.store.FindAccountByProviderAndAccountID(c.R.Context(), account.ProviderID, account.AccountID)
-	if err == nil && existing.UserID != stateData.Link.UserID {
-		redirectOAuthError(c, errorURL, "account_already_linked_to_different_user")
+	if err == nil {
+		if existing.UserID != stateData.Link.UserID {
+			redirectOAuthError(c, errorURL, "account_already_linked_to_different_user")
+			return
+		}
+		if err := c.Auth.updateOAuthAccountTokens(c, existing.ID, account); err != nil {
+			redirectOAuthError(c, errorURL, "unable_to_link_account")
+			return
+		}
+		c.Auth.applyUserInfoOnLink(c, stateData.Link.UserID, userInfo)
+		c.Redirect(stateData.CallbackURL)
 		return
 	}
-	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+	if !errors.Is(err, berrors.ErrNotFound) {
 		redirectOAuthError(c, errorURL, "unable_to_link_account")
 		return
 	}
 
-	accounts, _ := c.Auth.cfg.store.ListAccountsByUserID(c.R.Context(), stateData.Link.UserID)
-	var linked *types.Account
-	for i := range accounts {
-		if accounts[i].ProviderID == account.ProviderID && accounts[i].AccountID == account.AccountID {
-			linked = &accounts[i]
-			break
-		}
-	}
-	if linked != nil {
-		_ = c.Auth.updateOAuthAccountTokens(c, linked.ID, account)
-	} else if err := c.Auth.saveOAuthAccount(c, stateData.Link.UserID, account); err != nil {
+	if err := c.Auth.saveOAuthAccount(c, stateData.Link.UserID, account); err != nil {
 		redirectOAuthError(c, errorURL, "unable_to_link_account")
 		return
 	}

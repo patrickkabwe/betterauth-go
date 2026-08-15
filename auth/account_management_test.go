@@ -453,6 +453,63 @@ func TestLinkSocialOAuthCallbackAccountLookupFails(t *testing.T) {
 	}
 }
 
+func TestLinkSocialOAuthCallbackLinkedAccountUpdateFails(t *testing.T) {
+	fs := wrapStore("").(*failStore)
+	p := &staticOAuthProvider{
+		id:      "google",
+		authURL: "https://accounts.google.com/o/oauth2/auth",
+		user:    provider.OAuthUser{ID: "google-update-fail", Email: "link-update-fail@example.com", EmailVerified: true, Name: "Update Fail"},
+		tokens:  provider.OAuthTokens{AccessToken: "new-access-token"},
+	}
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.Store = fs
+		c.SocialProviders = map[string]provider.SocialProvider{"google": p}
+	})
+	cookies := signUp(t, a, "link-update-fail@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":       "old-id-token",
+			"accessToken": "old-access-token",
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider":         "google",
+		"callbackURL":      "http://localhost:3000/done",
+		"errorCallbackURL": "http://localhost:3000/oauth-error",
+		"disableRedirect":  true,
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var result types.LinkSocialResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+	fs.failOn = "UpdateAccount"
+
+	resp, _ = doRequest(a, http.MethodGet, "/callback/google?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=unable_to_link_account") {
+		t.Fatalf("redirect=%s", location)
+	}
+}
+
 func TestGetAccessToken(t *testing.T) {
 	a := testAuthWithGoogle(t)
 	cookies := signUp(t, a, "linker@example.com")
