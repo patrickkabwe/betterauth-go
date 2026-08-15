@@ -273,6 +273,28 @@ func TestResetPasswordTooLong(t *testing.T) {
 	}
 }
 
+func TestResetPasswordRevokeSessionsFails(t *testing.T) {
+	var resetData types.ResetPasswordEmailData
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("DeleteAllSessionsByUserID")
+		c.EmailAndPassword.RevokeSessionsOnPasswordReset = true
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, data types.ResetPasswordEmailData) error {
+			resetData = data
+			return nil
+		}
+	})
+	signUp(t, a, "rprevoke@example.com")
+	_, _ = doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "rprevoke@example.com",
+	}, nil)
+	resp, _ := doRequest(a, http.MethodPost, "/reset-password", map[string]any{
+		"token": resetData.Token, "newPassword": "newpassword1",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestDeleteUserWrongPassword(t *testing.T) {
 	a := newTestAuth()
 	cookies := signUp(t, a, "delwrong@example.com")

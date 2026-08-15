@@ -148,7 +148,10 @@ func handleResetPassword(c *Context) {
 	}
 
 	if c.Auth.cfg.emailPassword.revokeSessionsOnPasswordReset {
-		_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), v.Value)
+		if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), v.Value); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
