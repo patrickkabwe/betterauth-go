@@ -116,7 +116,7 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 		var body string
 		switch req.URL.Path {
 		case "/user":
-			body = `{"id":42,"login":"octo","name":"Octo","email":"public@example.com","avatar_url":"https://img.example.com/octo.png"}`
+			body = `{"id":42,"login":"octo","node_id":"node-42","html_url":"https://github.com/octo","name":"Octo","email":"public@example.com","avatar_url":"https://img.example.com/octo.png"}`
 		case "/user/emails":
 			body = `[
 				{"email":"primary@example.com","primary":true,"verified":true},
@@ -145,6 +145,9 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 		t.Fatalf("user=%+v", info.User)
 	}
 	if info.Data["login"] != "octo" || info.Data["email"] != "public@example.com" {
+		t.Fatalf("data=%+v", info.Data)
+	}
+	if info.Data["node_id"] != "node-42" || info.Data["html_url"] != "https://github.com/octo" {
 		t.Fatalf("data=%+v", info.Data)
 	}
 	if _, ok := info.Data["profile"]; ok {

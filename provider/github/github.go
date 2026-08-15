@@ -133,6 +133,7 @@ type githubProfile struct {
 	Name      string `json:"name"`
 	Email     string `json:"email"`
 	AvatarURL string `json:"avatar_url"`
+	Data      map[string]any
 }
 
 type githubEmail struct {
@@ -176,13 +177,12 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 }
 
 func githubProfileData(profile *githubProfile, email string) map[string]any {
-	return map[string]any{
-		"id":         profile.ID,
-		"login":      profile.Login,
-		"name":       profile.Name,
-		"email":      email,
-		"avatar_url": profile.AvatarURL,
+	data := make(map[string]any, len(profile.Data)+1)
+	for key, value := range profile.Data {
+		data[key] = value
 	}
+	data["email"] = email
+	return data
 }
 
 func githubSelectedEmail(profileEmail string, emails []githubEmail) string {
@@ -231,6 +231,9 @@ func (p *Provider) fetchProfile(ctx context.Context, accessToken string) (*githu
 	}
 	var profile githubProfile
 	if err := json.Unmarshal(body, &profile); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, &profile.Data); err != nil {
 		return nil, err
 	}
 	return &profile, nil
