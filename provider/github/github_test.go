@@ -142,6 +142,12 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 	if info.User.Email != "public@example.com" || info.User.EmailVerified {
 		t.Fatalf("user=%+v", info.User)
 	}
+	if info.Data["login"] != "octo" || info.Data["email"] != "public@example.com" {
+		t.Fatalf("data=%+v", info.Data)
+	}
+	if _, ok := info.Data["profile"]; ok {
+		t.Fatalf("unexpected wrapped profile data: %+v", info.Data)
+	}
 }
 
 func TestGitHubSignUpPolicy(t *testing.T) {

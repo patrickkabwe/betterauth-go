@@ -162,7 +162,6 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 	if profile.AvatarURL != "" {
 		image = &profile.AvatarURL
 	}
-	raw := map[string]any{"profile": profile, "emails": emails}
 	return &provider.UserInfo{
 		User: provider.OAuthUser{
 			ID:            fmt.Sprintf("%d", profile.ID),
@@ -171,8 +170,18 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 			Image:         image,
 			EmailVerified: verified,
 		},
-		Data: raw,
+		Data: githubProfileData(profile, email),
 	}, nil
+}
+
+func githubProfileData(profile *githubProfile, email string) map[string]any {
+	return map[string]any{
+		"id":         profile.ID,
+		"login":      profile.Login,
+		"name":       profile.Name,
+		"email":      email,
+		"avatar_url": profile.AvatarURL,
+	}
 }
 
 func githubSelectedEmail(profileEmail string, emails []githubEmail) string {
