@@ -272,7 +272,7 @@ func TestVerifyEmailEndpoint(t *testing.T) {
 	}
 	var result types.VerifyEmailResponse
 	_ = json.Unmarshal(data, &result)
-	if !result.User.EmailVerified {
+	if result.User == nil || !result.User.EmailVerified {
 		t.Fatal("email should be verified")
 	}
 }

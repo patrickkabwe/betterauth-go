@@ -110,6 +110,14 @@ func handleVerifyEmail(c *Context) {
 		redirectVerifyError(c, callbackURL, apierror.CodeUserNotFound)
 		return
 	}
+	if user.EmailVerified {
+		if callbackURL != "" {
+			c.Redirect(callbackURL)
+			return
+		}
+		c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: nil})
+		return
+	}
 
 	verified := true
 	updated, err := c.Auth.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
@@ -123,7 +131,8 @@ func handleVerifyEmail(c *Context) {
 		return
 	}
 
-	c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: toUserResponse(updated)})
+	responseUser := toUserResponse(updated)
+	c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: &responseUser})
 }
 
 func verifyErrorCode(err error) string {

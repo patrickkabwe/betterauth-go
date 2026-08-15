@@ -101,7 +101,7 @@ func TestChangeEmailVerificationFlow(t *testing.T) {
 	}
 	var result types.VerifyEmailResponse
 	_ = json.Unmarshal(data, &result)
-	if result.User.Email != "verified-new@example.com" || !result.User.EmailVerified {
+	if result.User == nil || result.User.Email != "verified-new@example.com" || !result.User.EmailVerified {
 		t.Fatalf("user=%+v", result.User)
 	}
 }
@@ -140,7 +140,7 @@ func TestChangeEmailConfirmationFlow(t *testing.T) {
 	}
 	var result types.VerifyEmailResponse
 	_ = json.Unmarshal(data, &result)
-	if result.User.Email != "confirmed-new@example.com" || !result.User.EmailVerified {
+	if result.User == nil || result.User.Email != "confirmed-new@example.com" || !result.User.EmailVerified {
 		t.Fatalf("user=%+v", result.User)
 	}
 }

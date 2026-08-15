@@ -109,8 +109,8 @@ type OKResponse struct {
 
 // VerifyEmailResponse is returned by verify-email.
 type VerifyEmailResponse struct {
-	Status bool `json:"status"`
-	User   User `json:"user"`
+	Status bool  `json:"status"`
+	User   *User `json:"user"`
 }
 
 // UpdateUserResponse is returned by update-user.

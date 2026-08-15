@@ -88,7 +88,8 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 			c.Redirect(callbackURL)
 			return true
 		}
-		c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: toUserResponse(updated)})
+		responseUser := toUserResponse(updated)
+		c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: &responseUser})
 		return true
 
 	default:
@@ -119,7 +120,8 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 			c.Redirect(callbackURL)
 			return true
 		}
-		c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: toUserResponse(updated)})
+		responseUser := toUserResponse(updated)
+		c.WriteJSON(http.StatusOK, types.VerifyEmailResponse{Status: true, User: &responseUser})
 		return true
 	}
 }
