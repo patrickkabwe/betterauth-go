@@ -8,48 +8,49 @@ import (
 )
 
 type route struct {
-	method  string
-	pattern string
-	handler func(*Context)
+	method     string
+	pattern    string
+	handler    func(*Context)
+	serverOnly bool
 }
 
 // route table; patterns may include {param} segments.
 var routeTable = []route{
-	{http.MethodGet, "/ok", handleOK},
-	{http.MethodGet, "/client-schema", handleClientSchema},
-	{http.MethodGet, "/get-session", handleGetSession},
-	{http.MethodPost, "/get-session", handleGetSession},
-	{http.MethodGet, "/list-sessions", handleListSessions},
-	{http.MethodGet, "/list-accounts", handleListAccounts},
-	{http.MethodGet, "/account-info", handleAccountInfo},
-	{http.MethodGet, "/verify-email", handleVerifyEmail},
-	{http.MethodGet, "/error", handleErrorPage},
-	{http.MethodGet, "/reset-password/{token}", handleResetPasswordCallback},
-	{http.MethodGet, "/delete-user/callback", handleDeleteUserCallback},
-	{http.MethodGet, "/callback/{provider}", handleOAuthCallback},
-	{http.MethodPost, "/callback/{provider}", handleOAuthCallback},
+	{http.MethodGet, "/ok", handleOK, false},
+	{http.MethodGet, "/client-schema", handleClientSchema, false},
+	{http.MethodGet, "/get-session", handleGetSession, false},
+	{http.MethodPost, "/get-session", handleGetSession, false},
+	{http.MethodGet, "/list-sessions", handleListSessions, false},
+	{http.MethodGet, "/list-accounts", handleListAccounts, false},
+	{http.MethodGet, "/account-info", handleAccountInfo, false},
+	{http.MethodGet, "/verify-email", handleVerifyEmail, false},
+	{http.MethodGet, "/error", handleErrorPage, false},
+	{http.MethodGet, "/reset-password/{token}", handleResetPasswordCallback, false},
+	{http.MethodGet, "/delete-user/callback", handleDeleteUserCallback, false},
+	{http.MethodGet, "/callback/{provider}", handleOAuthCallback, false},
+	{http.MethodPost, "/callback/{provider}", handleOAuthCallback, false},
 
-	{http.MethodPost, "/sign-up/email", handleSignUpEmail},
-	{http.MethodPost, "/sign-in/social", handleSignInSocial},
-	{http.MethodPost, "/sign-in/email", handleSignInEmail},
-	{http.MethodPost, "/sign-out", handleSignOut},
-	{http.MethodPost, "/send-verification-email", handleSendVerificationEmail},
-	{http.MethodPost, "/request-password-reset", handleRequestPasswordReset},
-	{http.MethodPost, "/reset-password", handleResetPassword},
-	{http.MethodPost, "/verify-password", handleVerifyPassword},
-	{http.MethodPost, "/update-user", handleUpdateUser},
-	{http.MethodPost, "/change-password", handleChangePassword},
-	{http.MethodPost, "/change-email", handleChangeEmail},
-	{http.MethodPost, "/set-password", handleSetPassword},
-	{http.MethodPost, "/delete-user", handleDeleteUser},
-	{http.MethodPost, "/update-session", handleUpdateSession},
-	{http.MethodPost, "/revoke-session", handleRevokeSession},
-	{http.MethodPost, "/revoke-sessions", handleRevokeSessions},
-	{http.MethodPost, "/revoke-other-sessions", handleRevokeOtherSessions},
-	{http.MethodPost, "/link-social", handleLinkSocial},
-	{http.MethodPost, "/unlink-account", handleUnlinkAccount},
-	{http.MethodPost, "/get-access-token", handleGetAccessToken},
-	{http.MethodPost, "/refresh-token", handleRefreshToken},
+	{http.MethodPost, "/sign-up/email", handleSignUpEmail, false},
+	{http.MethodPost, "/sign-in/social", handleSignInSocial, false},
+	{http.MethodPost, "/sign-in/email", handleSignInEmail, false},
+	{http.MethodPost, "/sign-out", handleSignOut, false},
+	{http.MethodPost, "/send-verification-email", handleSendVerificationEmail, false},
+	{http.MethodPost, "/request-password-reset", handleRequestPasswordReset, false},
+	{http.MethodPost, "/reset-password", handleResetPassword, false},
+	{http.MethodPost, "/verify-password", handleVerifyPassword, false},
+	{http.MethodPost, "/update-user", handleUpdateUser, false},
+	{http.MethodPost, "/change-password", handleChangePassword, false},
+	{http.MethodPost, "/change-email", handleChangeEmail, false},
+	{http.MethodPost, "/set-password", handleSetPassword, false},
+	{http.MethodPost, "/delete-user", handleDeleteUser, false},
+	{http.MethodPost, "/update-session", handleUpdateSession, false},
+	{http.MethodPost, "/revoke-session", handleRevokeSession, false},
+	{http.MethodPost, "/revoke-sessions", handleRevokeSessions, false},
+	{http.MethodPost, "/revoke-other-sessions", handleRevokeOtherSessions, false},
+	{http.MethodPost, "/link-social", handleLinkSocial, false},
+	{http.MethodPost, "/unlink-account", handleUnlinkAccount, false},
+	{http.MethodPost, "/get-access-token", handleGetAccessToken, false},
+	{http.MethodPost, "/refresh-token", handleRefreshToken, false},
 }
 
 func (a *Auth) handler() http.Handler {

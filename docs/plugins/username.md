@@ -10,7 +10,10 @@ Plugins: []auth.Plugin{
 },
 ```
 
-Stores `username` and `displayUsername` in user `additional` JSON.
+Stores `username` and `displayUsername` on the user table when the username
+plugin schema is generated, and exposes them through user `Additional`.
+When the plugin is enabled, `/sign-up/email` and `/update-user` accept these
+fields and apply the same normalization before persisting them.
 
 ## Client
 

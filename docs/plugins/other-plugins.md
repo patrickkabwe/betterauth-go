@@ -17,7 +17,7 @@ Brief reference for plugins without dedicated guides. All are enabled via
 | One Tap | `one-tap` | Google One Tap sign-in |
 | OpenAPI | `open-api` | Auto-generated OpenAPI spec at `/reference` |
 | Device authorization | `device-authorization` | OAuth 2.0 device code flow |
-| Phone number | `phone-number` | SMS OTP sign-in |
+| Phone number | `phone-number` | Phone password sign-in, SMS OTP verification, phone password reset, `phoneNumberValidator`, `callbackOnVerification`, and `signUpOnVerification` |
 | SIWE | `siwe` | Sign-In with Ethereum |
 | One-time token | `one-time-token` | Single-use cross-domain tokens |
 | MCP | `mcp` | Model Context Protocol OAuth |

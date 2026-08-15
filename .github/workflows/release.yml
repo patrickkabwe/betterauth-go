@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -86,6 +88,12 @@ jobs:
         run: |
           PREV_TAG="$(git tag -l 'v*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
 
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+          else
+            RANGE="${TAG}"
+          fi
+
           {
             echo "## Better Auth for Go ${VERSION}"
             echo
@@ -96,11 +104,21 @@ jobs:
             fi
             echo
             if [ -n "$PREV_TAG" ]; then
-              git log "${PREV_TAG}..${TAG}" --pretty=format:'- %s (%h)' --merges
+              LOG_ARGS=( "${RANGE}" )
             else
-              git log "${TAG}" --pretty=format:'- %s (%h)' --merges
+              LOG_ARGS=( "${RANGE}" --merges --reverse )
             fi
-            echo
+            CHANGE_COUNT="$(git rev-list --count "${LOG_ARGS[@]}" 2>/dev/null || echo 0)"
+            if [ "${CHANGE_COUNT}" -gt 0 ]; then
+              echo "### What's new"
+              echo
+              git log "${LOG_ARGS[@]}" --pretty=format:'- %s (%h)'
+              echo
+              echo
+            else
+              echo "_No changes in this release._"
+              echo
+            fi
             echo "## Install"
             echo
             echo "**Go module** (library + CLI):"

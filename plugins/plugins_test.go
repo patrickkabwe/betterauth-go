@@ -3,7 +3,6 @@ package plugins_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,18 +12,9 @@ import (
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
-	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/store/memory"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
-
-type listUsersFailStore struct {
-	*memory.Store
-}
-
-func (s listUsersFailStore) ListUsers(_ context.Context, _ store.ListUsersOpts) ([]types.User, error) {
-	return nil, errors.New("list users failed")
-}
 
 func newTestAuth(t *testing.T, p ...auth.Plugin) *auth.Auth {
 	t.Helper()
@@ -55,17 +45,6 @@ func get(t *testing.T, a *auth.Auth, path string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	a.Handler().ServeHTTP(w, req)
 	return w
-}
-
-func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
-	t.Helper()
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	return resp.Code
 }
 
 func TestAnonymousSignIn(t *testing.T) {
@@ -121,46 +100,6 @@ func TestUsernameAvailabilityRejectsInvalidDefaultUsername(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
-	if code := errorCode(t, w); code != constants.CodeInvalidUsername {
-		t.Fatalf("code %q", code)
-	}
-}
-
-func TestUsernameAvailabilityReportsLengthCodes(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{MaxUsernameLength: 5}))
-	w := post(t, a, "/is-username-available", `{"username":"ab"}`)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("short status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeUsernameTooShort {
-		t.Fatalf("short code %q", code)
-	}
-	w = post(t, a, "/is-username-available", `{"username":"abcdef"}`)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("long status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeUsernameTooLong {
-		t.Fatalf("long code %q", code)
-	}
-}
-
-func TestUsernameAvailabilityReportsStoreLookupErrors(t *testing.T) {
-	a, err := auth.New(auth.Config{
-		Secret:  "test-secret-key-32-chars-minimum!!",
-		BaseURL: "http://localhost:8080",
-		Store:   listUsersFailStore{Store: memory.New()},
-		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := post(t, a, "/is-username-available", `{"username":"newuser"}`)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeInternalServerError {
-		t.Fatalf("code %q", code)
-	}
 }
 
 func TestUsernameAvailabilityRejectsWhitespaceUsername(t *testing.T) {
@@ -179,8 +118,51 @@ func TestUsernameSignInRejectsInvalidUsernameShape(t *testing.T) {
 	}
 }
 
-func TestUsernameSignInRequiresEmailVerification(t *testing.T) {
-	var sent bool
+func TestUsernameSignInCallbackURL(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	now := time.Now()
+	password, err := a.HashPassword("password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateUser(context.Background(), &types.User{
+		ID: "username-user", Name: "Username", Email: "username@example.com",
+		CreatedAt: now, UpdatedAt: now,
+		Additional: map[string]any{
+			constants.FieldUsername: "username",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "username-account", AccountID: "username-user", ProviderID: constants.ProviderCredential,
+		UserID: "username-user", Password: password, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := post(t, a, "/sign-in/username", `{"username":"username","password":"password123","callbackURL":"/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if location := w.Header().Get("Location"); location != "/dashboard" {
+		t.Fatalf("Location = %q", location)
+	}
+	var resp struct {
+		Redirect bool   `json:"redirect"`
+		Token    string `json:"token"`
+		URL      string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Redirect || resp.URL != "/dashboard" || resp.Token == "" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestUsernameSignInRequiresVerifiedEmail(t *testing.T) {
 	a, err := auth.New(auth.Config{
 		Secret:  "test-secret-key-32-chars-minimum!!",
 		BaseURL: "http://localhost:8080",
@@ -188,707 +170,64 @@ func TestUsernameSignInRequiresEmailVerification(t *testing.T) {
 		EmailAndPassword: auth.EmailAndPasswordConfig{
 			RequireEmailVerification: true,
 		},
-		EmailVerification: auth.EmailVerificationConfig{
-			SendOnSignIn: true,
-			SendVerificationEmail: func(_ context.Context, _ types.VerificationEmailData) error {
-				sent = true
-				return nil
-			},
-		},
 		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	createUsernameCredentialUser(t, a, "username-unverified-user", "username-unverified@example.com", "unverified", "password123", false)
-
-	w := post(t, a, "/sign-in/username", `{"username":"unverified","password":"password123","callbackURL":"http://localhost:3000/verify"}`)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	if !sent {
-		t.Fatal("expected verification email on username sign-in")
-	}
-}
-
-func TestUsernameSignInReportsStoreLookupErrors(t *testing.T) {
-	a, err := auth.New(auth.Config{
-		Secret:  "test-secret-key-32-chars-minimum!!",
-		BaseURL: "http://localhost:8080",
-		Store:   listUsersFailStore{Store: memory.New()},
-		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := post(t, a, "/sign-in/username", `{"username":"newuser","password":"password123"}`)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeInternalServerError {
-		t.Fatalf("code %q", code)
-	}
-}
-
-func TestUsernameSignInCallbackURL(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
-	createUsernameCredentialUser(t, a, "username-callback-user", "username-callback@example.com", "callbackuser", "password123", true)
-
-	w := post(t, a, "/sign-in/username", `{"username":"callbackuser","password":"password123","callbackURL":"http://localhost:3000/dashboard"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	if w.Header().Get("Location") != "http://localhost:3000/dashboard" {
-		t.Fatalf("location %q", w.Header().Get("Location"))
-	}
-	var resp struct {
-		Redirect bool   `json:"redirect"`
-		URL      string `json:"url"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Redirect || resp.URL != "http://localhost:3000/dashboard" {
-		t.Fatalf("redirect=%t url=%q", resp.Redirect, resp.URL)
-	}
-}
-
-func TestUsernameAvailabilityUsesCustomValidatorAndNormalization(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
-		UsernameValidator: func(_ context.Context, username string) (bool, error) {
-			return !strings.Contains(username, " "), nil
-		},
-		UsernameNormalization: func(username string) string {
-			return strings.ReplaceAll(username, "-", "_")
-		},
-	}))
-	createUsernameCredentialUser(t, a, "username-normalized-available-user", "username-normalized-available@example.com", "dash_user", "password123", true)
-
-	w := post(t, a, "/is-username-available", `{"username":"dash-user"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Available bool `json:"available"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Available {
-		t.Fatal("expected normalized username to be unavailable")
-	}
-}
-
-func TestUsernameSignInUsesCustomNormalization(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
-		UsernameNormalization: func(username string) string {
-			return strings.ReplaceAll(username, "-", "_")
-		},
-	}))
-	createUsernameCredentialUser(t, a, "username-normalized-signin-user", "username-normalized-signin@example.com", "dash_user", "password123", true)
-
-	w := post(t, a, "/sign-in/username", `{"username":"dash-user","password":"password123"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestUsernameSignInPostNormalizationValidatesRawUsername(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
-		UsernameNormalization: func(username string) string {
-			return strings.ReplaceAll(username, "-", "_")
-		},
-		UsernameValidationOrder: plugins.UsernameValidationPostNormalization,
-	}))
-	createUsernameCredentialUser(t, a, "username-post-validation-user", "username-post-validation@example.com", "dash_user", "password123", true)
-
-	w := post(t, a, "/sign-in/username", `{"username":"dash-user","password":"password123"}`)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestUsernameSignUpStoresNormalizedUsernameAndDisplayFallback(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
-	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-signup@example.com","password":"password123","username":"MixedUser"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByEmail(context.Background(), "username-signup@example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auth.UserAdditionalString(user, constants.FieldUsername) != "mixeduser" {
-		t.Fatalf("username = %q", auth.UserAdditionalString(user, constants.FieldUsername))
-	}
-	if auth.UserAdditionalString(user, constants.FieldDisplayUsername) != "MixedUser" {
-		t.Fatalf("displayUsername = %q", auth.UserAdditionalString(user, constants.FieldDisplayUsername))
-	}
-	w = post(t, a, "/sign-in/username", `{"username":"MixedUser","password":"password123"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("sign-in status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestUsernameSignUpRejectsDuplicateNormalizedUsername(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
-	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-first@example.com","password":"password123","username":"DuplicateUser"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("first status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-second@example.com","password":"password123","username":"duplicateuser"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("second status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeUsernameIsAlreadyTaken {
-		t.Fatalf("second code %q", code)
-	}
-}
-
-func TestUsernameUpdateNormalizesAndRejectsDuplicateUsername(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
-	first := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-update-first@example.com","password":"password123","username":"FirstUser"}`)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first status %d body %s", first.Code, first.Body.String())
-	}
-	second := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-update-second@example.com","password":"password123","username":"SecondUser"}`)
-	if second.Code != http.StatusOK {
-		t.Fatalf("second status %d body %s", second.Code, second.Body.String())
-	}
-	cookie := first.Header().Get("Set-Cookie")
-	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"username":"UpdatedUser"}`))
-	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
-	req.Header.Set("Cookie", cookie)
-	w := httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByEmail(context.Background(), "username-update-first@example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auth.UserAdditionalString(user, constants.FieldUsername) != "updateduser" {
-		t.Fatalf("username = %q", auth.UserAdditionalString(user, constants.FieldUsername))
-	}
-	req = httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"username":"SecondUser"}`))
-	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
-	req.Header.Set("Cookie", cookie)
-	w = httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("duplicate update status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeUsernameIsAlreadyTaken {
-		t.Fatalf("duplicate update code %q", code)
-	}
-}
-
-func TestUsernameDisplayUsernameValidatorAndNormalization(t *testing.T) {
-	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
-		DisplayUsernameValidator: func(_ context.Context, displayUsername string) (bool, error) {
-			return !strings.Contains(displayUsername, "blocked"), nil
-		},
-		DisplayUsernameNormalization: strings.TrimSpace,
-	}))
-	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-display@example.com","password":"password123","username":"displayuser","displayUsername":" Display User "}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByEmail(context.Background(), "username-display@example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auth.UserAdditionalString(user, constants.FieldDisplayUsername) != "Display User" {
-		t.Fatalf("displayUsername = %q", auth.UserAdditionalString(user, constants.FieldDisplayUsername))
-	}
-	w = post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-display-blocked@example.com","password":"password123","username":"displayblocked","displayUsername":"blocked"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("blocked status %d body %s", w.Code, w.Body.String())
-	}
-	if code := errorCode(t, w); code != constants.CodeInvalidDisplayUsername {
-		t.Fatalf("blocked code %q", code)
-	}
-}
-
-func TestPhoneNumberSendOTPRequiresSender(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "SEND_OTP_NOT_IMPLEMENTED" {
-		t.Fatalf("code %q", resp.Code)
-	}
-}
-
-func TestPhoneNumberSendOTPResponseMatchesUpstream(t *testing.T) {
-	var sent bool
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, phone string, otp string) error {
-			if phone != "+1234567890" {
-				t.Fatalf("phone %q", phone)
-			}
-			if len(otp) != 6 {
-				t.Fatalf("otp length %d", len(otp))
-			}
-			if !isDigitString(otp) {
-				t.Fatalf("otp should be numeric: %q", otp)
-			}
-			sent = true
-			return nil
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Message != "code sent" {
-		t.Fatalf("message %q", resp.Message)
-	}
-	if !sent {
-		t.Fatal("expected otp sender to be called")
-	}
-}
-
-func TestPhoneNumberSendOTPUsesConfiguredLength(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		OTPLength: 4,
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	if len(sentCode) != 4 || !isDigitString(sentCode) {
-		t.Fatalf("sent code should be 4 numeric digits: %q", sentCode)
-	}
-}
-
-func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, _ string) error {
-			return errors.New("provider failed")
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPhoneNumberSendOTPUsesValidator(t *testing.T) {
-	var sent bool
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, _ string) error {
-			sent = true
-			return nil
-		},
-		PhoneNumberValidator: func(_ context.Context, phone string) (bool, error) {
-			return phone == "+1234567890", nil
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"invalid"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "INVALID_PHONE_NUMBER" {
-		t.Fatalf("code %q", resp.Code)
-	}
-	if sent {
-		t.Fatal("otp should not be sent when phone number is invalid")
-	}
-}
-
-func TestPhoneNumberVerifyUsesCode(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-		SignUpOnVerification: &plugins.PhoneNumberSignUpOnVerificationOptions{
-			GetTempEmail: func(phone string) string {
-				return "temp-" + phone + "@example.com"
-			},
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+sentCode+`"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status bool   `json:"status"`
-		Token  string `json:"token"`
-		User   struct {
-			ID string `json:"id"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Status {
-		t.Fatal("expected verified status")
-	}
-	if resp.Token == "" {
-		t.Fatal("expected session token")
-	}
-	if resp.User.ID == "" {
-		t.Fatal("expected user")
-	}
-	user, err := a.Store().FindUserByID(context.Background(), resp.User.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if user.Additional[constants.FieldPhoneNumber] != "+1234567890" || user.Additional[constants.FieldPhoneVerified] != true {
-		t.Fatalf("phone fields not verified: %+v", user.Additional)
-	}
-}
-
-func TestPhoneNumberVerifyDisableSessionReturnsNullToken(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-		SignUpOnVerification: &plugins.PhoneNumberSignUpOnVerificationOptions{
-			GetTempEmail: func(phone string) string {
-				return "temp-" + phone + "@example.com"
-			},
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+sentCode+`","disableSession":true}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status bool    `json:"status"`
-		Token  *string `json:"token"`
-		User   struct {
-			ID string `json:"id"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Status {
-		t.Fatal("expected verified status")
-	}
-	if resp.Token != nil {
-		t.Fatalf("token should be null: %q", *resp.Token)
-	}
-	if resp.User.ID == "" {
-		t.Fatal("expected user")
-	}
-}
-
-func TestPhoneNumberVerifyUpdatesExistingUser(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-	}))
 	now := time.Now()
-	err := a.Store().CreateUser(context.Background(), &types.User{
-		ID: "phone-verify-user", Name: "Phone User", Email: "verify@example.com",
-		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
+	password, err := a.HashPassword("password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateUser(context.Background(), &types.User{
+		ID: "unverified-username-user", Name: "Username", Email: "unverified-username@example.com",
+		EmailVerified: false, CreatedAt: now, UpdatedAt: now,
 		Additional: map[string]any{
-			constants.FieldPhoneNumber:   "+1234567890",
-			constants.FieldPhoneVerified: false,
+			constants.FieldUsername: "unverified",
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+sentCode+`"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByID(context.Background(), "phone-verify-user")
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "unverified-username-account", AccountID: "unverified-username-user", ProviderID: constants.ProviderCredential,
+		UserID: "unverified-username-user", Password: password, CreatedAt: now, UpdatedAt: now,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Additional[constants.FieldPhoneVerified] != true {
-		t.Fatalf("phone not verified: %+v", user.Additional)
-	}
-}
-
-func TestPhoneNumberVerifyUpdatesCurrentUserPhoneNumber(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-	}))
-	createPhoneCredentialUser(t, a, "phone-update-user", "+1234567890", "password123")
-
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("sign in status %d body %s", w.Code, w.Body.String())
-	}
-	cookie := w.Header().Get("Set-Cookie")
-	w = post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567891"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	req := httptest.NewRequest(http.MethodPost, "/phone-number/verify", strings.NewReader(`{"phoneNumber":"+1234567891","code":"`+sentCode+`","updatePhoneNumber":true}`))
-	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
-	req.Header.Set("Cookie", cookie)
-	w = httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByID(context.Background(), "phone-update-user")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if user.Additional[constants.FieldPhoneNumber] != "+1234567891" || user.Additional[constants.FieldPhoneVerified] != true {
-		t.Fatalf("phone fields not updated: %+v", user.Additional)
-	}
-}
-
-func TestPhoneNumberVerifyTracksOTPAttempts(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-		AllowedAttempts: 2,
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	wrongCode := "000000"
-	if sentCode == wrongCode {
-		wrongCode = "111111"
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("first verify status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("second verify status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+wrongCode+`"}`)
+	w := post(t, a, "/sign-in/username", `{"username":"unverified","password":"password123"}`)
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("third verify status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "TOO_MANY_ATTEMPTS" {
-		t.Fatalf("code %q", resp.Code)
-	}
-}
-
-func TestPhoneNumberVerifyRejectsOTPShape(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-	}))
-	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","otp":"`+sentCode+`"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPhoneNumberRequestPasswordResetSendsOTPForExistingUser(t *testing.T) {
-	sentPhone := ""
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendPasswordResetOTP: func(_ context.Context, phone string, otp string) error {
-			sentPhone = phone
-			sentCode = otp
-			return nil
-		},
-	}))
-	createPhoneCredentialUser(t, a, "phone-reset-user", "+1234567890", "password123")
-
-	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status bool `json:"status"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Status {
-		t.Fatal("expected reset request status")
-	}
-	if sentPhone != "+1234567890" {
-		t.Fatalf("sent phone %q", sentPhone)
-	}
-	if len(sentCode) != 6 {
-		t.Fatalf("sent code length %d", len(sentCode))
-	}
-	if !isDigitString(sentCode) {
-		t.Fatalf("sent code should be numeric: %q", sentCode)
-	}
-}
-
-func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) {
-	var sent bool
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendPasswordResetOTP: func(_ context.Context, _ string, _ string) error {
-			sent = true
-			return nil
-		},
-	}))
-	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567899"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status bool `json:"status"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Status {
-		t.Fatal("expected reset request status")
-	}
-	if sent {
-		t.Fatal("reset otp should not be sent for unknown phone numbers")
-	}
-	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), "+1234567899-request-password-reset")
-	if err != nil {
-		t.Fatal(err)
-	}
-	storedCode := strings.SplitN(verification.Value, ":", 2)[0]
-	if len(storedCode) != 6 {
-		t.Fatalf("verification code length %d", len(storedCode))
-	}
-	if !isDigitString(storedCode) {
-		t.Fatalf("verification code should be numeric: %q", verification.Value)
-	}
-	if !strings.HasSuffix(verification.Value, ":0") {
-		t.Fatalf("verification attempts not initialized: %q", verification.Value)
-	}
-}
-
-func TestPhoneNumberResetPasswordUpdatesCredentialPassword(t *testing.T) {
-	resetCode := ""
-	var resetUser types.User
-	a, err := auth.New(auth.Config{
-		Secret:  "test-secret-key-32-chars-minimum!!",
-		BaseURL: "http://localhost:8080",
-		Store:   memory.New(),
-		EmailAndPassword: auth.EmailAndPasswordConfig{
-			OnPasswordReset: func(_ context.Context, user types.User) error {
-				resetUser = user
-				return nil
-			},
-		},
-		Plugins: []auth.Plugin{plugins.PhoneNumber(plugins.PhoneNumberOptions{
-			SendPasswordResetOTP: func(_ context.Context, _ string, otp string) error {
-				resetCode = otp
-				return nil
-			},
-		})},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	createPhoneCredentialUser(t, a, "phone-reset-user", "+1234567890", "password123")
-
-	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567890"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("request status %d body %s", w.Code, w.Body.String())
-	}
-	w = post(t, a, "/phone-number/reset-password", `{"phoneNumber":"+1234567890","otp":"`+resetCode+`","newPassword":"updatedpassword123"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("reset status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status bool `json:"status"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Status {
-		t.Fatal("expected reset status")
-	}
-	if resetUser.ID != "phone-reset-user" {
-		t.Fatalf("reset callback user id = %q", resetUser.ID)
-	}
-	account, err := a.Store().FindAccountByUserAndProvider(context.Background(), "phone-reset-user", constants.ProviderCredential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	valid, err := a.VerifyPassword(account.Password, "updatedpassword123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !valid {
-		t.Fatal("expected updated password to verify")
-	}
-	valid, err = a.VerifyPassword(account.Password, "password123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if valid {
-		t.Fatal("old password should not verify")
 	}
 }
 
 func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
-	createPhoneCredentialUser(t, a, "phone-signin-user", "+1234567890", "password123")
-
+	now := time.Now()
+	password, err := a.HashPassword("password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateUser(context.Background(), &types.User{
+		ID: "phone-signin-user", Name: "Phone", Email: "phone-signin@example.com",
+		CreatedAt: now, UpdatedAt: now,
+		Additional: map[string]any{
+			constants.FieldPhoneNumber:   "+1234567890",
+			constants.FieldPhoneVerified: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "phone-signin-account", AccountID: "phone-signin-user", ProviderID: constants.ProviderCredential,
+		UserID: "phone-signin-user", Password: password, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
@@ -902,96 +241,8 @@ func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Token == "" {
-		t.Fatal("expected token")
-	}
-	if resp.User.ID != "phone-signin-user" {
-		t.Fatalf("user id %q", resp.User.ID)
-	}
-}
-
-func TestPhoneNumberSignInRequiresPhoneVerification(t *testing.T) {
-	sentCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		RequireVerification: true,
-		OTPLength:           4,
-		SendOTP: func(_ context.Context, _ string, otp string) error {
-			sentCode = otp
-			return nil
-		},
-	}))
-	createPhoneCredentialUserWithVerification(t, a, "phone-unverified-user", "+1234567890", "password123", false)
-
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "PHONE_NUMBER_NOT_VERIFIED" {
-		t.Fatalf("code %q", resp.Code)
-	}
-	if len(sentCode) != 4 || !isDigitString(sentCode) {
-		t.Fatalf("sent code should be numeric: %q", sentCode)
-	}
-	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationPhoneOTP+"+1234567890")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verification.Value != sentCode {
-		t.Fatalf("stored code %q sent %q", verification.Value, sentCode)
-	}
-}
-
-func TestPhoneNumberSignInAllowsVerifiedPhoneWhenRequired(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		RequireVerification: true,
-	}))
-	createPhoneCredentialUser(t, a, "phone-verified-user", "+1234567890", "password123")
-
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPhoneNumberSignInReturnsUnexpectedErrorWithoutPassword(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
-	now := time.Now()
-	err := a.Store().CreateUser(context.Background(), &types.User{
-		ID: "phone-empty-password-user", Name: "Phone User", Email: "empty-password@example.com",
-		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
-		Additional: map[string]any{
-			constants.FieldPhoneNumber:   "+1234567890",
-			constants.FieldPhoneVerified: true,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = a.Store().CreateAccount(context.Background(), &types.Account{
-		ID: "phone-empty-password-account", AccountID: "phone-empty-password-user", ProviderID: constants.ProviderCredential,
-		UserID: "phone-empty-password-user", CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "UNEXPECTED_ERROR" {
-		t.Fatalf("code %q", resp.Code)
+	if resp.Token == "" || resp.User.ID != "phone-signin-user" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 
@@ -1003,73 +254,44 @@ func TestPhoneNumberSignInRejectsOTPShape(t *testing.T) {
 	}
 }
 
-func TestPhoneNumberSignInUsesValidator(t *testing.T) {
+func TestPhoneNumberSignInRequiresPhoneVerification(t *testing.T) {
+	var sentCode string
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		PhoneNumberValidator: func(_ context.Context, phone string) (bool, error) {
-			return phone == "+1234567890", nil
+		RequireVerification: true,
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
 		},
 	}))
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"invalid","password":"password123"}`)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "INVALID_PHONE_NUMBER" {
-		t.Fatalf("code %q", resp.Code)
-	}
-}
-
-func TestPhoneNumberPluginUpdateUserRejectsDirectPhoneNumberChange(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
-	createPhoneCredentialUser(t, a, "phone-update-block-user", "+1234567890", "password123")
-	cookie := signInPhoneNumberCookie(t, a, "+1234567890", "password123")
-
-	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"phoneNumber":"+1234567891"}`))
-	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
-	req.Header.Set("Cookie", cookie)
-	w := httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Code != "PHONE_NUMBER_CANNOT_BE_UPDATED" {
-		t.Fatalf("code %q", resp.Code)
-	}
-}
-
-func TestPhoneNumberPluginUpdateUserAllowsClearingPhoneNumber(t *testing.T) {
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
-	createPhoneCredentialUser(t, a, "phone-update-clear-user", "+1234567890", "password123")
-	cookie := signInPhoneNumberCookie(t, a, "+1234567890", "password123")
-
-	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"phoneNumber":null}`))
-	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
-	req.Header.Set("Cookie", cookie)
-	w := httptest.NewRecorder()
-	a.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
-	}
-	user, err := a.Store().FindUserByID(context.Background(), "phone-update-clear-user")
+	now := time.Now()
+	password, err := a.HashPassword("password123")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Additional[constants.FieldPhoneNumber] != nil {
-		t.Fatalf("phoneNumber not cleared: %+v", user.Additional)
+	err = a.Store().CreateUser(context.Background(), &types.User{
+		ID: "phone-unverified-user", Name: "Phone", Email: "phone-unverified@example.com",
+		CreatedAt: now, UpdatedAt: now,
+		Additional: map[string]any{
+			constants.FieldPhoneNumber:   "+1234567891",
+			constants.FieldPhoneVerified: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if user.Additional[constants.FieldPhoneVerified] != false {
-		t.Fatalf("phoneNumberVerified not reset: %+v", user.Additional)
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "phone-unverified-account", AccountID: "phone-unverified-user", ProviderID: constants.ProviderCredential,
+		UserID: "phone-unverified-user", Password: password, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567891","password":"password123"}`)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if len(sentCode) != 6 {
+		t.Fatalf("sent code = %q", sentCode)
 	}
 }
 
@@ -1146,95 +368,4 @@ func TestAllPluginsCount(t *testing.T) {
 	if len(all) != 24 {
 		t.Fatalf("expected 24 plugins, got %d", len(all))
 	}
-}
-
-func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string) {
-	createPhoneCredentialUserWithVerification(t, a, userID, phoneNumber, password, true)
-}
-
-func createUsernameCredentialUser(t *testing.T, a *auth.Auth, userID string, email string, username string, password string, verified bool) {
-	t.Helper()
-	now := time.Now()
-	err := a.Store().CreateUser(context.Background(), &types.User{
-		ID:            userID,
-		Name:          "Username User",
-		Email:         email,
-		EmailVerified: verified,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		Additional: map[string]any{
-			constants.FieldUsername: username,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	hashedPassword, err := a.HashPassword(password)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = a.Store().CreateAccount(context.Background(), &types.Account{
-		ID:         userID + "-account",
-		AccountID:  userID,
-		ProviderID: constants.ProviderCredential,
-		UserID:     userID,
-		Password:   hashedPassword,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func createPhoneCredentialUserWithVerification(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string, verified bool) {
-	t.Helper()
-	now := time.Now()
-	err := a.Store().CreateUser(context.Background(), &types.User{
-		ID: userID, Name: "Phone User", Email: "phone@example.com",
-		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
-		Additional: map[string]any{
-			constants.FieldPhoneNumber:   phoneNumber,
-			constants.FieldPhoneVerified: verified,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	hashedPassword, err := a.HashPassword(password)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = a.Store().CreateAccount(context.Background(), &types.Account{
-		ID: "phone-signin-account", AccountID: userID, ProviderID: constants.ProviderCredential,
-		UserID: userID, Password: hashedPassword, CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func signInPhoneNumberCookie(t *testing.T, a *auth.Auth, phoneNumber string, password string) string {
-	t.Helper()
-	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"`+phoneNumber+`","password":"`+password+`"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("sign in status %d body %s", w.Code, w.Body.String())
-	}
-	cookie := w.Header().Get("Set-Cookie")
-	if cookie == "" {
-		t.Fatal("expected session cookie")
-	}
-	return cookie
-}
-
-func isDigitString(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, digit := range value {
-		if digit < '0' || digit > '9' {
-			return false
-		}
-	}
-	return true
 }

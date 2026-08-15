@@ -18,7 +18,7 @@ while keeping existing clients.
 |------------|-----|
 | `betterAuth({ … })` | `auth.New(auth.Config{ … })` |
 | Kysely / Drizzle / Prisma adapter | `store/sql` or custom `Store` |
-| Plugin fields as DB columns | JSON `additional` column |
+| Plugin fields as DB columns | Same JS-compatible columns for supported plugins |
 | `npx @better-auth/cli --config auth.ts` | Embed `core.Run` with `*auth.Auth` |
 | 35+ built-in OAuth providers | Google, GitHub + generic-oauth plugin |
 | `auth.api.*` typed routes | Partial helpers on `*auth.Auth` |
@@ -34,8 +34,9 @@ Map each `betterAuth({ … })` option to `auth.Config` — see the
 ### 2. Migrate data
 
 Export users, accounts, sessions, and verification rows from your existing DB.
-The SQL schema uses `ba_*` table names with unix-ms timestamps. Plugin data
-may need transformation if you relied on dedicated columns in TS adapters.
+The SQL schema uses Better Auth JS table and column names with unix-ms
+timestamps. Supported plugin columns are generated when the matching plugins are
+enabled.
 
 ### 3. Enable the same plugins
 

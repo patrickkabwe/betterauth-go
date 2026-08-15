@@ -3,7 +3,9 @@ package sql
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
@@ -16,7 +18,7 @@ import (
 
 func (s *Store) CreateOrganization(ctx context.Context, o *types.Organization) error {
 	var existing string
-	err := s.db.QueryRowContext(ctx, s.q(`SELECT id FROM ba_organization WHERE slug = ?`), o.Slug).Scan(&existing)
+	err := s.db.QueryRowContext(ctx, s.q(`SELECT id FROM `+s.table("organization")+` WHERE slug = ?`), o.Slug).Scan(&existing)
 	if err == nil {
 		return berrors.ErrAlreadyExists
 	}
@@ -24,9 +26,9 @@ func (s *Store) CreateOrganization(ctx context.Context, o *types.Organization) e
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, s.q(`
-		INSERT INTO ba_organization (id, name, slug, logo, metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`),
-		o.ID, o.Name, o.Slug, strOrNil(o.Logo), nullStr(o.Metadata), toMillis(o.CreatedAt))
+		INSERT INTO `+s.table("organization")+` (id, name, slug, logo, metadata, `+s.table("createdAt")+`, `+s.table("updatedAt")+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		o.ID, o.Name, o.Slug, strOrNil(o.Logo), nullStr(o.Metadata), toMillis(o.CreatedAt), nullMillis(o.UpdatedAt))
 	return err
 }
 
@@ -36,8 +38,9 @@ func (s *Store) scanOrg(row interface{ Scan(...any) error }) (*types.Organizatio
 		logo      sql.NullString
 		metadata  sql.NullString
 		createdAt int64
+		updatedAt sql.NullInt64
 	)
-	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &logo, &metadata, &createdAt); err != nil {
+	if err := row.Scan(&o.ID, &o.Name, &o.Slug, &logo, &metadata, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
@@ -49,27 +52,28 @@ func (s *Store) scanOrg(row interface{ Scan(...any) error }) (*types.Organizatio
 	}
 	o.Metadata = metadata.String
 	o.CreatedAt = fromMillis(createdAt)
+	o.UpdatedAt = scanNullMillis(updatedAt)
 	return &o, nil
 }
 
-const orgCols = `id, name, slug, logo, metadata, created_at`
+var orgColNames = []string{"id", "name", "slug", "logo", "metadata", "createdAt", "updatedAt"}
 
 func (s *Store) FindOrganizationByID(ctx context.Context, id string) (*types.Organization, error) {
-	return s.scanOrg(s.db.QueryRowContext(ctx, s.q(`SELECT `+orgCols+` FROM ba_organization WHERE id = ?`), id))
+	return s.scanOrg(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(orgColNames...)+` FROM `+s.table("organization")+` WHERE id = ?`), id))
 }
 
 func (s *Store) FindOrganizationBySlug(ctx context.Context, slug string) (*types.Organization, error) {
-	return s.scanOrg(s.db.QueryRowContext(ctx, s.q(`SELECT `+orgCols+` FROM ba_organization WHERE slug = ?`), slug))
+	return s.scanOrg(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(orgColNames...)+` FROM `+s.table("organization")+` WHERE slug = ?`), slug))
 }
 
-func (s *Store) UpdateOrganization(ctx context.Context, id string, name, slug string, logo *string) (*types.Organization, error) {
+func (s *Store) UpdateOrganization(ctx context.Context, id string, name, slug string, logo *string, metadata *string) (*types.Organization, error) {
 	o, err := s.FindOrganizationByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if slug != "" && slug != o.Slug {
 		var existing string
-		err := s.db.QueryRowContext(ctx, s.q(`SELECT id FROM ba_organization WHERE slug = ?`), slug).Scan(&existing)
+		err := s.db.QueryRowContext(ctx, s.q(`SELECT id FROM `+s.table("organization")+` WHERE slug = ?`), slug).Scan(&existing)
 		if err == nil {
 			return nil, berrors.ErrAlreadyExists
 		}
@@ -84,8 +88,13 @@ func (s *Store) UpdateOrganization(ctx context.Context, id string, name, slug st
 	if logo != nil {
 		o.Logo = logo
 	}
-	_, err = s.db.ExecContext(ctx, s.q(`UPDATE ba_organization SET name = ?, slug = ?, logo = ? WHERE id = ?`),
-		o.Name, o.Slug, strOrNil(o.Logo), id)
+	if metadata != nil {
+		o.Metadata = *metadata
+	}
+	now := time.Now().UTC()
+	o.UpdatedAt = &now
+	_, err = s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("organization")+` SET name = ?, slug = ?, logo = ?, metadata = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
+		o.Name, o.Slug, strOrNil(o.Logo), nullStr(o.Metadata), toMillis(now), id)
 	if err != nil {
 		return nil, err
 	}
@@ -93,21 +102,22 @@ func (s *Store) UpdateOrganization(ctx context.Context, id string, name, slug st
 }
 
 func (s *Store) DeleteOrganization(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_organization WHERE id = ?`), id)
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("organization")+` WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return berrors.ErrNotFound
 	}
-	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM ba_member WHERE organization_id = ?`), id)
-	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM ba_invitation WHERE organization_id = ?`), id)
-	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM ba_team WHERE organization_id = ?`), id)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("member")+` WHERE `+s.table("organizationId")+` = ?`), id)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("invitation")+` WHERE `+s.table("organizationId")+` = ?`), id)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("team")+` WHERE `+s.table("organizationId")+` = ?`), id)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("organizationRole")+` WHERE `+s.table("organizationId")+` = ?`), id)
 	return nil
 }
 
 func (s *Store) ListOrganizations(ctx context.Context) ([]types.Organization, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+orgCols+` FROM ba_organization`))
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(orgColNames...)+` FROM `+s.table("organization")))
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +137,7 @@ func (s *Store) ListOrganizations(ctx context.Context) ([]types.Organization, er
 // Member
 // =========================================================================
 
-const memberCols = `id, organization_id, user_id, role, created_at`
+var memberColNames = []string{"id", "organizationId", "userId", "role", "createdAt"}
 
 func (s *Store) scanMember(row interface{ Scan(...any) error }) (*types.Member, error) {
 	var (
@@ -145,22 +155,37 @@ func (s *Store) scanMember(row interface{ Scan(...any) error }) (*types.Member, 
 }
 
 func (s *Store) CreateMember(ctx context.Context, m *types.Member) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_member (`+memberCols+`) VALUES (?, ?, ?, ?, ?)`),
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("member")+` (`+s.cols(memberColNames...)+`) VALUES (?, ?, ?, ?, ?)`),
 		m.ID, m.OrganizationID, m.UserID, m.Role, toMillis(m.CreatedAt))
 	return err
 }
 
 func (s *Store) DeleteMember(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_member WHERE id = ?`), id)
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("member")+` WHERE id = ?`), id)
 	return err
 }
 
+func (s *Store) FindMemberByID(ctx context.Context, id string) (*types.Member, error) {
+	return s.scanMember(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(memberColNames...)+` FROM `+s.table("member")+` WHERE id = ?`), id))
+}
+
 func (s *Store) FindMemberByOrgAndUser(ctx context.Context, orgID, userID string) (*types.Member, error) {
-	return s.scanMember(s.db.QueryRowContext(ctx, s.q(`SELECT `+memberCols+` FROM ba_member WHERE organization_id = ? AND user_id = ?`), orgID, userID))
+	return s.scanMember(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(memberColNames...)+` FROM `+s.table("member")+` WHERE `+s.table("organizationId")+` = ? AND `+s.table("userId")+` = ?`), orgID, userID))
+}
+
+func (s *Store) UpdateMemberRole(ctx context.Context, id string, role string) (*types.Member, error) {
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("member")+` SET role = ? WHERE id = ?`), role, id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, berrors.ErrNotFound
+	}
+	return s.FindMemberByID(ctx, id)
 }
 
 func (s *Store) listMembers(ctx context.Context, where string, arg string) ([]types.Member, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+memberCols+` FROM ba_member WHERE `+where), arg)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(memberColNames...)+` FROM `+s.table("member")+` WHERE `+where), arg)
 	if err != nil {
 		return nil, err
 	}
@@ -177,48 +202,103 @@ func (s *Store) listMembers(ctx context.Context, where string, arg string) ([]ty
 }
 
 func (s *Store) ListMembersByOrg(ctx context.Context, orgID string) ([]types.Member, error) {
-	return s.listMembers(ctx, "organization_id = ?", orgID)
+	return s.listMembers(ctx, s.table("organizationId")+" = ?", orgID)
 }
 
 func (s *Store) ListMembersByUser(ctx context.Context, userID string) ([]types.Member, error) {
-	return s.listMembers(ctx, "user_id = ?", userID)
+	return s.listMembers(ctx, s.table("userId")+" = ?", userID)
 }
 
 // =========================================================================
 // Invitation
 // =========================================================================
 
-const invitationCols = `id, organization_id, email, role, status, inviter_id, expires_at, created_at`
+const invitationTeamIDColName = "teamId"
 
-func (s *Store) scanInvitation(row interface{ Scan(...any) error }) (*types.Invitation, error) {
+var invitationBaseColNames = []string{"id", "organizationId", "email", "role", "status", "inviterId", "expiresAt", "createdAt"}
+
+func invitationColNames(includeTeamID bool) []string {
+	cols := make([]string, 0, len(invitationBaseColNames)+1)
+	cols = append(cols, invitationBaseColNames[:6]...)
+	if includeTeamID {
+		cols = append(cols, invitationTeamIDColName)
+	}
+	cols = append(cols, invitationBaseColNames[6:]...)
+	return cols
+}
+
+func (s *Store) invitationTeamIDColumnPresent(ctx context.Context) (bool, error) {
+	cols, err := s.columnsPresent(ctx, "invitation", []string{invitationTeamIDColName})
+	if err != nil {
+		return false, err
+	}
+	return len(cols) > 0, nil
+}
+
+func (s *Store) scanInvitation(row interface{ Scan(...any) error }, includeTeamID bool) (*types.Invitation, error) {
 	var (
 		inv       types.Invitation
+		teamID    sql.NullString
 		expiresAt int64
 		createdAt int64
 	)
-	if err := row.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Status, &inv.InviterID, &expiresAt, &createdAt); err != nil {
+	var err error
+	if includeTeamID {
+		err = row.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Status, &inv.InviterID, &teamID, &expiresAt, &createdAt)
+	} else {
+		err = row.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.Status, &inv.InviterID, &expiresAt, &createdAt)
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
+	inv.TeamID = teamID.String
 	inv.ExpiresAt = fromMillis(expiresAt)
 	inv.CreatedAt = fromMillis(createdAt)
 	return &inv, nil
 }
 
 func (s *Store) CreateInvitation(ctx context.Context, inv *types.Invitation) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_invitation (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-		inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.Status, inv.InviterID, toMillis(inv.ExpiresAt), toMillis(inv.CreatedAt))
+	includeTeamID, err := s.invitationTeamIDColumnPresent(ctx)
+	if err != nil {
+		return err
+	}
+	if !includeTeamID {
+		if inv.TeamID != "" {
+			return fmt.Errorf("invitation teamId requires organization teams schema: table=%q column=%q invitationId=%q organizationId=%q", "invitation", invitationTeamIDColName, inv.ID, inv.OrganizationID)
+		}
+		_, err = s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("invitation")+` (`+s.cols(invitationColNames(false)...)+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+			inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.Status, inv.InviterID, toMillis(inv.ExpiresAt), toMillis(inv.CreatedAt))
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("invitation")+` (`+s.cols(invitationColNames(true)...)+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.Status, inv.InviterID, nullStr(inv.TeamID), toMillis(inv.ExpiresAt), toMillis(inv.CreatedAt))
 	return err
 }
 
 func (s *Store) FindInvitationByID(ctx context.Context, id string) (*types.Invitation, error) {
-	return s.scanInvitation(s.db.QueryRowContext(ctx, s.q(`SELECT `+invitationCols+` FROM ba_invitation WHERE id = ?`), id))
+	includeTeamID, err := s.invitationTeamIDColumnPresent(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.scanInvitation(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(invitationColNames(includeTeamID)...)+` FROM `+s.table("invitation")+` WHERE id = ?`), id), includeTeamID)
 }
 
 func (s *Store) UpdateInvitationStatus(ctx context.Context, id, status string) error {
-	res, err := s.db.ExecContext(ctx, s.q(`UPDATE ba_invitation SET status = ? WHERE id = ?`), status, id)
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("invitation")+` SET status = ? WHERE id = ?`), status, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateInvitationExpiresAt(ctx context.Context, id string, expiresAt time.Time) error {
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("invitation")+` SET `+s.table("expiresAt")+` = ? WHERE id = ?`), toMillis(expiresAt), id)
 	if err != nil {
 		return err
 	}
@@ -229,14 +309,18 @@ func (s *Store) UpdateInvitationStatus(ctx context.Context, id, status string) e
 }
 
 func (s *Store) listInvitations(ctx context.Context, where, arg string) ([]types.Invitation, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+invitationCols+` FROM ba_invitation WHERE `+where), arg)
+	includeTeamID, err := s.invitationTeamIDColumnPresent(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(invitationColNames(includeTeamID)...)+` FROM `+s.table("invitation")+` WHERE `+where), arg)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []types.Invitation
 	for rows.Next() {
-		inv, err := s.scanInvitation(rows)
+		inv, err := s.scanInvitation(rows, includeTeamID)
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +330,7 @@ func (s *Store) listInvitations(ctx context.Context, where, arg string) ([]types
 }
 
 func (s *Store) ListInvitationsByOrg(ctx context.Context, orgID string) ([]types.Invitation, error) {
-	return s.listInvitations(ctx, "organization_id = ?", orgID)
+	return s.listInvitations(ctx, s.table("organizationId")+" = ?", orgID)
 }
 
 func (s *Store) ListInvitationsByEmail(ctx context.Context, email string) ([]types.Invitation, error) {
@@ -257,44 +341,90 @@ func (s *Store) ListInvitationsByEmail(ctx context.Context, email string) ([]typ
 // Team
 // =========================================================================
 
-const teamCols = `id, name, organization_id, created_at`
+var teamColNames = []string{"id", "name", "organizationId", "createdAt", "updatedAt"}
 
 func (s *Store) scanTeam(row interface{ Scan(...any) error }) (*types.Team, error) {
 	var (
 		t         types.Team
 		createdAt int64
+		updatedAt sql.NullInt64
 	)
-	if err := row.Scan(&t.ID, &t.Name, &t.OrganizationID, &createdAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.OrganizationID, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
 	t.CreatedAt = fromMillis(createdAt)
+	if updatedAt.Valid {
+		t.UpdatedAt = fromMillis(updatedAt.Int64)
+	}
 	return &t, nil
 }
 
 func (s *Store) CreateTeam(ctx context.Context, t *types.Team) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_team (`+teamCols+`) VALUES (?, ?, ?, ?)`),
-		t.ID, t.Name, t.OrganizationID, toMillis(t.CreatedAt))
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("team")+` (`+s.cols(teamColNames...)+`) VALUES (?, ?, ?, ?, ?)`),
+		t.ID, t.Name, t.OrganizationID, toMillis(t.CreatedAt), nullTimeMillis(t.UpdatedAt))
 	return err
 }
 
 func (s *Store) DeleteTeam(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_team WHERE id = ?`), id)
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("team")+` WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
-	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM ba_team_member WHERE team_id = ?`), id)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("teamMember")+` WHERE `+s.table("teamId")+` = ?`), id)
 	return nil
 }
 
 func (s *Store) FindTeamByID(ctx context.Context, id string) (*types.Team, error) {
-	return s.scanTeam(s.db.QueryRowContext(ctx, s.q(`SELECT `+teamCols+` FROM ba_team WHERE id = ?`), id))
+	return s.scanTeam(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(teamColNames...)+` FROM `+s.table("team")+` WHERE id = ?`), id))
+}
+
+func (s *Store) UpdateTeam(ctx context.Context, id string, name string) (*types.Team, error) {
+	t, err := s.FindTeamByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if name != "" {
+		t.Name = name
+	}
+	now := time.Now()
+	t.UpdatedAt = now
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("team")+` SET name = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`), t.Name, toMillis(now), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, berrors.ErrNotFound
+	}
+	return t, nil
 }
 
 func (s *Store) ListTeamsByOrg(ctx context.Context, orgID string) ([]types.Team, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+teamCols+` FROM ba_team WHERE organization_id = ?`), orgID)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(teamColNames...)+` FROM `+s.table("team")+` WHERE `+s.table("organizationId")+` = ?`), orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []types.Team
+	for rows.Next() {
+		t, err := s.scanTeam(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListTeamsByUser(ctx context.Context, userID string) ([]types.Team, error) {
+	teamCols := `t.` + s.table("id") + `, t.` + s.table("name") + `, t.` + s.table("organizationId") + `, t.` + s.table("createdAt") + `, t.` + s.table("updatedAt")
+	rows, err := s.db.QueryContext(ctx, s.q(`
+		SELECT `+teamCols+`
+		FROM `+s.table("team")+` t
+		INNER JOIN `+s.table("teamMember")+` tm ON tm.`+s.table("teamId")+` = t.`+s.table("id")+`
+		WHERE tm.`+s.table("userId")+` = ?`), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -315,18 +445,45 @@ func (s *Store) ListTeamsByOrg(ctx context.Context, orgID string) ([]types.Team,
 // =========================================================================
 
 func (s *Store) CreateTeamMember(ctx context.Context, tm *types.TeamMember) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_team_member (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)`),
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("teamMember")+` (id, `+s.table("teamId")+`, `+s.table("userId")+`, `+s.table("createdAt")+`) VALUES (?, ?, ?, ?)`),
 		tm.ID, tm.TeamID, tm.UserID, toMillis(tm.CreatedAt))
 	return err
 }
 
 func (s *Store) DeleteTeamMember(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_team_member WHERE id = ?`), id)
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("teamMember")+` WHERE id = ?`), id)
 	return err
 }
 
+func (s *Store) DeleteTeamMemberByTeamAndUser(ctx context.Context, teamID string, userID string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("teamMember")+` WHERE `+s.table("teamId")+` = ? AND `+s.table("userId")+` = ?`), teamID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) FindTeamMember(ctx context.Context, teamID string, userID string) (*types.TeamMember, error) {
+	var (
+		tm        types.TeamMember
+		createdAt int64
+	)
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT id, `+s.table("teamId")+`, `+s.table("userId")+`, `+s.table("createdAt")+` FROM `+s.table("teamMember")+` WHERE `+s.table("teamId")+` = ? AND `+s.table("userId")+` = ?`), teamID, userID)
+	if err := row.Scan(&tm.ID, &tm.TeamID, &tm.UserID, &createdAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	tm.CreatedAt = fromMillis(createdAt)
+	return &tm, nil
+}
+
 func (s *Store) ListTeamMembers(ctx context.Context, teamID string) ([]types.TeamMember, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, team_id, user_id, created_at FROM ba_team_member WHERE team_id = ?`), teamID)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, `+s.table("teamId")+`, `+s.table("userId")+`, `+s.table("createdAt")+` FROM `+s.table("teamMember")+` WHERE `+s.table("teamId")+` = ?`), teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -347,43 +504,183 @@ func (s *Store) ListTeamMembers(ctx context.Context, teamID string) ([]types.Tea
 }
 
 // =========================================================================
+// OrganizationRole
+// =========================================================================
+
+var organizationRoleColNames = []string{"id", "organizationId", "role", "permission", "createdAt", "updatedAt"}
+
+func encodeOrganizationRolePermission(permission map[string][]string) (string, error) {
+	data, err := json.Marshal(permission)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeOrganizationRolePermission(raw string) (map[string][]string, error) {
+	permission := map[string][]string{}
+	if raw == "" {
+		return permission, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &permission); err != nil {
+		return nil, err
+	}
+	return permission, nil
+}
+
+func (s *Store) scanOrganizationRole(row interface{ Scan(...any) error }) (*types.OrganizationRole, error) {
+	var (
+		role       types.OrganizationRole
+		permission string
+		createdAt  int64
+		updatedAt  sql.NullInt64
+	)
+	if err := row.Scan(&role.ID, &role.OrganizationID, &role.Role, &permission, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	decoded, err := decodeOrganizationRolePermission(permission)
+	if err != nil {
+		return nil, err
+	}
+	role.Permission = decoded
+	role.CreatedAt = fromMillis(createdAt)
+	role.UpdatedAt = scanNullMillis(updatedAt)
+	return &role, nil
+}
+
+func (s *Store) CreateOrganizationRole(ctx context.Context, role *types.OrganizationRole) error {
+	if _, err := s.FindOrganizationRoleByOrgAndRole(ctx, role.OrganizationID, role.Role); err == nil {
+		return berrors.ErrAlreadyExists
+	} else if !errors.Is(err, berrors.ErrNotFound) {
+		return err
+	}
+	permission, err := encodeOrganizationRolePermission(role.Permission)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("organizationRole")+` (`+s.cols(organizationRoleColNames...)+`) VALUES (?, ?, ?, ?, ?, ?)`),
+		role.ID, role.OrganizationID, role.Role, permission, toMillis(role.CreatedAt), nullMillis(role.UpdatedAt))
+	return err
+}
+
+func (s *Store) FindOrganizationRoleByID(ctx context.Context, id string) (*types.OrganizationRole, error) {
+	return s.scanOrganizationRole(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(organizationRoleColNames...)+` FROM `+s.table("organizationRole")+` WHERE id = ?`), id))
+}
+
+func (s *Store) FindOrganizationRoleByOrgAndRole(ctx context.Context, organizationID string, role string) (*types.OrganizationRole, error) {
+	return s.scanOrganizationRole(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(organizationRoleColNames...)+` FROM `+s.table("organizationRole")+` WHERE `+s.table("organizationId")+` = ? AND role = ?`), organizationID, role))
+}
+
+func (s *Store) UpdateOrganizationRole(ctx context.Context, id string, role string, permission map[string][]string) (*types.OrganizationRole, error) {
+	existing, err := s.FindOrganizationRoleByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if role != existing.Role {
+		if _, err := s.FindOrganizationRoleByOrgAndRole(ctx, existing.OrganizationID, role); err == nil {
+			return nil, berrors.ErrAlreadyExists
+		} else if !errors.Is(err, berrors.ErrNotFound) {
+			return nil, err
+		}
+	}
+	encoded, err := encodeOrganizationRolePermission(permission)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("organizationRole")+` SET role = ?, permission = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
+		role, encoded, toMillis(now), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, berrors.ErrNotFound
+	}
+	return s.FindOrganizationRoleByID(ctx, id)
+}
+
+func (s *Store) DeleteOrganizationRole(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("organizationRole")+` WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListOrganizationRolesByOrg(ctx context.Context, organizationID string) ([]types.OrganizationRole, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(organizationRoleColNames...)+` FROM `+s.table("organizationRole")+` WHERE `+s.table("organizationId")+` = ?`), organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []types.OrganizationRole{}
+	for rows.Next() {
+		role, err := s.scanOrganizationRole(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *role)
+	}
+	return out, rows.Err()
+}
+
+// =========================================================================
 // TwoFactor
 // =========================================================================
 
 func (s *Store) CreateTwoFactor(ctx context.Context, rec *types.TwoFactorRecord) error {
-	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM ba_two_factor WHERE user_id = ?`), rec.UserID)
+	_, _ = s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("twoFactor")+` WHERE `+s.table("userId")+` = ?`), rec.UserID)
 	_, err := s.db.ExecContext(ctx, s.q(`
-		INSERT INTO ba_two_factor (id, user_id, secret, backup_codes, verified, created_at, updated_at)
+		INSERT INTO `+s.table("twoFactor")+` (id, `+s.table("userId")+`, secret, `+s.table("backupCodes")+`, verified, `+s.table("failedVerificationCount")+`, `+s.table("lockedUntil")+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`),
-		rec.ID, rec.UserID, rec.Secret, rec.BackupCodes, boolToInt(rec.Verified), toMillis(rec.CreatedAt), toMillis(rec.UpdatedAt))
+		rec.ID, rec.UserID, rec.Secret, rec.BackupCodes, boolToInt(rec.Verified), rec.FailedVerificationCount, nullMillis(rec.LockedUntil))
 	return err
 }
 
 func (s *Store) FindTwoFactorByUserID(ctx context.Context, userID string) (*types.TwoFactorRecord, error) {
 	var (
-		rec       types.TwoFactorRecord
-		verified  int
-		createdAt int64
-		updatedAt int64
+		rec                     types.TwoFactorRecord
+		verified                int
+		failedVerificationCount int
+		lockedUntil             sql.NullInt64
 	)
 	row := s.db.QueryRowContext(ctx, s.q(`
-		SELECT id, user_id, secret, backup_codes, verified, created_at, updated_at FROM ba_two_factor WHERE user_id = ?`), userID)
-	if err := row.Scan(&rec.ID, &rec.UserID, &rec.Secret, &rec.BackupCodes, &verified, &createdAt, &updatedAt); err != nil {
+		SELECT id, `+s.table("userId")+`, secret, `+s.table("backupCodes")+`, verified, `+s.table("failedVerificationCount")+`, `+s.table("lockedUntil")+` FROM `+s.table("twoFactor")+` WHERE `+s.table("userId")+` = ?`), userID)
+	if err := row.Scan(&rec.ID, &rec.UserID, &rec.Secret, &rec.BackupCodes, &verified, &failedVerificationCount, &lockedUntil); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
 	rec.Verified = verified != 0
-	rec.CreatedAt = fromMillis(createdAt)
-	rec.UpdatedAt = fromMillis(updatedAt)
+	rec.FailedVerificationCount = failedVerificationCount
+	rec.LockedUntil = scanNullMillis(lockedUntil)
 	return &rec, nil
 }
 
 func (s *Store) UpdateTwoFactor(ctx context.Context, userID string, secret, backupCodes string, verified bool) error {
 	res, err := s.db.ExecContext(ctx, s.q(`
-		UPDATE ba_two_factor SET secret = ?, backup_codes = ?, verified = ?, updated_at = ? WHERE user_id = ?`),
-		secret, backupCodes, boolToInt(verified), toMillis(time.Now()), userID)
+		UPDATE `+s.table("twoFactor")+` SET secret = ?, `+s.table("backupCodes")+` = ?, verified = ? WHERE `+s.table("userId")+` = ?`),
+		secret, backupCodes, boolToInt(verified), userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateTwoFactorLockout(ctx context.Context, userID string, failedVerificationCount int, lockedUntil *time.Time) error {
+	res, err := s.db.ExecContext(ctx, s.q(`
+		UPDATE `+s.table("twoFactor")+` SET `+s.table("failedVerificationCount")+` = ?, `+s.table("lockedUntil")+` = ? WHERE `+s.table("userId")+` = ?`),
+		failedVerificationCount, nullMillis(lockedUntil), userID)
 	if err != nil {
 		return err
 	}
@@ -394,7 +691,7 @@ func (s *Store) UpdateTwoFactor(ctx context.Context, userID string, secret, back
 }
 
 func (s *Store) DeleteTwoFactor(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_two_factor WHERE user_id = ?`), userID)
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("twoFactor")+` WHERE `+s.table("userId")+` = ?`), userID)
 	return err
 }
 
@@ -402,48 +699,48 @@ func (s *Store) DeleteTwoFactor(ctx context.Context, userID string) error {
 // DeviceCode
 // =========================================================================
 
-const deviceCols = `id, device_code, user_code, user_id, status, expires_at, poll_interval, client_id, scope, created_at`
+var deviceColNames = []string{"id", "deviceCode", "userCode", "userId", "status", "expiresAt", "lastPolledAt", "pollingInterval", "clientId", "scope"}
 
 func (s *Store) scanDeviceCode(row interface{ Scan(...any) error }) (*types.DeviceCode, error) {
 	var (
 		dc        types.DeviceCode
 		userID    sql.NullString
+		lastPoll  sql.NullInt64
 		clientID  sql.NullString
 		scope     sql.NullString
 		expiresAt int64
-		createdAt int64
 	)
-	if err := row.Scan(&dc.ID, &dc.DeviceCode, &dc.UserCode, &userID, &dc.Status, &expiresAt, &dc.Interval, &clientID, &scope, &createdAt); err != nil {
+	if err := row.Scan(&dc.ID, &dc.DeviceCode, &dc.UserCode, &userID, &dc.Status, &expiresAt, &lastPoll, &dc.Interval, &clientID, &scope); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
 	dc.UserID = userID.String
+	dc.LastPolledAt = scanNullMillis(lastPoll)
 	dc.ClientID = clientID.String
 	dc.Scope = scope.String
 	dc.ExpiresAt = fromMillis(expiresAt)
-	dc.CreatedAt = fromMillis(createdAt)
 	return &dc, nil
 }
 
 func (s *Store) CreateDeviceCode(ctx context.Context, dc *types.DeviceCode) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_device_code (`+deviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		dc.ID, dc.DeviceCode, dc.UserCode, nullStr(dc.UserID), dc.Status, toMillis(dc.ExpiresAt), dc.Interval,
-		nullStr(dc.ClientID), nullStr(dc.Scope), toMillis(dc.CreatedAt))
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("deviceCode")+` (`+s.cols(deviceColNames...)+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		dc.ID, dc.DeviceCode, dc.UserCode, nullStr(dc.UserID), dc.Status, toMillis(dc.ExpiresAt), nullMillis(dc.LastPolledAt), dc.Interval,
+		nullStr(dc.ClientID), nullStr(dc.Scope))
 	return err
 }
 
 func (s *Store) FindDeviceCodeByDeviceCode(ctx context.Context, code string) (*types.DeviceCode, error) {
-	return s.scanDeviceCode(s.db.QueryRowContext(ctx, s.q(`SELECT `+deviceCols+` FROM ba_device_code WHERE device_code = ?`), code))
+	return s.scanDeviceCode(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(deviceColNames...)+` FROM `+s.table("deviceCode")+` WHERE `+s.table("deviceCode")+` = ?`), code))
 }
 
 func (s *Store) FindDeviceCodeByUserCode(ctx context.Context, code string) (*types.DeviceCode, error) {
-	return s.scanDeviceCode(s.db.QueryRowContext(ctx, s.q(`SELECT `+deviceCols+` FROM ba_device_code WHERE user_code = ?`), code))
+	return s.scanDeviceCode(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(deviceColNames...)+` FROM `+s.table("deviceCode")+` WHERE `+s.table("userCode")+` = ?`), code))
 }
 
 func (s *Store) UpdateDeviceCode(ctx context.Context, id string, userID, status string) error {
-	res, err := s.db.ExecContext(ctx, s.q(`UPDATE ba_device_code SET user_id = ?, status = ? WHERE id = ?`),
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("deviceCode")+` SET `+s.table("userId")+` = ?, status = ? WHERE id = ?`),
 		nullStr(userID), status, id)
 	if err != nil {
 		return err
@@ -459,13 +756,13 @@ func (s *Store) UpdateDeviceCode(ctx context.Context, id string, userID, status 
 // =========================================================================
 
 func (s *Store) CreateJWKS(ctx context.Context, rec *types.JWKSRecord) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO ba_jwks (id, public_key, private_key, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`),
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("jwks")+` (id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+`) VALUES (?, ?, ?, ?, ?)`),
 		rec.ID, rec.PublicKey, nullStr(rec.PrivateKey), toMillis(rec.CreatedAt), nullMillis(rec.ExpiresAt))
 	return err
 }
 
 func (s *Store) ListJWKS(ctx context.Context) ([]types.JWKSRecord, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, public_key, private_key, created_at, expires_at FROM ba_jwks`))
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+` FROM `+s.table("jwks")))
 	if err != nil {
 		return nil, err
 	}
@@ -495,9 +792,10 @@ func (s *Store) ListJWKS(ctx context.Context) ([]types.JWKSRecord, error) {
 
 func (s *Store) CreateOAuthApp(ctx context.Context, app *types.OAuthApplication) error {
 	_, err := s.db.ExecContext(ctx, s.q(`
-		INSERT INTO ba_oauth_app (id, client_id, client_secret, name, redirect_urls, type, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`),
-		app.ID, app.ClientID, nullStr(app.ClientSecret), app.Name, app.RedirectURLs, app.Type, toMillis(app.CreatedAt))
+		INSERT INTO `+s.table("oauthApplication")+` (id, `+s.table("clientId")+`, `+s.table("clientSecret")+`, name, icon, metadata, `+s.table("redirectUrls")+`, type, disabled, `+s.table("userId")+`, `+s.table("createdAt")+`, `+s.table("updatedAt")+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		app.ID, app.ClientID, nullStr(app.ClientSecret), app.Name, nullStr(app.Icon), nullStr(app.Metadata),
+		app.RedirectURLs, app.Type, boolToInt(app.Disabled), nullStr(app.UserID), toMillis(app.CreatedAt), toMillis(app.UpdatedAt))
 	return err
 }
 
@@ -505,18 +803,28 @@ func (s *Store) FindOAuthAppByClientID(ctx context.Context, clientID string) (*t
 	var (
 		app          types.OAuthApplication
 		clientSecret sql.NullString
+		icon         sql.NullString
+		metadata     sql.NullString
+		userID       sql.NullString
+		disabled     int
 		createdAt    int64
+		updatedAt    int64
 	)
 	row := s.db.QueryRowContext(ctx, s.q(`
-		SELECT id, client_id, client_secret, name, redirect_urls, type, created_at FROM ba_oauth_app WHERE client_id = ?`), clientID)
-	if err := row.Scan(&app.ID, &app.ClientID, &clientSecret, &app.Name, &app.RedirectURLs, &app.Type, &createdAt); err != nil {
+		SELECT id, `+s.table("clientId")+`, `+s.table("clientSecret")+`, name, icon, metadata, `+s.table("redirectUrls")+`, type, disabled, `+s.table("userId")+`, `+s.table("createdAt")+`, `+s.table("updatedAt")+` FROM `+s.table("oauthApplication")+` WHERE `+s.table("clientId")+` = ?`), clientID)
+	if err := row.Scan(&app.ID, &app.ClientID, &clientSecret, &app.Name, &icon, &metadata, &app.RedirectURLs, &app.Type, &disabled, &userID, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
 	app.ClientSecret = clientSecret.String
+	app.Icon = icon.String
+	app.Metadata = metadata.String
+	app.Disabled = disabled != 0
+	app.UserID = userID.String
 	app.CreatedAt = fromMillis(createdAt)
+	app.UpdatedAt = fromMillis(updatedAt)
 	return &app, nil
 }
 
@@ -543,20 +851,20 @@ func (s *Store) scanWallet(row interface{ Scan(...any) error }) (*types.WalletAd
 
 func (s *Store) CreateWallet(ctx context.Context, w *types.WalletAddress) error {
 	_, err := s.db.ExecContext(ctx, s.q(`
-		INSERT INTO ba_wallet (id, user_id, address, chain_id, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
+		INSERT INTO `+s.table("walletAddress")+` (id, `+s.table("userId")+`, address, `+s.table("chainId")+`, `+s.table("isPrimary")+`, `+s.table("createdAt")+`) VALUES (?, ?, ?, ?, ?, ?)`),
 		w.ID, w.UserID, w.Address, w.ChainID, boolToInt(w.IsPrimary), toMillis(w.CreatedAt))
 	return err
 }
 
 func (s *Store) FindWalletByAddress(ctx context.Context, address string, chainID int) (*types.WalletAddress, error) {
 	return s.scanWallet(s.db.QueryRowContext(ctx, s.q(`
-		SELECT id, user_id, address, chain_id, is_primary, created_at FROM ba_wallet WHERE LOWER(address) = ? AND chain_id = ?`),
+		SELECT id, `+s.table("userId")+`, address, `+s.table("chainId")+`, `+s.table("isPrimary")+`, `+s.table("createdAt")+` FROM `+s.table("walletAddress")+` WHERE LOWER(address) = ? AND `+s.table("chainId")+` = ?`),
 		lowerLike(address), chainID))
 }
 
 func (s *Store) ListWalletsByUser(ctx context.Context, userID string) ([]types.WalletAddress, error) {
 	rows, err := s.db.QueryContext(ctx, s.q(`
-		SELECT id, user_id, address, chain_id, is_primary, created_at FROM ba_wallet WHERE user_id = ?`), userID)
+		SELECT id, `+s.table("userId")+`, address, `+s.table("chainId")+`, `+s.table("isPrimary")+`, `+s.table("createdAt")+` FROM `+s.table("walletAddress")+` WHERE `+s.table("userId")+` = ?`), userID)
 	if err != nil {
 		return nil, err
 	}

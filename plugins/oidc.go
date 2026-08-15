@@ -40,12 +40,12 @@ func oidcMetadataHandler() func(*auth.Context) {
 		base := c.Auth.BaseURL() + c.Auth.BasePath()
 		c.WriteJSON(http.StatusOK, map[string]any{
 			"issuer":                                c.Auth.BaseURL(),
-			"authorization_endpoint":                  base + "/oauth2/authorize",
+			"authorization_endpoint":                base + "/oauth2/authorize",
 			"token_endpoint":                        base + "/oauth2/token",
 			"userinfo_endpoint":                     base + "/oauth2/userinfo",
 			"registration_endpoint":                 base + "/oauth2/register",
 			"end_session_endpoint":                  base + "/oauth2/endsession",
-			"response_types_supported":                []string{"code"},
+			"response_types_supported":              []string{"code"},
 			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{constants.JWTAlgHS256},
 		})
@@ -160,8 +160,8 @@ func oidcRegisterHandler() func(*auth.Context) {
 			redirects += u
 		}
 		_ = ext.CreateOAuthApp(c.R.Context(), &types.OAuthApplication{
-			ClientID: clientID, ClientSecret: secret, Name: body.ClientName,
-			RedirectURLs: redirects, Type: constants.OAuthAppTypeWeb, CreatedAt: now,
+			ID: clientID, ClientID: clientID, ClientSecret: secret, Name: body.ClientName,
+			RedirectURLs: redirects, Type: constants.OAuthAppTypeWeb, CreatedAt: now, UpdatedAt: now,
 		})
 		c.WriteJSON(http.StatusOK, map[string]string{
 			"client_id": clientID, "client_secret": secret,

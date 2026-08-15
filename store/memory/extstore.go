@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -46,7 +47,7 @@ func (s *Store) FindOrganizationBySlug(_ context.Context, slug string) (*types.O
 	return &cp, nil
 }
 
-func (s *Store) UpdateOrganization(_ context.Context, id string, name, slug string, logo *string) (*types.Organization, error) {
+func (s *Store) UpdateOrganization(_ context.Context, id string, name, slug string, logo *string, metadata *string) (*types.Organization, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.orgs[id]
@@ -67,6 +68,11 @@ func (s *Store) UpdateOrganization(_ context.Context, id string, name, slug stri
 	if logo != nil {
 		o.Logo = logo
 	}
+	if metadata != nil {
+		o.Metadata = *metadata
+	}
+	now := time.Now().UTC()
+	o.UpdatedAt = &now
 	cp := *o
 	return &cp, nil
 }
@@ -93,6 +99,11 @@ func (s *Store) DeleteOrganization(_ context.Context, id string) error {
 	for tid, t := range s.teams {
 		if t.OrganizationID == id {
 			delete(s.teams, tid)
+		}
+	}
+	for roleID, role := range s.organizationRoles {
+		if role.OrganizationID == id {
+			delete(s.organizationRoles, roleID)
 		}
 	}
 	return nil
@@ -123,6 +134,17 @@ func (s *Store) DeleteMember(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) FindMemberByID(_ context.Context, id string) (*types.Member, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.members[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *m
+	return &cp, nil
+}
+
 func (s *Store) FindMemberByOrgAndUser(_ context.Context, orgID, userID string) (*types.Member, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -133,6 +155,18 @@ func (s *Store) FindMemberByOrgAndUser(_ context.Context, orgID, userID string) 
 		}
 	}
 	return nil, ErrNotFound
+}
+
+func (s *Store) UpdateMemberRole(_ context.Context, id string, role string) (*types.Member, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.members[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	m.Role = role
+	cp := *m
+	return &cp, nil
 }
 
 func (s *Store) ListMembersByOrg(_ context.Context, orgID string) ([]types.Member, error) {
@@ -186,6 +220,17 @@ func (s *Store) UpdateInvitationStatus(_ context.Context, id, status string) err
 		return ErrNotFound
 	}
 	inv.Status = status
+	return nil
+}
+
+func (s *Store) UpdateInvitationExpiresAt(_ context.Context, id string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv, ok := s.invitations[id]
+	if !ok {
+		return ErrNotFound
+	}
+	inv.ExpiresAt = expiresAt
 	return nil
 }
 
@@ -245,6 +290,21 @@ func (s *Store) FindTeamByID(_ context.Context, id string) (*types.Team, error) 
 	return &cp, nil
 }
 
+func (s *Store) UpdateTeam(_ context.Context, id string, name string) (*types.Team, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.teams[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if name != "" {
+		t.Name = name
+	}
+	t.UpdatedAt = time.Now()
+	cp := *t
+	return &cp, nil
+}
+
 func (s *Store) ListTeamsByOrg(_ context.Context, orgID string) ([]types.Team, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -252,6 +312,24 @@ func (s *Store) ListTeamsByOrg(_ context.Context, orgID string) ([]types.Team, e
 	for _, t := range s.teams {
 		if t.OrganizationID == orgID {
 			out = append(out, *t)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListTeamsByUser(_ context.Context, userID string) ([]types.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	teamIDs := make(map[string]struct{})
+	for _, tm := range s.teamMembers {
+		if tm.UserID == userID {
+			teamIDs[tm.TeamID] = struct{}{}
+		}
+	}
+	out := make([]types.Team, 0, len(teamIDs))
+	for teamID := range teamIDs {
+		if team, ok := s.teams[teamID]; ok {
+			out = append(out, *team)
 		}
 	}
 	return out, nil
@@ -272,6 +350,30 @@ func (s *Store) DeleteTeamMember(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) DeleteTeamMemberByTeamAndUser(_ context.Context, teamID string, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, tm := range s.teamMembers {
+		if tm.TeamID == teamID && tm.UserID == userID {
+			delete(s.teamMembers, id)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (s *Store) FindTeamMember(_ context.Context, teamID string, userID string) (*types.TeamMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, tm := range s.teamMembers {
+		if tm.TeamID == teamID && tm.UserID == userID {
+			cp := *tm
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (s *Store) ListTeamMembers(_ context.Context, teamID string) ([]types.TeamMember, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -279,6 +381,96 @@ func (s *Store) ListTeamMembers(_ context.Context, teamID string) ([]types.TeamM
 	for _, tm := range s.teamMembers {
 		if tm.TeamID == teamID {
 			out = append(out, *tm)
+		}
+	}
+	return out, nil
+}
+
+func cloneOrganizationRolePermission(permission map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(permission))
+	for resource, actions := range permission {
+		out[resource] = append([]string(nil), actions...)
+	}
+	return out
+}
+
+func cloneOrganizationRole(role *types.OrganizationRole) *types.OrganizationRole {
+	cp := *role
+	cp.Permission = cloneOrganizationRolePermission(role.Permission)
+	return &cp
+}
+
+func (s *Store) CreateOrganizationRole(_ context.Context, role *types.OrganizationRole) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.organizationRoles {
+		if existing.OrganizationID == role.OrganizationID && existing.Role == role.Role {
+			return ErrAlreadyExists
+		}
+	}
+	s.organizationRoles[role.ID] = cloneOrganizationRole(role)
+	return nil
+}
+
+func (s *Store) FindOrganizationRoleByID(_ context.Context, roleID string) (*types.OrganizationRole, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	role, ok := s.organizationRoles[roleID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return cloneOrganizationRole(role), nil
+}
+
+func (s *Store) FindOrganizationRoleByOrgAndRole(_ context.Context, organizationID string, roleName string) (*types.OrganizationRole, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, role := range s.organizationRoles {
+		if role.OrganizationID == organizationID && role.Role == roleName {
+			return cloneOrganizationRole(role), nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Store) UpdateOrganizationRole(_ context.Context, roleID string, roleName string, permission map[string][]string) (*types.OrganizationRole, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	role, ok := s.organizationRoles[roleID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if roleName != role.Role {
+		for _, existing := range s.organizationRoles {
+			if existing.ID != roleID && existing.OrganizationID == role.OrganizationID && existing.Role == roleName {
+				return nil, ErrAlreadyExists
+			}
+		}
+		role.Role = roleName
+	}
+	role.Permission = cloneOrganizationRolePermission(permission)
+	now := time.Now().UTC()
+	role.UpdatedAt = &now
+	return cloneOrganizationRole(role), nil
+}
+
+func (s *Store) DeleteOrganizationRole(_ context.Context, roleID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.organizationRoles[roleID]; !ok {
+		return ErrNotFound
+	}
+	delete(s.organizationRoles, roleID)
+	return nil
+}
+
+func (s *Store) ListOrganizationRolesByOrg(_ context.Context, organizationID string) ([]types.OrganizationRole, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []types.OrganizationRole{}
+	for _, role := range s.organizationRoles {
+		if role.OrganizationID == organizationID {
+			out = append(out, *cloneOrganizationRole(role))
 		}
 	}
 	return out, nil
@@ -313,6 +505,18 @@ func (s *Store) UpdateTwoFactor(_ context.Context, userID string, secret, backup
 	rec.Secret = secret
 	rec.BackupCodes = backupCodes
 	rec.Verified = verified
+	return nil
+}
+
+func (s *Store) UpdateTwoFactorLockout(_ context.Context, userID string, failedVerificationCount int, lockedUntil *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.twoFactor[userID]
+	if !ok {
+		return ErrNotFound
+	}
+	rec.FailedVerificationCount = failedVerificationCount
+	rec.LockedUntil = lockedUntil
 	return nil
 }
 

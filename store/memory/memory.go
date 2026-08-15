@@ -32,6 +32,7 @@ type Store struct {
 	invitations       map[string]*types.Invitation
 	teams             map[string]*types.Team
 	teamMembers       map[string]*types.TeamMember
+	organizationRoles map[string]*types.OrganizationRole
 	twoFactor         map[string]*types.TwoFactorRecord
 	deviceCodes       map[string]*types.DeviceCode
 	deviceCodesByUser map[string]string
@@ -54,6 +55,7 @@ func New() *Store {
 		invitations:       make(map[string]*types.Invitation),
 		teams:             make(map[string]*types.Team),
 		teamMembers:       make(map[string]*types.TeamMember),
+		organizationRoles: make(map[string]*types.OrganizationRole),
 		twoFactor:         make(map[string]*types.TwoFactorRecord),
 		deviceCodes:       make(map[string]*types.DeviceCode),
 		deviceCodesByUser: make(map[string]string),

@@ -26,7 +26,7 @@ backend is Go.
 | Social OAuth | 35+ providers | Google, GitHub built-in + generic OAuth plugin |
 | Plugins | many | 24 core plugins |
 | Adapters | Kysely, Drizzle, Prisma, … | driver-agnostic SQL (Postgres/SQLite/MySQL) + `Store` interface |
-| Plugin/extra fields | dedicated columns | stored in a portable JSON `additional` column |
+| Plugin/extra fields | dedicated columns | plugin columns + JSON custom fields |
 | CLI | `@better-auth/cli` | `cli` binary + `cli/core` package |
 
 See the [ROADMAP](../ROADMAP.md) for the full parity tracker.

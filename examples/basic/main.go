@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	databasesql "database/sql"
-	"fmt"
+	_ "embed"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +18,12 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// playgroundHTML is an interactive demo page exercising every enabled auth
+// method (OAuth, email/password, magic link, email OTP). Served at "/".
+//
+//go:embed playground.html
+var playgroundHTML []byte
 
 // newStore returns a SQL-backed store. Defaults to ./better-auth-example.db so
 // ExtStore plugins (organization, two-factor, …) work out of the box.
@@ -146,8 +152,8 @@ func main() {
 		Plugins: []auth.Plugin{
 			plugins.Bearer(plugins.BearerOptions{}),
 			plugins.Username(plugins.UsernameOptions{}),
-			plugins.Organization(plugins.OrganizationOptions{}),
-			plugins.TwoFactor(plugins.TwoFactorOptions{Issuer: "Better Auth Go Example"}),
+			// plugins.Organization(plugins.OrganizationOptions{}),
+			// plugins.TwoFactor(plugins.TwoFactorOptions{Issuer: "Better Auth Go Example"}),
 			plugins.Anonymous(plugins.AnonymousOptions{}),
 			plugins.LastLoginMethod(plugins.LastLoginMethodOptions{StoreInCookie: true}),
 			plugins.MagicLink(plugins.MagicLinkOptions{
@@ -173,23 +179,17 @@ func main() {
 	// Mount Better Auth handler at /api/auth
 	mux.Handle("/api/auth/", http.StripPrefix("/api/auth", a.Handler()))
 
+	// Interactive playground: one page with every enabled auth method.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Better Auth Go server running.")
-		fmt.Fprintln(w, "Auth endpoints: http://localhost:8080/api/auth/*")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "Enabled plugins: bearer, username, organization, two-factor,")
-		fmt.Fprintln(w, "  anonymous, last-login-method, magic-link, email-otp")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "Email / link flows log URLs and OTPs to this terminal.")
-		fmt.Fprintln(w, "OAuth: set GOOGLE_CLIENT_ID/SECRET and/or GITHUB_CLIENT_ID/SECRET.")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "Client schema (type inference):")
-		fmt.Fprintln(w, "  GET http://localhost:8080/api/auth/client-schema")
-		fmt.Fprintln(w, "")
-		fmt.Fprintln(w, "React playground: cd examples/react && npm run dev")
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(playgroundHTML)
 	})
 
-	addr := ":8080"
+	addr := ":8070"
 	log.Printf("listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

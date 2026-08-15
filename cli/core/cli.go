@@ -162,6 +162,10 @@ type featureMigrator interface {
 	MigrateFor(context.Context, ...string) error
 }
 
+type schemaPlugin interface {
+	SchemaPluginIDs() []string
+}
+
 // resolvePluginIDs determines which plugin schema groups to include. When an
 // auth instance is supplied its configured plugins are authoritative (the Go
 // equivalent of the TS CLI reading your config). Otherwise the --plugins list
@@ -170,6 +174,10 @@ func resolvePluginIDs(opts Options, explicit string, all bool) []string {
 	if opts.Auth != nil {
 		ids := make([]string, 0, len(opts.Auth.Plugins()))
 		for _, p := range opts.Auth.Plugins() {
+			if sp, ok := p.(schemaPlugin); ok {
+				ids = append(ids, sp.SchemaPluginIDs()...)
+				continue
+			}
 			ids = append(ids, p.ID())
 		}
 		return ids

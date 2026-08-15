@@ -11,14 +11,22 @@ func srt(method, pattern string, fn func(*auth.Context)) auth.PluginRoute {
 }
 
 type basePlugin struct {
-	id     string
-	routes []auth.PluginRoute
-	hooks  *auth.PluginHooks
+	id        string
+	routes    []auth.PluginRoute
+	hooks     *auth.PluginHooks
+	schemaIDs []string
 }
 
 func (b basePlugin) ID() string                 { return b.id }
 func (b basePlugin) Routes() []auth.PluginRoute { return b.routes }
 func (b basePlugin) Hooks() *auth.PluginHooks   { return b.hooks }
+
+func (b basePlugin) SchemaPluginIDs() []string {
+	if len(b.schemaIDs) > 0 {
+		return append([]string(nil), b.schemaIDs...)
+	}
+	return []string{b.id}
+}
 
 func (b basePlugin) ClientPluginInfo() *auth.ClientPluginInfo {
 	return clientPluginInfo(b.id)

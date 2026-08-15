@@ -71,6 +71,32 @@ func (c Config) DontRememberName() string {
 	return c.resolveName("dont_remember", name)
 }
 
+// TwoFactorName returns the two-factor challenge cookie name.
+func (c Config) TwoFactorName() string {
+	prefix := c.Prefix
+	if prefix == "" {
+		prefix = "better-auth"
+	}
+	name := prefix + ".two_factor"
+	if c.Secure {
+		name = "__Secure-" + name
+	}
+	return c.resolveName("two_factor", name)
+}
+
+// TrustDeviceName returns the trusted-device cookie name.
+func (c Config) TrustDeviceName() string {
+	prefix := c.Prefix
+	if prefix == "" {
+		prefix = "better-auth"
+	}
+	name := prefix + ".trust_device"
+	if c.Secure {
+		name = "__Secure-" + name
+	}
+	return c.resolveName("trust_device", name)
+}
+
 // SignCookie signs a value using HMAC-SHA256 with standard base64 encoding,
 // matching better-call's serializeSignedCookie format: value.signature
 func SignCookie(value, secret string) string {
@@ -151,6 +177,38 @@ func SetSessionCookie(w http.ResponseWriter, cfg Config, secret, token string, m
 	}
 }
 
+// SetTwoFactorCookie sets the signed two-factor challenge cookie.
+func SetTwoFactorCookie(w http.ResponseWriter, cfg Config, secret string, identifier string, maxAge int) {
+	signed := SignCookie(identifier, secret)
+	http.SetCookie(w, &http.Cookie{
+		Name:        cfg.TwoFactorName(),
+		Value:       signed,
+		Path:        cfg.Path,
+		Domain:      cfg.Domain,
+		MaxAge:      maxAge,
+		HttpOnly:    true,
+		Secure:      cfg.Secure,
+		SameSite:    cfg.SameSite,
+		Partitioned: cfg.Partitioned,
+	})
+}
+
+// SetTrustDeviceCookie sets the signed trusted-device cookie.
+func SetTrustDeviceCookie(w http.ResponseWriter, cfg Config, secret string, value string, maxAge int) {
+	signed := SignCookie(value, secret)
+	http.SetCookie(w, &http.Cookie{
+		Name:        cfg.TrustDeviceName(),
+		Value:       signed,
+		Path:        cfg.Path,
+		Domain:      cfg.Domain,
+		MaxAge:      maxAge,
+		HttpOnly:    true,
+		Secure:      cfg.Secure,
+		SameSite:    cfg.SameSite,
+		Partitioned: cfg.Partitioned,
+	})
+}
+
 // SetSessionDataCookie sets the session_data cache cookie.
 func SetSessionDataCookie(w http.ResponseWriter, cfg Config, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
@@ -208,6 +266,36 @@ func DeleteSessionCookies(w http.ResponseWriter, cfg Config) {
 	http.SetCookie(w, &dontRememberCookie)
 }
 
+// DeleteTwoFactorCookie clears the two-factor challenge cookie.
+func DeleteTwoFactorCookie(w http.ResponseWriter, cfg Config) {
+	http.SetCookie(w, &http.Cookie{
+		Name:        cfg.TwoFactorName(),
+		Path:        cfg.Path,
+		Domain:      cfg.Domain,
+		MaxAge:      -1,
+		Expires:     time.Unix(0, 0),
+		HttpOnly:    true,
+		Secure:      cfg.Secure,
+		SameSite:    cfg.SameSite,
+		Partitioned: cfg.Partitioned,
+	})
+}
+
+// DeleteTrustDeviceCookie clears the trusted-device cookie.
+func DeleteTrustDeviceCookie(w http.ResponseWriter, cfg Config) {
+	http.SetCookie(w, &http.Cookie{
+		Name:        cfg.TrustDeviceName(),
+		Path:        cfg.Path,
+		Domain:      cfg.Domain,
+		MaxAge:      -1,
+		Expires:     time.Unix(0, 0),
+		HttpOnly:    true,
+		Secure:      cfg.Secure,
+		SameSite:    cfg.SameSite,
+		Partitioned: cfg.Partitioned,
+	})
+}
+
 // GetSessionToken reads and verifies the session token from the request cookies.
 func GetSessionToken(r *http.Request, cfg Config, secret string) (string, bool) {
 	return GetSessionTokenAny(r, cfg, []string{secret})
@@ -217,6 +305,24 @@ func GetSessionToken(r *http.Request, cfg Config, secret string) (string, bool) 
 // provided secrets (primary first, then rotated/old secrets).
 func GetSessionTokenAny(r *http.Request, cfg Config, secrets []string) (string, bool) {
 	c, err := r.Cookie(cfg.SessionTokenName())
+	if err != nil {
+		return "", false
+	}
+	return VerifySignedCookieAny(c.Value, secrets)
+}
+
+// GetTwoFactorCookieAny reads and verifies the two-factor challenge cookie.
+func GetTwoFactorCookieAny(r *http.Request, cfg Config, secrets []string) (string, bool) {
+	c, err := r.Cookie(cfg.TwoFactorName())
+	if err != nil {
+		return "", false
+	}
+	return VerifySignedCookieAny(c.Value, secrets)
+}
+
+// GetTrustDeviceCookieAny reads and verifies the trusted-device cookie.
+func GetTrustDeviceCookieAny(r *http.Request, cfg Config, secrets []string) (string, bool) {
+	c, err := r.Cookie(cfg.TrustDeviceName())
 	if err != nil {
 		return "", false
 	}

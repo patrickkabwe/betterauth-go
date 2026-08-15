@@ -19,7 +19,6 @@ func TestClientSchema(t *testing.T) {
 		c.Plugins = []auth.Plugin{
 			plugins.Bearer(plugins.BearerOptions{}),
 			plugins.Organization(plugins.OrganizationOptions{}),
-			plugins.Username(plugins.UsernameOptions{}),
 		}
 	})
 
@@ -41,12 +40,6 @@ func TestClientSchema(t *testing.T) {
 	if schema.User["role"].Type != "string" {
 		t.Fatal("missing role field")
 	}
-	if schema.User[constants.FieldUsername].Type != "string" {
-		t.Fatal("missing username field")
-	}
-	if schema.User[constants.FieldDisplayUsername].Type != "string" {
-		t.Fatal("missing displayUsername field")
-	}
 
 	var org *auth.ClientPluginSchema
 	for i := range schema.Plugins {
@@ -57,6 +50,39 @@ func TestClientSchema(t *testing.T) {
 	}
 	if org == nil || org.ClientPlugin == nil || org.ClientPlugin.Import != "organizationClient" {
 		t.Fatalf("organization client plugin missing: %+v", org)
+	}
+	for _, endpoint := range org.Endpoints {
+		if endpoint.Path == "/organization/add-member" {
+			t.Fatalf("server-only organization add-member leaked into plugin schema")
+		}
+		if isOrganizationTeamEndpoint(endpoint.Path) {
+			t.Fatalf("disabled organization team endpoint leaked into plugin schema: %s", endpoint.Path)
+		}
+	}
+	for _, endpoint := range schema.Routes {
+		if endpoint.Path == "/organization/add-member" {
+			t.Fatalf("server-only organization add-member leaked into route schema")
+		}
+		if isOrganizationTeamEndpoint(endpoint.Path) {
+			t.Fatalf("disabled organization team endpoint leaked into route schema: %s", endpoint.Path)
+		}
+	}
+}
+
+func isOrganizationTeamEndpoint(path string) bool {
+	switch path {
+	case "/organization/create-team",
+		"/organization/remove-team",
+		"/organization/update-team",
+		"/organization/list-teams",
+		"/organization/set-active-team",
+		"/organization/list-user-teams",
+		"/organization/list-team-members",
+		"/organization/add-team-member",
+		"/organization/remove-team-member":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -43,6 +43,12 @@ type Store interface {
 	ListUsers(ctx context.Context, opts ListUsersOpts) ([]types.User, error)
 }
 
+// UserAdditionalFinder optionally provides an indexed lookup for user fields
+// exposed through User.Additional.
+type UserAdditionalFinder interface {
+	FindUserByAdditional(ctx context.Context, key string, value any) (*types.User, error)
+}
+
 // UserUpdate contains mutable user fields.
 type UserUpdate struct {
 	Name          *string

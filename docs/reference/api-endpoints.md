@@ -68,10 +68,11 @@ Plugin endpoints are registered dynamically. Common examples:
 | Plugin | Example paths |
 |--------|----------------|
 | `username` | `/sign-in/username`, `/is-username-available` |
+| `phone-number` | `/sign-in/phone-number`, `/phone-number/request-password-reset`, `/phone-number/reset-password` |
 | `magic-link` | `/sign-in/magic-link`, `/magic-link/verify` |
-| `email-otp` | `/email-otp/send-verification-otp`, `/sign-in/email-otp` |
+| `email-otp` | `/email-otp/send-verification-otp`, `/sign-in/email-otp`, `/email-otp/reset-password` |
 | `organization` | `/organization/create`, `/organization/list`, `/organization/invite-member` |
-| `two-factor` | `/two-factor/enable`, `/two-factor/verify-totp` |
+| `two-factor` | `/two-factor/enable`, `/two-factor/verify-totp`, `/two-factor/send-otp`, `/two-factor/verify-otp` |
 | `admin` | `/admin/list-users`, `/admin/impersonate-user` |
 | `open-api` | `/reference` (OpenAPI spec) |
 

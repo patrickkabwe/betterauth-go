@@ -1,7 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { authClient, getBearerToken } from "./lib/auth-client";
+import { authClient, baseURL, getBearerToken } from "./lib/auth-client";
 import { fetchClientSchema, type ClientSchema } from "./lib/client-schema";
 import { callbackURL, formatError, runAuthAction } from "./lib/helpers";
+import AuthCard from "./components/AuthCard";
+import ForgotPassword from "./components/ForgotPassword";
+import ResetPassword from "./components/ResetPassword";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -38,9 +41,8 @@ function ActionRow({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const { data: session, isPending, error, refetch } = authClient.useSession();
-  const authURL = import.meta.env.VITE_AUTH_URL ?? "http://localhost:8080";
-
   const [schema, setSchema] = useState<ClientSchema | null>(null);
+  const [showPlayground, setShowPlayground] = useState(false);
   const [mode, setMode] = useState<Mode>("sign-in");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -86,8 +88,8 @@ export default function App() {
   );
 
   useEffect(() => {
-    fetchClientSchema(authURL).then(setSchema);
-  }, [authURL]);
+    fetchClientSchema(baseURL).then(setSchema);
+  }, [baseURL]);
 
   useEffect(() => {
     if (session?.user.name) setNewName(session.user.name);
@@ -526,13 +528,30 @@ export default function App() {
       ? (authClient as { getLastUsedLoginMethod: () => string | null }).getLastUsedLoginMethod()
       : null;
 
+  // Forgot-password screen: dedicated page to request a reset link.
+  if (typeof window !== "undefined" && window.location.pathname === "/forgot-password") {
+    return <ForgotPassword />;
+  }
+
+  // Password-reset screen: the Go server redirects here (?token=… or ?error=…)
+  // after the user opens the reset link from their email.
+  if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+    return <ResetPassword />;
+  }
+
+  // Signed-out landing: the polished Apex sign-in card. The full developer
+  // playground stays one click away.
+  if (!session && !isPending && !showPlayground) {
+    return <AuthCard onSuccess={() => refetch()} onShowPlayground={() => setShowPlayground(true)} />;
+  }
+
   return (
     <div className="page">
       <header className="hero">
         <p className="eyebrow">betterauth · go + react</p>
         <h1>Auth playground</h1>
         <p className="lede">
-          Manual test harness for the Go server at <code>{authURL}</code>. Email links, OTPs, and
+          Manual test harness for the Go server at <code>{baseURL}</code>. Email links, OTPs, and
           magic links are printed in the server terminal.
         </p>
       </header>

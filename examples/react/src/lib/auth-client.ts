@@ -11,7 +11,7 @@ import {
 } from "better-auth/client/plugins";
 import type { Auth } from "./auth-types";
 
-const baseURL = import.meta.env.VITE_AUTH_URL ?? "http://localhost:8080";
+export const baseURL = import.meta.env.VITE_AUTH_URL ?? "http://localhost:8070";
 
 /**
  * Client plugins mirror the Go server plugins in examples/basic.

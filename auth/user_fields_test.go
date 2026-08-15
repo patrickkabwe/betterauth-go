@@ -1,8 +1,13 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/patrickkabwe/betterauth-go/constants"
+	"github.com/patrickkabwe/betterauth-go/store/memory"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 func TestParseAdditionalUserInput(t *testing.T) {
@@ -77,4 +82,39 @@ func TestApplyDefaultAdditionalFields(t *testing.T) {
 	if out["role"] != "user" {
 		t.Fatalf("out=%v", out)
 	}
+}
+
+func TestFindUserByAdditionalUsesOptionalStoreFinderThroughHooks(t *testing.T) {
+	finder := &testAdditionalFinderStore{
+		Store: memory.New(),
+		user:  &types.User{ID: "found-user", Email: "found@example.com"},
+	}
+	a, err := New(Config{
+		Secret: "test-secret-key-for-cookie-signing",
+		Store:  finder,
+		DatabaseHooks: DatabaseHooksConfig{
+			User: &UserDatabaseHooks{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := a.FindUserByAdditional(context.Background(), constants.FieldUsername, "alice")
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.ID != "found-user" || !finder.called {
+		t.Fatalf("finder not used: user=%+v called=%v", user, finder.called)
+	}
+}
+
+type testAdditionalFinderStore struct {
+	*memory.Store
+	called bool
+	user   *types.User
+}
+
+func (s *testAdditionalFinderStore) FindUserByAdditional(_ context.Context, _ string, _ any) (*types.User, error) {
+	s.called = true
+	return s.user, nil
 }

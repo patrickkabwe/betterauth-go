@@ -62,13 +62,13 @@ func TestGenerateCoreOnly(t *testing.T) {
 	}
 	sql := readFile(t, filepath.Join(dir, "schema.sql"))
 	// Core tables present.
-	for _, want := range []string{"CREATE TABLE IF NOT EXISTS ba_user", "ba_session", "ba_account", "ba_verification", "(postgres)"} {
+	for _, want := range []string{`CREATE TABLE IF NOT EXISTS "user"`, `"session"`, `"account"`, `"verification"`, "(postgres)"} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("schema missing core table %q", want)
 		}
 	}
 	// Plugin tables absent without any feature enabled.
-	for _, unexpected := range []string{"ba_organization", "ba_two_factor", "ba_wallet", "ba_jwks", "ba_device_code", "ba_oauth_app"} {
+	for _, unexpected := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"deviceCode"`, `"oauthApplication"`} {
 		if strings.Contains(sql, unexpected) {
 			t.Fatalf("core-only schema should not contain %q", unexpected)
 		}
@@ -77,17 +77,17 @@ func TestGenerateCoreOnly(t *testing.T) {
 
 func TestGenerateWithPluginsFlag(t *testing.T) {
 	dir := t.TempDir()
-	_, _, err := run(t, []string{"generate", "--plugins", "organization,two-factor", "-o", "schema.sql", "--yes"}, core.Options{WorkingDir: dir})
+	_, _, err := run(t, []string{"generate", "--plugins", "organization,organization-teams,two-factor", "-o", "schema.sql", "--yes"}, core.Options{WorkingDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sql := readFile(t, filepath.Join(dir, "schema.sql"))
-	for _, want := range []string{"ba_organization", "ba_member", "ba_team", "ba_two_factor"} {
+	for _, want := range []string{`"organization"`, `"member"`, `"team"`, `"twoFactor"`} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("schema missing enabled-plugin table %q", want)
 		}
 	}
-	for _, unexpected := range []string{"ba_wallet", "ba_jwks", "ba_oauth_app", "ba_device_code"} {
+	for _, unexpected := range []string{`"walletAddress"`, `"jwks"`, `"oauthApplication"`, `"deviceCode"`} {
 		if strings.Contains(sql, unexpected) {
 			t.Fatalf("schema should not contain disabled-plugin table %q", unexpected)
 		}
@@ -110,12 +110,35 @@ func TestGenerateFromAuthConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := readFile(t, filepath.Join(dir, "schema.sql"))
-	if !strings.Contains(sql, "ba_organization") {
+	if !strings.Contains(sql, `"organization"`) {
 		t.Fatal("expected organization tables from configured plugin")
 	}
-	for _, unexpected := range []string{"ba_wallet", "ba_jwks", "ba_two_factor"} {
+	for _, unexpected := range []string{`"walletAddress"`, `"jwks"`, `"twoFactor"`, `CREATE TABLE IF NOT EXISTS "team"`} {
 		if strings.Contains(sql, unexpected) {
 			t.Fatalf("schema should not contain %q (plugin not enabled)", unexpected)
+		}
+	}
+}
+
+func TestGenerateFromAuthConfigWithOrganizationTeams(t *testing.T) {
+	a, err := auth.New(auth.Config{
+		Secret: "x-secret-aaaaaaaaaaaaaaaaaaaaaa",
+		Store:  memory.New(),
+		Plugins: []auth.Plugin{plugins.Organization(plugins.OrganizationOptions{
+			Teams: &plugins.OrganizationTeamsOptions{Enabled: true},
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if _, _, err := run(t, []string{"generate", "-o", "schema.sql", "--yes"}, core.Options{Auth: a, WorkingDir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	sql := readFile(t, filepath.Join(dir, "schema.sql"))
+	for _, want := range []string{`CREATE TABLE IF NOT EXISTS "team"`, `CREATE TABLE IF NOT EXISTS "teamMember"`, `"activeTeamId"`} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("schema missing organization teams feature %q", want)
 		}
 	}
 }
@@ -126,15 +149,15 @@ func TestGenerateAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := readFile(t, filepath.Join(dir, "schema.sql"))
-	for _, want := range []string{"ba_organization", "ba_two_factor", "ba_wallet", "ba_jwks", "ba_oauth_app", "ba_device_code"} {
+	for _, want := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"oauthApplication"`, `"deviceCode"`} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("--all schema missing %q", want)
 		}
 	}
 	// The shared OAuth app table must appear exactly once even though both
 	// oidc-provider and mcp need it.
-	if n := strings.Count(sql, "CREATE TABLE IF NOT EXISTS ba_oauth_app"); n != 1 {
-		t.Fatalf("ba_oauth_app should be emitted once, got %d", n)
+	if n := strings.Count(sql, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
+		t.Fatalf("oauthApplication should be emitted once, got %d", n)
 	}
 }
 
@@ -196,9 +219,9 @@ func TestMigrateWithAuthStore(t *testing.T) {
 	}
 	// Verify a core table now exists.
 	var name string
-	row := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='ba_user'`)
+	row := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='user'`)
 	if err := row.Scan(&name); err != nil {
-		t.Fatalf("ba_user table not created: %v", err)
+		t.Fatalf("user table not created: %v", err)
 	}
 }
 
@@ -222,7 +245,7 @@ func TestMigrateUnwrapsHookedStore(t *testing.T) {
 	if _, _, err := run(t, []string{"migrate", "--yes"}, core.Options{Auth: a}); err != nil {
 		t.Fatalf("migrate through wrapper: %v", err)
 	}
-	if err := db.QueryRow(`SELECT 1 FROM ba_session LIMIT 1`).Err(); err != nil {
+	if err := db.QueryRow(`SELECT 1 FROM "session" LIMIT 1`).Err(); err != nil {
 		// table existing (no rows) returns ErrNoRows, which is fine; a "no such
 		// table" error is not.
 		if strings.Contains(err.Error(), "no such table") {
@@ -242,8 +265,8 @@ func TestMigrateFromDSN(t *testing.T) {
 	}
 	db, _ := databasesql.Open("sqlite", "file:"+dbPath)
 	defer db.Close()
-	if err := db.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE name='ba_account'`).Scan(new(string)); err != nil {
-		t.Fatalf("ba_account not created via DSN migrate: %v", err)
+	if err := db.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE name='account'`).Scan(new(string)); err != nil {
+		t.Fatalf("account not created via DSN migrate: %v", err)
 	}
 }
 

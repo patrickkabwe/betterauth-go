@@ -76,9 +76,23 @@ Built-in implementations:
 
 ## Additional fields
 
-User and session plugin data lives in JSON `additional` columns/maps — not
-separate columns per field. Use `UserUpdate.Additional` and
+User and session plugin data is exposed through `Additional` maps in the store
+interface. The SQL adapter persists supported Better Auth JS plugin fields in
+dedicated columns when the enabled plugin schema creates them; custom fields can
+remain in JSON `additional`. Use `UserUpdate.Additional` and
 `SessionUpdate.Additional` for partial updates.
+
+Stores may also implement `store.UserAdditionalFinder` to provide an indexed
+lookup for fields exposed through `User.Additional`:
+
+```go
+type UserAdditionalFinder interface {
+    FindUserByAdditional(ctx context.Context, key string, value any) (*types.User, error)
+}
+```
+
+The SQL adapter uses this for Better Auth JS plugin columns such as `username`
+and `phoneNumber`.
 
 ## Database hooks wrapper
 
@@ -87,7 +101,7 @@ access the underlying store via `auth.ExtStore(a.Store())`.
 
 ## SQL schema reference
 
-Core tables: `ba_user`, `ba_account`, `ba_session`, `ba_verification`.
+Core tables: `user`, `account`, `session`, `verification`.
 
 Generate full schema:
 

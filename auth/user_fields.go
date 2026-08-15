@@ -106,6 +106,19 @@ func applyDefaultAdditionalFields(userAdditional map[string]any, fields map[stri
 	return userAdditional
 }
 
+func mergeAdditionalMaps(base map[string]any, next map[string]any) map[string]any {
+	if len(next) == 0 {
+		return base
+	}
+	if base == nil {
+		base = make(map[string]any, len(next))
+	}
+	for key, value := range next {
+		base[key] = value
+	}
+	return base
+}
+
 func mergeUserUpdateFromBody(body map[string]json.RawMessage, fields map[string]AdditionalFieldDef) (store.UserUpdate, map[string]json.RawMessage, *apierror.Error) {
 	update := store.UserUpdate{}
 	rest := make(map[string]json.RawMessage, len(body))

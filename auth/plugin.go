@@ -1,11 +1,6 @@
 package auth
 
-import (
-	"net/http"
-
-	"github.com/patrickkabwe/betterauth-go/internal/apierror"
-	"github.com/patrickkabwe/betterauth-go/types"
-)
+import "net/http"
 
 // Plugin extends Better Auth with routes and lifecycle hooks.
 type Plugin interface {
@@ -18,32 +13,6 @@ type Plugin interface {
 type PasswordValidatorPlugin interface {
 	Plugin
 	ValidatePassword(password string) error
-}
-
-// EmailVerificationSenderPlugin can replace the core verification email sender.
-type EmailVerificationSenderPlugin interface {
-	Plugin
-	OverrideEmailVerification() bool
-	SendVerificationEmail(c *Context, user *types.User) error
-}
-
-// SignUpVerificationPlugin can send additional verification after email sign-up.
-type SignUpVerificationPlugin interface {
-	Plugin
-	SendVerificationOnSignUp() bool
-	SendSignUpVerification(c *Context, user *types.User) error
-}
-
-// UserAdditionalFieldsPlugin contributes user additional-field schema.
-type UserAdditionalFieldsPlugin interface {
-	Plugin
-	AdditionalUserFields() map[string]AdditionalFieldDef
-}
-
-// UserAdditionalProcessorPlugin validates and normalizes user additional fields.
-type UserAdditionalProcessorPlugin interface {
-	Plugin
-	ProcessUserAdditional(c *Context, action string, currentUserID string, fields map[string]any) (map[string]any, *apierror.Error)
 }
 
 // PluginRoute is an HTTP route registered by a plugin.
@@ -76,7 +45,7 @@ func mergePluginRoutes(base []route, plugins []Plugin) []route {
 	for _, p := range plugins {
 		for _, r := range p.Routes() {
 			key := r.Method + " " + r.Pattern
-			rt := route{method: r.Method, pattern: r.Pattern, handler: r.Handler}
+			rt := route{method: r.Method, pattern: r.Pattern, handler: r.Handler, serverOnly: r.ServerOnly}
 			if r.Pattern == "/get-session" && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 				overrides[key] = rt
 				continue
@@ -131,43 +100,4 @@ func runPluginAfterHooks(c *Context, plugins []Plugin) {
 	if c.pendingAuthToken != "" && !c.authTokenExposed {
 		c.ExposeAuthToken(c.pendingAuthToken)
 	}
-}
-
-func emailVerificationOverridePlugin(plugins []Plugin) (EmailVerificationSenderPlugin, bool) {
-	for _, plugin := range plugins {
-		sender, ok := plugin.(EmailVerificationSenderPlugin)
-		if ok && sender.OverrideEmailVerification() {
-			return sender, true
-		}
-	}
-	return nil, false
-}
-
-func runSignUpVerificationPlugins(c *Context, plugins []Plugin, user *types.User) error {
-	for _, plugin := range plugins {
-		sender, ok := plugin.(SignUpVerificationPlugin)
-		if !ok || !sender.SendVerificationOnSignUp() {
-			continue
-		}
-		if err := sender.SendSignUpVerification(c, user); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runUserAdditionalProcessors(c *Context, action string, currentUserID string, fields map[string]any) (map[string]any, *apierror.Error) {
-	out := fields
-	for _, plugin := range c.Auth.cfg.plugins {
-		processor, ok := plugin.(UserAdditionalProcessorPlugin)
-		if !ok {
-			continue
-		}
-		next, err := processor.ProcessUserAdditional(c, action, currentUserID, out)
-		if err != nil {
-			return nil, err
-		}
-		out = next
-	}
-	return out, nil
 }

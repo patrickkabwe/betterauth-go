@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/types"
@@ -145,18 +147,37 @@ func handleResetPassword(c *Context) {
 		return
 	}
 
-	if err := c.Auth.SetCredentialPassword(c.R.Context(), v.Value, hash); err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-		return
+	_, err = c.Auth.cfg.store.FindAccountByUserAndProvider(c.R.Context(), v.Value, constants.ProviderCredential)
+	if err != nil {
+		if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		now := time.Now()
+		accID, err := id.Generate(32)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		if err := c.Auth.cfg.store.CreateAccount(c.R.Context(), &types.Account{
+			ID: accID, AccountID: v.Value, ProviderID: constants.ProviderCredential,
+			UserID: v.Value, Password: hash, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+	} else {
+		if err := c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), v.Value, constants.ProviderCredential, hash); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 
-	if err := c.Auth.RevokeSessionsOnPasswordReset(c.R.Context(), v.Value); err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-		return
-	}
-	if err := c.Auth.RunPasswordResetCallback(c.R.Context(), v.Value); err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-		return
+	if c.Auth.cfg.emailPassword.revokeSessionsOnPasswordReset {
+		if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), v.Value); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})

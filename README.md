@@ -1,5 +1,9 @@
 # betterauth (Go)
 
+<p align="center">
+  <img src="docs/assets/betterauth-go-banner.png" alt="BetterAuth-Go — Authentication that feels native to Go" width="100%" />
+</p>
+
 A Go server implementation compatible with [Better Auth](https://better-auth.com) clients — React, Vue, Svelte, Solid, and the framework-agnostic client.
 
 Drop this into any Go HTTP server and point your `better-auth/react` (or other) client at it.

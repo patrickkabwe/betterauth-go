@@ -48,7 +48,7 @@ Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 | `one-tap` | `plugins.OneTap` | Google One Tap |
 | `open-api` | `plugins.OpenAPI` | OpenAPI spec endpoint |
 | `device-authorization` | `plugins.DeviceAuthorization` | Device code flow |
-| `phone-number` | `plugins.PhoneNumber` | Phone OTP sign-in |
+| `phone-number` | `plugins.PhoneNumber` | Phone password sign-in + configurable OTP verification/reset |
 | `siwe` | `plugins.SIWE` | Sign-In with Ethereum |
 | `two-factor` | `plugins.TwoFactor` | TOTP / backup codes — [guide](two-factor.md) |
 | `admin` | `plugins.Admin` | Admin APIs, bans, impersonation — [guide](admin.md) |

@@ -12,8 +12,9 @@ Plugins: []auth.Plugin{
 },
 ```
 
-Admin access is determined by the user's `role` field in `additional` JSON
-(default role: `user`).
+Admin access is determined by the user's `role` field (a SQL column when the
+admin plugin schema is generated; exposed through `Additional` in the store
+interface). Default role: `user`.
 
 ## Client
 
@@ -51,6 +52,7 @@ a.SetUserAdditional(ctx, userID, map[string]any{"role": "admin"})
 | POST | `/admin/set-user-password` | Set password for user |
 | POST | `/admin/has-permission` | Check admin permission |
 
-Impersonation stores `impersonatedBy` on the session's `additional` field.
+Impersonation stores `impersonatedBy` on the session (a SQL column when the
+admin plugin schema is generated; exposed through session `Additional`).
 
 Back to: [Plugin overview](overview.md)

@@ -32,12 +32,12 @@ func handleSignUpEmail(c *Context) {
 	}
 
 	var raw map[string]json.RawMessage
-	var body signUpBody
 	if err := c.ParseJSON(&raw); err != nil {
 		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeInvalidEmail, constants.MsgInvalidRequestBody))
 		return
 	}
-	if err := decodeRawBody(raw, &body); err != nil {
+	body, err := signUpBodyFromRaw(raw)
+	if err != nil {
 		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeInvalidEmail, constants.MsgInvalidRequestBody))
 		return
 	}
@@ -50,16 +50,17 @@ func handleSignUpEmail(c *Context) {
 		c.WriteError(fieldErr)
 		return
 	}
-	additional, fieldErr = runUserAdditionalProcessors(c, "create", "", additional)
-	if fieldErr != nil {
-		c.WriteError(fieldErr)
+	usernameAdditional, usernameErr := c.Auth.usernameAdditionalFromRaw(c.R.Context(), raw, "", true)
+	if usernameErr != nil {
+		c.WriteError(usernameErr)
 		return
 	}
+	additional = mergeAdditionalMaps(additional, usernameAdditional)
 
 	email := strings.ToLower(strings.TrimSpace(body.Email))
-	_, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
+	_, err = c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
 	if err == nil {
-		handleDuplicateSignUp(c, body, email)
+		handleDuplicateSignUp(c, body, email, additional)
 		return
 	}
 	if !errors.Is(err, berrors.ErrNotFound) {
@@ -77,10 +78,6 @@ func handleSignUpEmail(c *Context) {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 			return
 		}
-	}
-	if err := runSignUpVerificationPlugins(c, c.Auth.cfg.plugins, user); err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-		return
 	}
 
 	if !c.Auth.cfg.emailPassword.autoSignIn {
@@ -105,9 +102,7 @@ func handleSignUpEmail(c *Context) {
 
 func shouldSendSignUpVerification(cfg resolved) bool {
 	if cfg.emailVerification.sendVerificationEmail == nil {
-		if _, ok := emailVerificationOverridePlugin(cfg.plugins); !ok {
-			return false
-		}
+		return false
 	}
 	if cfg.emailVerification.sendOnSignUp != nil {
 		return *cfg.emailVerification.sendOnSignUp
@@ -115,7 +110,42 @@ func shouldSendSignUpVerification(cfg resolved) bool {
 	return cfg.emailPassword.requireEmailVerification
 }
 
-func handleDuplicateSignUp(c *Context, body signUpBody, email string) {
+func signUpBodyFromRaw(raw map[string]json.RawMessage) (signUpBody, error) {
+	var body signUpBody
+	if err := decodeStringField(raw, "name", &body.Name); err != nil {
+		return signUpBody{}, err
+	}
+	if err := decodeStringField(raw, "email", &body.Email); err != nil {
+		return signUpBody{}, err
+	}
+	if err := decodeStringField(raw, "password", &body.Password); err != nil {
+		return signUpBody{}, err
+	}
+	if err := decodeStringField(raw, "callbackURL", &body.CallbackURL); err != nil {
+		return signUpBody{}, err
+	}
+	if value, ok := raw["image"]; ok {
+		if err := json.Unmarshal(value, &body.Image); err != nil {
+			return signUpBody{}, err
+		}
+	}
+	if value, ok := raw["rememberMe"]; ok {
+		if err := json.Unmarshal(value, &body.RememberMe); err != nil {
+			return signUpBody{}, err
+		}
+	}
+	return body, nil
+}
+
+func decodeStringField(raw map[string]json.RawMessage, key string, dst *string) error {
+	value, ok := raw[key]
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(value, dst)
+}
+
+func handleDuplicateSignUp(c *Context, body signUpBody, email string, additional map[string]any) {
 	if c.Auth.cfg.emailPassword.requireEmailVerification || !c.Auth.cfg.emailPassword.autoSignIn {
 		if _, err := c.Auth.cfg.hasher.Hash(body.Password); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
@@ -137,6 +167,7 @@ func handleDuplicateSignUp(c *Context, body signUpBody, email string) {
 				Image:         body.Image,
 				CreatedAt:     now,
 				UpdatedAt:     now,
+				Additional:    applyDefaultAdditionalFields(additional, c.Auth.cfg.user.additionalFields),
 			},
 		})
 		return
@@ -197,20 +228,16 @@ func handleSignInEmail(c *Context) {
 		return
 	}
 
-	if c.Auth.cfg.emailPassword.requireEmailVerification && !user.EmailVerified {
-		if c.Auth.cfg.emailVerification.sendOnSignIn && c.Auth.cfg.emailVerification.sendVerificationEmail != nil {
-			if err := sendVerificationEmailToUser(c, user, body.CallbackURL); err != nil {
-				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-				return
-			}
-		}
-		c.WriteError(apierror.WithCode(http.StatusForbidden, apierror.CodeEmailNotVerified))
+	if !c.Auth.ValidateSignInUser(c, user, body.CallbackURL) {
 		return
 	}
 
 	rememberMe := true
 	if body.RememberMe != nil {
 		rememberMe = *body.RememberMe
+	}
+	if c.Auth.StartTwoFactorSignIn(c, user, rememberMe) {
+		return
 	}
 
 	sess, err := c.Auth.createSession(c, user.ID, rememberMe)
@@ -261,15 +288,7 @@ func validateSignUpInput(c *Context, name, email, password string) *apierror.Err
 	return nil
 }
 
-func decodeRawBody(raw map[string]json.RawMessage, dst any) error {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, dst)
-}
-
-func createUserWithCredential(c *Context, name string, email string, password string, image *string, additional map[string]any) (*types.User, *types.Account, error) {
+func createUserWithCredential(c *Context, name, email, password string, image *string, additional map[string]any) (*types.User, *types.Account, error) {
 	hash, err := c.Auth.cfg.hasher.Hash(password)
 	if err != nil {
 		return nil, nil, err

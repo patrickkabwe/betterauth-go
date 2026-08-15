@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -12,14 +13,16 @@ type ExtStore interface {
 	CreateOrganization(ctx context.Context, o *types.Organization) error
 	FindOrganizationByID(ctx context.Context, id string) (*types.Organization, error)
 	FindOrganizationBySlug(ctx context.Context, slug string) (*types.Organization, error)
-	UpdateOrganization(ctx context.Context, id string, name, slug string, logo *string) (*types.Organization, error)
+	UpdateOrganization(ctx context.Context, id string, name, slug string, logo *string, metadata *string) (*types.Organization, error)
 	DeleteOrganization(ctx context.Context, id string) error
 	ListOrganizations(ctx context.Context) ([]types.Organization, error)
 
 	// Member
 	CreateMember(ctx context.Context, m *types.Member) error
 	DeleteMember(ctx context.Context, id string) error
+	FindMemberByID(ctx context.Context, id string) (*types.Member, error)
 	FindMemberByOrgAndUser(ctx context.Context, orgID, userID string) (*types.Member, error)
+	UpdateMemberRole(ctx context.Context, id string, role string) (*types.Member, error)
 	ListMembersByOrg(ctx context.Context, orgID string) ([]types.Member, error)
 	ListMembersByUser(ctx context.Context, userID string) ([]types.Member, error)
 
@@ -27,6 +30,7 @@ type ExtStore interface {
 	CreateInvitation(ctx context.Context, inv *types.Invitation) error
 	FindInvitationByID(ctx context.Context, id string) (*types.Invitation, error)
 	UpdateInvitationStatus(ctx context.Context, id, status string) error
+	UpdateInvitationExpiresAt(ctx context.Context, id string, expiresAt time.Time) error
 	ListInvitationsByOrg(ctx context.Context, orgID string) ([]types.Invitation, error)
 	ListInvitationsByEmail(ctx context.Context, email string) ([]types.Invitation, error)
 
@@ -34,17 +38,30 @@ type ExtStore interface {
 	CreateTeam(ctx context.Context, t *types.Team) error
 	DeleteTeam(ctx context.Context, id string) error
 	FindTeamByID(ctx context.Context, id string) (*types.Team, error)
+	UpdateTeam(ctx context.Context, id string, name string) (*types.Team, error)
 	ListTeamsByOrg(ctx context.Context, orgID string) ([]types.Team, error)
+	ListTeamsByUser(ctx context.Context, userID string) ([]types.Team, error)
 
 	// TeamMember
 	CreateTeamMember(ctx context.Context, tm *types.TeamMember) error
 	DeleteTeamMember(ctx context.Context, id string) error
+	DeleteTeamMemberByTeamAndUser(ctx context.Context, teamID string, userID string) error
+	FindTeamMember(ctx context.Context, teamID string, userID string) (*types.TeamMember, error)
 	ListTeamMembers(ctx context.Context, teamID string) ([]types.TeamMember, error)
+
+	// OrganizationRole
+	CreateOrganizationRole(ctx context.Context, role *types.OrganizationRole) error
+	FindOrganizationRoleByID(ctx context.Context, id string) (*types.OrganizationRole, error)
+	FindOrganizationRoleByOrgAndRole(ctx context.Context, organizationID string, role string) (*types.OrganizationRole, error)
+	UpdateOrganizationRole(ctx context.Context, id string, role string, permission map[string][]string) (*types.OrganizationRole, error)
+	DeleteOrganizationRole(ctx context.Context, id string) error
+	ListOrganizationRolesByOrg(ctx context.Context, organizationID string) ([]types.OrganizationRole, error)
 
 	// TwoFactor
 	CreateTwoFactor(ctx context.Context, rec *types.TwoFactorRecord) error
 	FindTwoFactorByUserID(ctx context.Context, userID string) (*types.TwoFactorRecord, error)
 	UpdateTwoFactor(ctx context.Context, userID string, secret, backupCodes string, verified bool) error
+	UpdateTwoFactorLockout(ctx context.Context, userID string, failedVerificationCount int, lockedUntil *time.Time) error
 	DeleteTwoFactor(ctx context.Context, userID string) error
 
 	// DeviceCode

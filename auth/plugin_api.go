@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	berrors "github.com/patrickkabwe/betterauth-go/errors"
+	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
-	internalcrypto "github.com/patrickkabwe/betterauth-go/internal/crypto"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -31,6 +32,16 @@ func ExtStore(s store.Store) (store.ExtStore, bool) {
 	return nil, false
 }
 
+func userAdditionalFinder(s store.Store) (store.UserAdditionalFinder, bool) {
+	if finder, ok := s.(store.UserAdditionalFinder); ok {
+		return finder, true
+	}
+	if u, ok := s.(interface{ Unwrap() store.Store }); ok {
+		return userAdditionalFinder(u.Unwrap())
+	}
+	return nil, false
+}
+
 // NewSession creates a session and sets cookies (exported for plugins).
 func (a *Auth) NewSession(c *Context, userID string, rememberMe bool) (*types.Session, error) {
 	return a.createSession(c, userID, rememberMe)
@@ -39,7 +50,7 @@ func (a *Auth) NewSession(c *Context, userID string, rememberMe bool) (*types.Se
 // SyncUserSession refreshes cached session user data after a plugin updates the
 // current user.
 func (a *Auth) SyncUserSession(c *Context, sess *types.Session, user *types.User) {
-	a.setSessionCache(c, sess, user)
+	a.syncUserSession(c, sess, user)
 }
 
 // CanLinkAccountEmail reports whether account-linking policy permits the OAuth email.
@@ -62,14 +73,9 @@ func (a *Auth) HashPassword(password string) (string, error) {
 	return a.cfg.hasher.Hash(password)
 }
 
-// EncryptSecretData encrypts plugin data with the current auth secret.
-func (a *Auth) EncryptSecretData(data string) (string, error) {
-	return internalcrypto.SymmetricEncrypt(a.cfg.secret, data)
-}
-
-// DecryptSecretData decrypts plugin data with the current or rotated auth secrets.
-func (a *Auth) DecryptSecretData(data string) (string, error) {
-	return internalcrypto.SymmetricDecryptAny(a.cfg.secrets, data)
+// PasswordLengthLimits returns the resolved password length policy.
+func (a *Auth) PasswordLengthLimits() (int, int) {
+	return a.cfg.minPassword, a.cfg.maxPassword
 }
 
 // ValidatePasswords runs plugin password validators.
@@ -82,29 +88,34 @@ func (a *Auth) ValidatePasswords(password string) error {
 	return nil
 }
 
-// AllowSignInWithEmailVerification applies the configured sign-in email verification policy.
-func (a *Auth) AllowSignInWithEmailVerification(c *Context, user *types.User, callbackURL string) (bool, error) {
-	if !a.cfg.emailPassword.requireEmailVerification || user.EmailVerified {
-		return true, nil
-	}
-	if a.cfg.emailVerification.sendOnSignIn && a.cfg.emailVerification.sendVerificationEmail != nil {
-		if err := sendVerificationEmailToUser(c, user, callbackURL); err != nil {
-			return false, err
-		}
-	}
-	return false, nil
+// ParseAdditionalUserCreateInput parses configured user fields for plugin user creation.
+func (a *Auth) ParseAdditionalUserCreateInput(raw map[string]json.RawMessage) (map[string]any, *apierror.Error) {
+	return parseAdditionalUserInput(a.cfg.user.additionalFields, raw, "create")
 }
 
-// PasswordLengthLimits returns the resolved password length policy.
-func (a *Auth) PasswordLengthLimits() (int, int) {
-	return a.cfg.minPassword, a.cfg.maxPassword
+// CreateUser creates a user with the same defaults used by core sign-up.
+func (a *Auth) CreateUser(ctx context.Context, name string, email string, image *string, additional map[string]any) (*types.User, error) {
+	now := time.Now()
+	userID, err := id.Generate(32)
+	if err != nil {
+		return nil, err
+	}
+	user := &types.User{
+		ID: userID, Name: name, Email: email, EmailVerified: false,
+		Image: image, CreatedAt: now, UpdatedAt: now,
+		Additional: applyDefaultAdditionalFields(additional, a.cfg.user.additionalFields),
+	}
+	if err := a.cfg.store.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // SetCredentialPassword creates or updates the user's credential account.
 func (a *Auth) SetCredentialPassword(ctx context.Context, userID string, password string) error {
-	_, err := a.cfg.store.FindAccountByUserAndProvider(ctx, userID, constants.ProviderCredential)
+	err := a.cfg.store.UpdateAccountPassword(ctx, userID, constants.ProviderCredential, password)
 	if err == nil {
-		return a.cfg.store.UpdateAccountPassword(ctx, userID, constants.ProviderCredential, password)
+		return nil
 	}
 	if !errors.Is(err, berrors.ErrNotFound) {
 		return err
@@ -128,42 +139,21 @@ func (a *Auth) RevokeSessionsOnPasswordReset(ctx context.Context, userID string)
 	return a.cfg.store.DeleteAllSessionsByUserID(ctx, userID)
 }
 
-// RunPasswordResetCallback runs the configured password reset callback.
-func (a *Auth) RunPasswordResetCallback(ctx context.Context, userID string) error {
-	if a.cfg.emailPassword.onPasswordReset == nil {
-		return nil
+// ValidateSignInUser enforces sign-in preconditions shared by core and plugin
+// credential flows. It writes the API error response and returns false when the
+// request must stop.
+func (a *Auth) ValidateSignInUser(c *Context, user *types.User, callbackURL string) bool {
+	if a.cfg.emailPassword.requireEmailVerification && !user.EmailVerified {
+		if a.cfg.emailVerification.sendOnSignIn && a.cfg.emailVerification.sendVerificationEmail != nil {
+			if err := sendVerificationEmailToUser(c, user, callbackURL); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+				return false
+			}
+		}
+		c.WriteError(apierror.WithCode(http.StatusForbidden, constants.CodeEmailNotVerified))
+		return false
 	}
-	user, err := a.cfg.store.FindUserByID(ctx, userID)
-	if errors.Is(err, berrors.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return a.cfg.emailPassword.onPasswordReset(ctx, *user)
-}
-
-// ParseAdditionalUserCreateInput parses configured user fields for plugin user creation.
-func (a *Auth) ParseAdditionalUserCreateInput(raw map[string]json.RawMessage) (map[string]any, *apierror.Error) {
-	return parseAdditionalUserInput(a.cfg.user.additionalFields, raw, "create")
-}
-
-// CreateUser creates a user using configured additional field defaults.
-func (a *Auth) CreateUser(ctx context.Context, name string, email string, image *string, additional map[string]any) (*types.User, error) {
-	now := time.Now()
-	userID, err := id.Generate(32)
-	if err != nil {
-		return nil, err
-	}
-	user := &types.User{
-		ID: userID, Name: name, Email: email, EmailVerified: false,
-		Image: image, CreatedAt: now, UpdatedAt: now,
-		Additional: applyDefaultAdditionalFields(additional, a.cfg.user.additionalFields),
-	}
-	if err := a.cfg.store.CreateUser(ctx, user); err != nil {
-		return nil, err
-	}
-	return user, nil
+	return true
 }
 
 // CreateVerification stores a verification token.
@@ -193,15 +183,18 @@ func (a *Auth) ConsumeVerification(ctx context.Context, identifier string) (*typ
 	return v, nil
 }
 
-// FindUserByAdditional scans users for an additional field value (in-memory friendly).
+// FindUserByAdditional finds a user by an additional field value.
 func (a *Auth) FindUserByAdditional(ctx context.Context, key string, value any) (*types.User, error) {
+	if finder, ok := userAdditionalFinder(a.cfg.store); ok {
+		return finder.FindUserByAdditional(ctx, key, value)
+	}
 	users, err := a.cfg.store.ListUsers(ctx, store.ListUsersOpts{Limit: 10000})
 	if err != nil {
 		return nil, err
 	}
 	for _, u := range users {
 		if u.Additional != nil {
-			if v, ok := u.Additional[key]; ok && v == value {
+			if v, ok := u.Additional[key]; ok && reflect.DeepEqual(v, value) {
 				cp := u
 				return &cp, nil
 			}

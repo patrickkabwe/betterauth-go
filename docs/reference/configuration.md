@@ -62,7 +62,7 @@ Complete reference for `auth.Config` and nested options. Maps to the TypeScript
 
 | Field | Description |
 |-------|-------------|
-| `AdditionalFields` | Custom user fields (JSON `additional` column) |
+| `AdditionalFields` | Custom user fields persisted in JSON `additional` |
 | `ChangeEmail` | Change-email flow config |
 | `DeleteUser` | Account deletion config |
 
