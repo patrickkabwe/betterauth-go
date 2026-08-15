@@ -22,6 +22,7 @@ type PhoneNumberOptions struct {
 	SendOTP                func(ctx context.Context, phone, otp string) error
 	SendPasswordResetOTP   func(ctx context.Context, phone, otp string) error
 	VerifyOTP              func(ctx context.Context, phone, otp string) (bool, error)
+	PhoneNumberValidator   func(ctx context.Context, phone string) (bool, error)
 	CallbackOnVerification func(ctx context.Context, phone string, user *types.User) error
 	SignUpOnVerification   *PhoneNumberSignUpOnVerificationOptions
 	ExpiresIn              time.Duration
@@ -35,11 +36,12 @@ type PhoneNumberSignUpOnVerificationOptions struct {
 }
 
 const (
-	codePhoneNumberExists = "PHONE_NUMBER_EXIST"
-	codeFailedUpdateUser  = "FAILED_TO_UPDATE_USER"
-	codeOTPNotFound       = "OTP_NOT_FOUND"
-	codeOTPExpired        = "OTP_EXPIRED"
-	codeTooManyAttempts   = "TOO_MANY_ATTEMPTS"
+	codePhoneNumberExists  = "PHONE_NUMBER_EXIST"
+	codeFailedUpdateUser   = "FAILED_TO_UPDATE_USER"
+	codeOTPNotFound        = "OTP_NOT_FOUND"
+	codeOTPExpired         = "OTP_EXPIRED"
+	codeTooManyAttempts    = "TOO_MANY_ATTEMPTS"
+	codeInvalidPhoneNumber = "INVALID_PHONE_NUMBER"
 )
 
 // PhoneNumber adds phone number OTP authentication.
@@ -65,6 +67,9 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				}
 				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
+					return
+				}
+				if !validatePhoneNumber(c, opts.PhoneNumberValidator, body.PhoneNumber) {
 					return
 				}
 				otp, err := numericOTP(6)
@@ -176,6 +181,9 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				}
 				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" || body.Password == "" {
 					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
+				}
+				if !validatePhoneNumber(c, opts.PhoneNumberValidator, body.PhoneNumber) {
 					return
 				}
 				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
@@ -386,6 +394,22 @@ func consumePhoneOTP(c *auth.Context, identifier string, code string, allowedAtt
 	}
 	if err := c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	return true
+}
+
+func validatePhoneNumber(c *auth.Context, validator func(context.Context, string) (bool, error), phoneNumber string) bool {
+	if validator == nil {
+		return true
+	}
+	valid, err := validator(c.R.Context(), phoneNumber)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	if !valid {
+		c.WriteError(apierror.New(http.StatusBadRequest, codeInvalidPhoneNumber, "Invalid phone number"))
 		return false
 	}
 	return true

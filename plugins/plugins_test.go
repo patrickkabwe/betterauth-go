@@ -183,6 +183,35 @@ func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberSendOTPUsesValidator(t *testing.T) {
+	var sent bool
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, _ string, _ string) error {
+			sent = true
+			return nil
+		},
+		PhoneNumberValidator: func(_ context.Context, phone string) (bool, error) {
+			return phone == "+1234567890", nil
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"invalid"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "INVALID_PHONE_NUMBER" {
+		t.Fatalf("code %q", resp.Code)
+	}
+	if sent {
+		t.Fatal("otp should not be sent when phone number is invalid")
+	}
+}
+
 func TestPhoneNumberVerifyUsesCode(t *testing.T) {
 	sentCode := ""
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
@@ -558,6 +587,27 @@ func TestPhoneNumberSignInRejectsOTPShape(t *testing.T) {
 	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","otp":"123456"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPhoneNumberSignInUsesValidator(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		PhoneNumberValidator: func(_ context.Context, phone string) (bool, error) {
+			return phone == "+1234567890", nil
+		},
+	}))
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"invalid","password":"password123"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "INVALID_PHONE_NUMBER" {
+		t.Fatalf("code %q", resp.Code)
 	}
 }
 
