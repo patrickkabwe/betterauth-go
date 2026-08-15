@@ -35,6 +35,20 @@ func TestGoogleAuthURLIncludesHostedDomain(t *testing.T) {
 	}
 }
 
+func TestGoogleAuthURLIncludesDisplay(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", Display: "popup"})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := googleAuthURLQuery(t, authURL)
+	if query.Get("display") != "popup" {
+		t.Fatalf("display=%q", query.Get("display"))
+	}
+}
+
 func TestGoogleAuthURLCanDisableDefaultScopes(t *testing.T) {
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true, Scopes: []string{"calendar.readonly"}})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{

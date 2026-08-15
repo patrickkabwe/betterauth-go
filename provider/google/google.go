@@ -24,6 +24,7 @@ type Config struct {
 	ClientSecret             string
 	Scopes                   []string
 	AccessType               string
+	Display                  string
 	Prompt                   string
 	HD                       string
 	DisableDefaultScope      bool
@@ -98,6 +99,9 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("access_type", accessType)
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
+	}
+	if p.cfg.Display != "" {
+		params.Set("display", p.cfg.Display)
 	}
 	if p.cfg.HD != "" {
 		params.Set("hd", p.cfg.HD)

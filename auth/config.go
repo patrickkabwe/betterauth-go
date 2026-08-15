@@ -74,6 +74,7 @@ type GoogleProviderConfig struct {
 	ClientSecret             string
 	Scopes                   []string
 	AccessType               string
+	Display                  string
 	Prompt                   string
 	HD                       string
 	DisableDefaultScope      bool
@@ -551,7 +552,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.Google.ClientID != "" && opts.Google.ClientSecret != "" && !opts.Google.Disabled {
 		providers[constants.ProviderGoogle] = google.New(google.Config{
 			ClientID: opts.Google.ClientID, ClientSecret: opts.Google.ClientSecret, Scopes: opts.Google.Scopes,
-			AccessType: opts.Google.AccessType, Prompt: opts.Google.Prompt, HD: opts.Google.HD,
+			AccessType: opts.Google.AccessType, Display: opts.Google.Display, Prompt: opts.Google.Prompt, HD: opts.Google.HD,
 			DisableDefaultScope:   opts.Google.DisableDefaultScope,
 			DisableImplicitSignUp: opts.Google.DisableImplicitSignUp, DisableSignUp: opts.Google.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.Google.OverrideUserInfoOnSignIn,

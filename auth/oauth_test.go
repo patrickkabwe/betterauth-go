@@ -897,7 +897,7 @@ func TestGoogleProviderWiring(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.Google = auth.GoogleProviderConfig{
 			ClientID: "gid", ClientSecret: "gsecret",
-			AccessType: "online", Prompt: "select_account", HD: "example.com",
+			AccessType: "online", Display: "popup", Prompt: "select_account", HD: "example.com",
 		}
 	})
 	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
@@ -915,7 +915,7 @@ func TestGoogleProviderWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := parsed.Query()
-	if query.Get("access_type") != "online" || query.Get("prompt") != "select_account" || query.Get("hd") != "example.com" {
+	if query.Get("access_type") != "online" || query.Get("display") != "popup" || query.Get("prompt") != "select_account" || query.Get("hd") != "example.com" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 }
