@@ -41,36 +41,41 @@ type GenericOAuthGetTokenParams struct {
 // GenericOAuthMapProfileToUser maps a provider profile into Better Auth user fields.
 type GenericOAuthMapProfileToUser func(ctx context.Context, profile map[string]any) (provider.OAuthUserMapping, error)
 
+// GenericOAuthURLParams returns request-scoped OAuth URL parameters.
+type GenericOAuthURLParams func(c *auth.Context) map[string]string
+
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
 type GenericOAuthProviderConfig struct {
-	ProviderID              string
-	ClientID                string
-	ClientSecret            string
-	DiscoveryURL            string
-	DiscoveryHeaders        map[string]string
-	Issuer                  string
-	RequireIssuerValidation bool
-	AuthorizationURL        string
-	TokenURL                string
-	UserInfoURL             string
-	RedirectURI             string
-	Scopes                  []string
-	ResponseType            string
-	ResponseMode            string
-	PKCE                    bool
-	Prompt                  string
-	AccessType              string
-	AccessTokenExpiresIn    int
-	DisableImplicitSignUp   bool
-	DisableSignUp           bool
-	OverrideUserInfo        bool
-	AuthorizationHeaders    map[string]string
-	AuthorizationURLParams  map[string]string
-	TokenURLParams          map[string]string
-	Authentication          provider.OAuthClientAuthentication
-	GetToken                GenericOAuthGetToken
-	GetUserInfo             GenericOAuthGetUserInfo
-	MapProfileToUser        GenericOAuthMapProfileToUser
+	ProviderID                 string
+	ClientID                   string
+	ClientSecret               string
+	DiscoveryURL               string
+	DiscoveryHeaders           map[string]string
+	Issuer                     string
+	RequireIssuerValidation    bool
+	AuthorizationURL           string
+	TokenURL                   string
+	UserInfoURL                string
+	RedirectURI                string
+	Scopes                     []string
+	ResponseType               string
+	ResponseMode               string
+	PKCE                       bool
+	Prompt                     string
+	AccessType                 string
+	AccessTokenExpiresIn       int
+	DisableImplicitSignUp      bool
+	DisableSignUp              bool
+	OverrideUserInfo           bool
+	AuthorizationHeaders       map[string]string
+	AuthorizationURLParams     map[string]string
+	AuthorizationURLParamsFunc GenericOAuthURLParams
+	TokenURLParams             map[string]string
+	TokenURLParamsFunc         GenericOAuthURLParams
+	Authentication             provider.OAuthClientAuthentication
+	GetToken                   GenericOAuthGetToken
+	GetUserInfo                GenericOAuthGetUserInfo
+	MapProfileToUser           GenericOAuthMapProfileToUser
 }
 
 var (
@@ -715,7 +720,7 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 		CodeVerifier:   codeVerifier,
 		Authentication: p.Authentication,
 		Headers:        p.AuthorizationHeaders,
-		ExtraParams:    p.TokenURLParams,
+		ExtraParams:    genericOAuthURLParams(c, p.TokenURLParams, p.TokenURLParamsFunc),
 		ExtraOverwrite: true,
 	})
 	if err != nil {
@@ -1112,10 +1117,27 @@ func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConf
 		q.Set("code_challenge_method", "S256")
 		q.Set("code_challenge", oauth2pkg.CodeChallengeS256(codeVerifier))
 	}
-	for key, value := range p.AuthorizationURLParams {
+	for key, value := range genericOAuthURLParams(c, p.AuthorizationURLParams, p.AuthorizationURLParamsFunc) {
 		q.Set(key, value)
 	}
 	return q
+}
+
+func genericOAuthURLParams(c *auth.Context, params map[string]string, paramsFunc GenericOAuthURLParams) map[string]string {
+	if len(params) == 0 && paramsFunc == nil {
+		return nil
+	}
+	out := make(map[string]string, len(params))
+	for key, value := range params {
+		out[key] = value
+	}
+	if paramsFunc == nil {
+		return out
+	}
+	for key, value := range paramsFunc(c) {
+		out[key] = value
+	}
+	return out
 }
 
 func genericOAuthRedirectURI(c *auth.Context, p GenericOAuthProviderConfig) string {
