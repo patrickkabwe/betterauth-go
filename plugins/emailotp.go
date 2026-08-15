@@ -64,7 +64,8 @@ const (
 
 	EmailOTPResendStrategyReuse EmailOTPResendStrategy = "reuse"
 
-	EmailOTPStoreOTPHashed EmailOTPStoreOTP = "hashed"
+	EmailOTPStoreOTPHashed    EmailOTPStoreOTP = "hashed"
+	EmailOTPStoreOTPEncrypted EmailOTPStoreOTP = "encrypted"
 )
 
 func (o EmailOTPOptions) length() int {
@@ -238,6 +239,14 @@ func storeEmailOTPValue(c *auth.Context, opts EmailOTPOptions, otp string) (stri
 			return "", false
 		}
 		encryptedOTP, err := opts.EncryptOTP(c.R.Context(), otp)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		return encryptedOTP, true
+	}
+	if opts.StoreOTP == EmailOTPStoreOTPEncrypted {
+		encryptedOTP, err := c.Auth.EncryptSecretData(otp)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 			return "", false
@@ -608,6 +617,14 @@ func retrieveEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP stri
 			return "", false
 		}
 		otp, err := opts.DecryptOTP(c.R.Context(), storedOTP)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		return otp, true
+	}
+	if opts.StoreOTP == EmailOTPStoreOTPEncrypted {
+		otp, err := c.Auth.DecryptSecretData(storedOTP)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 			return "", false

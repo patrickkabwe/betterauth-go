@@ -523,6 +523,66 @@ func TestEmailOTPPluginCustomEncryptOTPCanReturnReuseAndVerifyCode(t *testing.T)
 	}
 }
 
+func TestEmailOTPPluginEncryptedStoreOTPCanReturnReuseAndVerifyCode(t *testing.T) {
+	var sentCodes []string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			StoreOTP:       plugins.EmailOTPStoreOTPEncrypted,
+			ResendStrategy: plugins.EmailOTPResendStrategyReuse,
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentCodes = append(sentCodes, otp)
+				return nil
+			},
+		})}
+	})
+
+	for i := 0; i < 2; i++ {
+		resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+			"email": "encrypted-store@example.com",
+			"type":  "sign-in",
+		}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("send status=%d body=%s", resp.StatusCode, data)
+		}
+	}
+	if len(sentCodes) != 2 {
+		t.Fatalf("sent codes=%v", sentCodes)
+	}
+	if sentCodes[0] != sentCodes[1] {
+		t.Fatalf("expected reused OTP, got %q then %q", sentCodes[0], sentCodes[1])
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":encrypted-store@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedOTP, _ := splitOTPAttemptsForTest(verification.Value)
+	if storedOTP == sentCodes[0] || storedOTP == sentCodes[0]+"-encrypted" {
+		t.Fatalf("stored value should be encrypted: %q", verification.Value)
+	}
+
+	resp, data := doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=encrypted-store@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		OTP *string `json:"otp"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OTP == nil || *body.OTP != sentCodes[0] {
+		t.Fatalf("get otp=%v want %q", body.OTP, sentCodes[0])
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
+		"email": "encrypted-store@example.com",
+		"otp":   sentCodes[0],
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
 	var sentCodes []string
 	a := newTestAuth(func(c *auth.Config) {
@@ -1021,4 +1081,12 @@ func TestEmailOTPPluginRequestEmailChangeSkipsExistingEmail(t *testing.T) {
 	if !errors.Is(err, berrors.ErrNotFound) {
 		t.Fatalf("verification error=%v", err)
 	}
+}
+
+func splitOTPAttemptsForTest(value string) (string, string) {
+	idx := strings.LastIndex(value, ":")
+	if idx < 0 {
+		return value, ""
+	}
+	return value[:idx], value[idx+1:]
 }

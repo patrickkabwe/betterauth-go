@@ -11,6 +11,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
+	internalcrypto "github.com/patrickkabwe/betterauth-go/internal/crypto"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -59,6 +60,16 @@ func (a *Auth) VerifyPassword(hash, password string) (bool, error) {
 // HashPassword hashes a password with the configured hasher.
 func (a *Auth) HashPassword(password string) (string, error) {
 	return a.cfg.hasher.Hash(password)
+}
+
+// EncryptSecretData encrypts plugin data with the current auth secret.
+func (a *Auth) EncryptSecretData(data string) (string, error) {
+	return internalcrypto.SymmetricEncrypt(a.cfg.secret, data)
+}
+
+// DecryptSecretData decrypts plugin data with the current or rotated auth secrets.
+func (a *Auth) DecryptSecretData(data string) (string, error) {
+	return internalcrypto.SymmetricDecryptAny(a.cfg.secrets, data)
 }
 
 // ValidatePasswords runs plugin password validators.
