@@ -153,6 +153,8 @@ const (
 	CodeUnauthorized                = "UNAUTHORIZED"
 	CodeInternalServerError         = "INTERNAL_SERVER_ERROR"
 	CodeEmailNotVerified            = "EMAIL_NOT_VERIFIED"
+	CodeEmailAlreadyVerified        = "EMAIL_ALREADY_VERIFIED"
+	CodeEmailMismatch               = "EMAIL_MISMATCH"
 	CodeInvalidToken                = "INVALID_TOKEN"
 	CodeTokenExpired                = "TOKEN_EXPIRED"
 	CodeUserNotFound                = "USER_NOT_FOUND"
@@ -239,6 +241,8 @@ const (
 	MsgUnauthorized                = "Unauthorized"
 	MsgInternalServerError         = "Internal server error"
 	MsgEmailNotVerified            = "Email not verified"
+	MsgEmailAlreadyVerified        = "Email is already verified"
+	MsgEmailMismatch               = "Email mismatch"
 	MsgInvalidToken                = "Invalid token"
 	MsgTokenExpired                = "Session expired. Re-authenticate to perform this action."
 	MsgUserNotFound                = "User not found"
@@ -371,6 +375,8 @@ var apiMessages = map[string]string{
 	CodeUnauthorized:                MsgUnauthorized,
 	CodeInternalServerError:         MsgInternalServerError,
 	CodeEmailNotVerified:            MsgEmailNotVerified,
+	CodeEmailAlreadyVerified:        MsgEmailAlreadyVerified,
+	CodeEmailMismatch:               MsgEmailMismatch,
 	CodeInvalidToken:                MsgInvalidToken,
 	CodeTokenExpired:                MsgTokenExpired,
 	CodeUserNotFound:                MsgUserNotFound,

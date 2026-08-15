@@ -30,8 +30,26 @@ func handleSendVerificationEmail(c *Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if _, sessionUser, err := c.GetSession(); err == nil {
+		if strings.ToLower(sessionUser.Email) != email {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailMismatch))
+			return
+		}
+		if sessionUser.EmailVerified {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailAlreadyVerified))
+			return
+		}
+		if err := sendVerificationEmailToUser(c, sessionUser, body.CallbackURL); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
+		return
+	}
+
 	user, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
-	if err != nil {
+	if err != nil || user.EmailVerified {
+		_, _ = createEmailVerificationToken(c, email, nil)
 		c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 		return
 	}
