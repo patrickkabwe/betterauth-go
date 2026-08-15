@@ -61,6 +61,11 @@ func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, 
 	return server, &tokenRequestSeen
 }
 
+func genericOAuthTestIDToken(claims map[string]any) string {
+	raw, _ := json.Marshal(claims)
+	return "hdr." + base64.RawURLEncoding.EncodeToString(raw) + ".sig"
+}
+
 func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
@@ -259,6 +264,85 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	}
 	if len(callback.Result().Cookies()) == 0 {
 		t.Fatal("expected session cookie")
+	}
+}
+
+func TestGenericOAuthCallbackUsesIDTokenUserInfo(t *testing.T) {
+	idToken := genericOAuthTestIDToken(map[string]any{
+		"sub":            "id-token-account",
+		"email":          "ID-TOKEN@EXAMPLE.COM",
+		"name":           "ID Token User",
+		"email_verified": true,
+		"picture":        "https://idp.example.com/id-token.png",
+	})
+	tokenResponse, err := json.Marshal(map[string]string{
+		"access_token": "access-token",
+		"id_token":     idToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(tokenResponse)
+		case "/userinfo":
+			t.Fatal("userinfo endpoint should not be called when id_token is present")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "id-token@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Name != "ID Token User" || !user.EmailVerified {
+		t.Fatalf("user=%+v", user)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "id-token-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.UserID != user.ID || account.IDToken != idToken {
+		t.Fatalf("account=%+v user=%+v", account, user)
 	}
 }
 

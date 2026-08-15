@@ -17,6 +17,7 @@ import (
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
+	"github.com/patrickkabwe/betterauth-go/internal/jwt"
 	oauth2pkg "github.com/patrickkabwe/betterauth-go/internal/oauth2"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -507,6 +508,16 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 			return provider.OAuthUser{}, errors.New("user info is missing")
 		}
 		return genericOAuthMappedUser(c, p, info.User, genericOAuthProfileFromUserInfo(info))
+	}
+	if tokens.IDToken != "" {
+		claims, err := jwt.DecodePayload(tokens.IDToken)
+		if err != nil {
+			return provider.OAuthUser{}, err
+		}
+		user, err := genericOAuthUserFromMap(c, p, claims)
+		if err == nil {
+			return user, nil
+		}
 	}
 	userInfoURL, err := genericOAuthUserInfoEndpoint(c, p)
 	if err != nil {
