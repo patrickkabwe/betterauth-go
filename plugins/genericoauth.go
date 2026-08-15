@@ -2,19 +2,24 @@ package plugins
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	oauth2pkg "github.com/patrickkabwe/betterauth-go/internal/oauth2"
 	"github.com/patrickkabwe/betterauth-go/provider"
+	"github.com/patrickkabwe/betterauth-go/store"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
@@ -74,16 +79,15 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
 					return
 				}
-				codeVerifier := ""
-				if p.PKCE {
-					codeVerifier, err = oauth2pkg.GenerateCodeVerifier()
-					if err != nil {
-						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-						return
-					}
+				state, codeVerifier, err := createGenericOAuthState(c, genericOAuthStateInput{
+					ProviderID:  body.ProviderID,
+					CallbackURL: body.CallbackURL,
+					UsePKCE:     p.PKCE,
+				})
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
 				}
-				state, _ := id.Generate(32)
-				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
 				q := genericOAuthAuthorizationValues(c, p, state, genericOAuthSignInScopes(body.Scopes, p.Scopes), codeVerifier)
 				redirectURL := provider.BuildAuthURL(authorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
@@ -115,16 +119,40 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
 					return
 				}
-				storedProviderID, callbackURL, ok := parseGenericOAuthStateValue(v.Value)
-				if !ok || storedProviderID != providerID {
+				stateData, ok := parseGenericOAuthStateValue(v.Value)
+				if !ok || stateData.ProviderID != providerID {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
 					return
 				}
+				callbackURL := stateData.CallbackURL
 				if callbackURL == "" {
 					callbackURL = c.Auth.BaseURL()
 				}
 				if !genericOAuthIssuerAllowed(c, p) {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+					return
+				}
+				tokens, err := genericOAuthExchangeAuthorizationCode(c, p, code, stateData.CodeVerifier)
+				if err != nil {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "oauth_code_verification_failed", "")
+					return
+				}
+				userInfo, err := genericOAuthUserInfo(c, p, tokens)
+				if err != nil {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_get_user_info", "")
+					return
+				}
+				if stateData.LinkUserID != "" {
+					handleGenericOAuthLinkCallback(c, stateData, userInfo, tokens)
+					return
+				}
+				user, _, err := genericOAuthSignInUser(c, p, userInfo, tokens)
+				if err != nil {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), strings.ReplaceAll(err.Error(), " ", "_"), "")
+					return
+				}
+				if _, err := c.Auth.NewSession(c, user.ID, true); err != nil {
+					redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_create_session", "")
 					return
 				}
 				c.Redirect(callbackURL)
@@ -140,7 +168,7 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
 					return
 				}
-				_, _, ok := c.RequireSession()
+				_, user, ok := c.RequireSession()
 				if !ok {
 					return
 				}
@@ -154,16 +182,17 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
 					return
 				}
-				codeVerifier := ""
-				if p.PKCE {
-					codeVerifier, err = oauth2pkg.GenerateCodeVerifier()
-					if err != nil {
-						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-						return
-					}
+				state, codeVerifier, err := createGenericOAuthState(c, genericOAuthStateInput{
+					ProviderID:  body.ProviderID,
+					CallbackURL: body.CallbackURL,
+					LinkUserID:  user.ID,
+					LinkEmail:   user.Email,
+					UsePKCE:     p.PKCE,
+				})
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
 				}
-				state, _ := id.Generate(32)
-				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
 				q := genericOAuthAuthorizationValues(c, p, state, genericOAuthLinkScopes(body.Scopes, p.Scopes), codeVerifier)
 				redirectURL := provider.BuildAuthURL(authorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": true})
@@ -271,12 +300,311 @@ func genericOAuthExpectedIssuer(c *auth.Context, p GenericOAuthProviderConfig) (
 	return discovery.Issuer, nil
 }
 
-func parseGenericOAuthStateValue(value string) (string, string, bool) {
+func parseGenericOAuthStateValue(value string) (genericOAuthStatePayload, bool) {
+	var payload genericOAuthStatePayload
+	if err := json.Unmarshal([]byte(value), &payload); err == nil && payload.ProviderID != "" {
+		return payload, true
+	}
 	providerID, callbackURL, ok := strings.Cut(value, "|")
 	if !ok || providerID == "" {
-		return "", "", false
+		return genericOAuthStatePayload{}, false
 	}
-	return providerID, callbackURL, true
+	return genericOAuthStatePayload{ProviderID: providerID, CallbackURL: callbackURL}, true
+}
+
+type genericOAuthStateInput struct {
+	ProviderID  string
+	CallbackURL string
+	LinkUserID  string
+	LinkEmail   string
+	UsePKCE     bool
+}
+
+type genericOAuthStatePayload struct {
+	ProviderID   string `json:"providerId"`
+	CallbackURL  string `json:"callbackURL"`
+	CodeVerifier string `json:"codeVerifier,omitempty"`
+	LinkUserID   string `json:"linkUserId,omitempty"`
+	LinkEmail    string `json:"linkEmail,omitempty"`
+}
+
+func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (string, string, error) {
+	codeVerifier := ""
+	var err error
+	if input.UsePKCE {
+		codeVerifier, err = oauth2pkg.GenerateCodeVerifier()
+		if err != nil {
+			return "", "", err
+		}
+	}
+	state, err := id.Generate(32)
+	if err != nil {
+		return "", "", err
+	}
+	payload := genericOAuthStatePayload{
+		ProviderID:   input.ProviderID,
+		CallbackURL:  input.CallbackURL,
+		CodeVerifier: codeVerifier,
+		LinkUserID:   input.LinkUserID,
+		LinkEmail:    input.LinkEmail,
+	}
+	value, err := json.Marshal(payload)
+	if err != nil {
+		return "", "", err
+	}
+	if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, string(value), 10*time.Minute); err != nil {
+		return "", "", err
+	}
+	return state, codeVerifier, nil
+}
+
+func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProviderConfig, code string, codeVerifier string) (*provider.OAuthTokens, error) {
+	tokenURL, err := genericOAuthTokenEndpoint(c, p)
+	if err != nil {
+		return nil, err
+	}
+	data, err := provider.ExchangeAuthorizationCode(c.R.Context(), provider.CodeExchangeOpts{
+		TokenURL:       tokenURL,
+		ClientID:       p.ClientID,
+		ClientSecret:   p.ClientSecret,
+		Code:           code,
+		RedirectURI:    genericOAuthRedirectURI(c, p),
+		CodeVerifier:   codeVerifier,
+		Authentication: provider.OAuthClientAuthenticationPost,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return provider.TokensFromMap(data), nil
+}
+
+func genericOAuthTokenEndpoint(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
+	tokenURL := p.TokenURL
+	if p.DiscoveryURL != "" {
+		discovery, err := genericOAuthDiscovery(c, p)
+		if err != nil {
+			return "", err
+		}
+		if discovery.TokenEndpoint != "" {
+			tokenURL = discovery.TokenEndpoint
+		}
+	}
+	if tokenURL == "" {
+		return "", fmt.Errorf("invalid generic oauth configuration for provider %q: tokenURL=%q", p.ProviderID, tokenURL)
+	}
+	return tokenURL, nil
+}
+
+func genericOAuthUserInfoEndpoint(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
+	userInfoURL := p.UserInfoURL
+	if p.DiscoveryURL != "" {
+		discovery, err := genericOAuthDiscovery(c, p)
+		if err != nil {
+			return "", err
+		}
+		if discovery.UserInfoEndpoint != "" {
+			userInfoURL = discovery.UserInfoEndpoint
+		}
+	}
+	if userInfoURL == "" {
+		return "", fmt.Errorf("invalid generic oauth configuration for provider %q: userInfoURL=%q", p.ProviderID, userInfoURL)
+	}
+	return userInfoURL, nil
+}
+
+func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens *provider.OAuthTokens) (provider.OAuthUser, error) {
+	if tokens == nil || tokens.AccessToken == "" {
+		return provider.OAuthUser{}, errors.New("access token missing")
+	}
+	userInfoURL, err := genericOAuthUserInfoEndpoint(c, p)
+	if err != nil {
+		return provider.OAuthUser{}, err
+	}
+	req, err := http.NewRequestWithContext(c.R.Context(), http.MethodGet, userInfoURL, nil)
+	if err != nil {
+		return provider.OAuthUser{}, err
+	}
+	req.Header.Set(constants.HeaderAccept, constants.MIMEJSON)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return provider.OAuthUser{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return provider.OAuthUser{}, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return provider.OAuthUser{}, fmt.Errorf("generic oauth userinfo failed for provider %q at %q with status %d: %s", p.ProviderID, userInfoURL, resp.StatusCode, string(body))
+	}
+	var data map[string]any
+	if err := json.Unmarshal(body, &data); err != nil {
+		return provider.OAuthUser{}, err
+	}
+	return genericOAuthUserFromMap(data)
+}
+
+func genericOAuthUserFromMap(data map[string]any) (provider.OAuthUser, error) {
+	accountID := firstGenericOAuthString(data, "id", "sub")
+	if accountID == "" {
+		return provider.OAuthUser{}, errors.New("id is missing")
+	}
+	name := firstGenericOAuthString(data, "name")
+	if name == "" {
+		return provider.OAuthUser{}, errors.New("name is missing")
+	}
+	email := auth.NormalizeEmail(firstGenericOAuthString(data, "email"))
+	if email == "" {
+		return provider.OAuthUser{}, errors.New("email is missing")
+	}
+	imageValue := firstGenericOAuthString(data, "image", "picture", "avatar_url")
+	var image *string
+	if imageValue != "" {
+		image = &imageValue
+	}
+	emailVerified, _ := data["email_verified"].(bool)
+	return provider.OAuthUser{
+		ID: accountID, Name: name, Email: email, Image: image, EmailVerified: emailVerified,
+	}, nil
+}
+
+func firstGenericOAuthString(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := data[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			if typed != "" {
+				return typed
+			}
+		case float64:
+			return strconv.FormatFloat(typed, 'f', -1, 64)
+		case bool:
+			return strconv.FormatBool(typed)
+		}
+	}
+	return ""
+}
+
+func genericOAuthSignInUser(c *auth.Context, p GenericOAuthProviderConfig, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) (*types.User, bool, error) {
+	account, err := c.Auth.Store().FindAccountByProviderAndAccountID(c.R.Context(), p.ProviderID, userInfo.ID)
+	if err == nil {
+		if err := updateGenericOAuthAccount(c, account.ID, tokens); err != nil {
+			return nil, false, err
+		}
+		user, err := c.Auth.Store().FindUserByID(c.R.Context(), account.UserID)
+		return user, false, err
+	}
+	if !errors.Is(err, berrors.ErrNotFound) {
+		return nil, false, err
+	}
+	existing, err := c.Auth.Store().FindUserByEmail(c.R.Context(), userInfo.Email)
+	if err == nil && existing != nil {
+		return nil, false, errors.New("account not linked")
+	}
+	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+		return nil, false, err
+	}
+	user, err := createGenericOAuthUser(c, userInfo)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := createGenericOAuthAccount(c, p.ProviderID, user.ID, userInfo.ID, tokens); err != nil {
+		return nil, false, err
+	}
+	return user, true, nil
+}
+
+func createGenericOAuthUser(c *auth.Context, userInfo provider.OAuthUser) (*types.User, error) {
+	now := time.Now()
+	userID, err := id.Generate(32)
+	if err != nil {
+		return nil, err
+	}
+	user := &types.User{
+		ID: userID, Name: userInfo.Name, Email: userInfo.Email, EmailVerified: userInfo.EmailVerified,
+		Image: userInfo.Image, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := c.Auth.Store().CreateUser(c.R.Context(), user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func createGenericOAuthAccount(c *auth.Context, providerID string, userID string, accountID string, tokens *provider.OAuthTokens) error {
+	now := time.Now()
+	idValue, err := id.Generate(32)
+	if err != nil {
+		return err
+	}
+	return c.Auth.Store().CreateAccount(c.R.Context(), &types.Account{
+		ID: idValue, AccountID: accountID, ProviderID: providerID, UserID: userID,
+		AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
+		AccessTokenExpiresAt: tokens.AccessTokenExpiresAt, RefreshTokenExpiresAt: tokens.RefreshTokenExpiresAt,
+		IDToken: tokens.IDToken, Scope: strings.Join(tokens.Scopes, ","), CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func updateGenericOAuthAccount(c *auth.Context, accountID string, tokens *provider.OAuthTokens) error {
+	update := store.AccountUpdate{
+		AccessTokenExpiresAt:  tokens.AccessTokenExpiresAt,
+		RefreshTokenExpiresAt: tokens.RefreshTokenExpiresAt,
+	}
+	hasUpdate := tokens.AccessTokenExpiresAt != nil || tokens.RefreshTokenExpiresAt != nil
+	if tokens.AccessToken != "" {
+		update.AccessToken = &tokens.AccessToken
+		hasUpdate = true
+	}
+	if tokens.RefreshToken != "" {
+		update.RefreshToken = &tokens.RefreshToken
+		hasUpdate = true
+	}
+	if tokens.IDToken != "" {
+		update.IDToken = &tokens.IDToken
+		hasUpdate = true
+	}
+	if len(tokens.Scopes) > 0 {
+		scope := strings.Join(tokens.Scopes, ",")
+		update.Scope = &scope
+		hasUpdate = true
+	}
+	if !hasUpdate {
+		return nil
+	}
+	_, err := c.Auth.Store().UpdateAccount(c.R.Context(), accountID, update)
+	return err
+}
+
+func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthStatePayload, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) {
+	if !strings.EqualFold(stateData.LinkEmail, userInfo.Email) {
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "email_doesn't_match", "")
+		return
+	}
+	existing, err := c.Auth.Store().FindAccountByProviderAndAccountID(c.R.Context(), stateData.ProviderID, userInfo.ID)
+	if err == nil {
+		if existing.UserID != stateData.LinkUserID {
+			redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "account_already_linked_to_different_user", "")
+			return
+		}
+		if err := updateGenericOAuthAccount(c, existing.ID, tokens); err != nil {
+			redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+			return
+		}
+		c.Redirect(stateData.CallbackURL)
+		return
+	}
+	if !errors.Is(err, berrors.ErrNotFound) {
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+		return
+	}
+	if err := createGenericOAuthAccount(c, stateData.ProviderID, stateData.LinkUserID, userInfo.ID, tokens); err != nil {
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "unable_to_link_account", "")
+		return
+	}
+	c.Redirect(stateData.CallbackURL)
 }
 
 func genericOAuthDefaultErrorURL(c *auth.Context) string {

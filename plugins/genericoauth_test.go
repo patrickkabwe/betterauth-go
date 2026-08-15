@@ -13,6 +13,52 @@ import (
 	"github.com/patrickkabwe/betterauth-go/plugins"
 )
 
+func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, email string) (*httptest.Server, *bool) {
+	t.Helper()
+	tokenRequestSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			tokenRequestSeen = true
+			if r.Method != http.MethodPost {
+				http.Error(w, "method", http.StatusMethodNotAllowed)
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "form", http.StatusBadRequest)
+				return
+			}
+			if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "code" {
+				http.Error(w, "form", http.StatusBadRequest)
+				return
+			}
+			if r.Form.Get("redirect_uri") != "http://localhost:8080/api/auth/oauth2/callback/oidc" {
+				http.Error(w, "redirect_uri", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`))
+		case "/userinfo":
+			if r.Header.Get("Authorization") != "Bearer access-token" {
+				http.Error(w, "authorization", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			resp := map[string]any{
+				"sub":            accountID,
+				"name":           name,
+				"email":          email,
+				"email_verified": true,
+				"picture":        "https://idp.example.com/avatar.png",
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return server, &tokenRequestSeen
+}
+
 func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
@@ -150,6 +196,9 @@ func TestGenericOAuthLinkReturnsAuthorizationURL(t *testing.T) {
 }
 
 func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
+	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "oidc-account", "OIDC User", "OIDC@EXAMPLE.COM")
+	defer oauthServer.Close()
+
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
 			{
@@ -157,8 +206,8 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 				ClientID:         "client",
 				ClientSecret:     "secret",
 				AuthorizationURL: "https://idp.example.com/oauth/authorize",
-				TokenURL:         "https://idp.example.com/oauth/token",
-				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+				TokenURL:         oauthServer.URL + "/token",
+				UserInfoURL:      oauthServer.URL + "/userinfo",
 			},
 		},
 	}))
@@ -188,6 +237,89 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	}
 	if location := callback.Header().Get("Location"); location != "https://app.example.com/dashboard" {
 		t.Fatalf("Location=%q", location)
+	}
+	if !*tokenRequestSeen {
+		t.Fatal("expected token request")
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "oidc@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Name != "OIDC User" || !user.EmailVerified {
+		t.Fatalf("user=%+v", user)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "oidc-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.UserID != user.ID || account.AccessToken != "access-token" || account.RefreshToken != "refresh-token" || account.Scope != "openid,email" {
+		t.Fatalf("account=%+v", account)
+	}
+	if len(callback.Result().Cookies()) == 0 {
+		t.Fatal("expected session cookie")
+	}
+}
+
+func TestGenericOAuthCallbackLinksAccount(t *testing.T) {
+	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "link-account", "Link User", "generic-oauth-link-callback@example.com")
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+				UserInfoURL:      oauthServer.URL + "/userinfo",
+			},
+		},
+	}))
+
+	signUp := post(t, a, "/sign-up/email", `{"name":"Link User","email":"generic-oauth-link-callback@example.com","password":"password123"}`)
+	if signUp.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", signUp.Code, signUp.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "generic-oauth-link-callback@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := postWithCookies(t, a, "/oauth2/link", `{"providerId":"oidc","callbackURL":"https://app.example.com/settings"}`, signUp.Result().Cookies())
+	if link.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", link.Code, link.Body.String())
+	}
+	var linkBody struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(link.Body.Bytes(), &linkBody); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(linkBody.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", linkBody.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "https://app.example.com/settings" {
+		t.Fatalf("Location=%q", location)
+	}
+	if !*tokenRequestSeen {
+		t.Fatal("expected token request")
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "link-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.UserID != user.ID || account.AccessToken != "access-token" {
+		t.Fatalf("account=%+v user=%+v", account, user)
 	}
 }
 
