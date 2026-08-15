@@ -26,6 +26,7 @@ type EmailOTPOptions struct {
 	DisableSignUp   bool
 	AllowedAttempts int
 	ChangeEmail     EmailOTPChangeEmailOptions
+	ResendStrategy  EmailOTPResendStrategy
 }
 
 // EmailOTPChangeEmailOptions configures the change-email OTP flow.
@@ -34,9 +35,14 @@ type EmailOTPChangeEmailOptions struct {
 	VerifyCurrentEmail bool
 }
 
+// EmailOTPResendStrategy controls OTP behavior when a valid code already exists.
+type EmailOTPResendStrategy string
+
 const (
 	codeEmailOTPExpired         = "OTP_EXPIRED"
 	codeEmailOTPTooManyAttempts = "TOO_MANY_ATTEMPTS"
+
+	EmailOTPResendStrategyReuse EmailOTPResendStrategy = "reuse"
 )
 
 func (o EmailOTPOptions) length() int {
@@ -164,6 +170,15 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 }
 
 func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool) {
+	if opts.ResendStrategy == EmailOTPResendStrategyReuse {
+		otp, reused, ok := reuseEmailOTP(c, opts, identifier)
+		if !ok {
+			return "", false
+		}
+		if reused {
+			return otp, true
+		}
+	}
 	otp, err := numericOTP(opts.length())
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -174,6 +189,38 @@ func createEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (s
 		return "", false
 	}
 	return otp, true
+}
+
+func reuseEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool, bool) {
+	verification, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
+	if errors.Is(err, berrors.ErrNotFound) {
+		return "", false, true
+	}
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return "", false, false
+	}
+	if time.Now().After(verification.ExpiresAt) {
+		return "", false, true
+	}
+	otp, attempts := splitEmailOTPValue(verification.Value)
+	if attempts >= opts.allowedAttempts() {
+		return "", false, true
+	}
+	now := time.Now()
+	err = c.Auth.Store().CreateVerification(c.R.Context(), &types.Verification{
+		ID:         verification.ID,
+		Identifier: verification.Identifier,
+		Value:      verification.Value,
+		ExpiresAt:  now.Add(opts.expires()),
+		CreatedAt:  verification.CreatedAt,
+		UpdatedAt:  now,
+	})
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return "", false, false
+	}
+	return otp, true, true
 }
 
 func requestEmailChangeOTPHandler(opts EmailOTPOptions) func(*auth.Context) {

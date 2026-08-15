@@ -160,6 +160,54 @@ func TestEmailOTPPluginSendVerificationOTPGeneratesNumericCode(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
+	var sentCodes []string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			ResendStrategy: plugins.EmailOTPResendStrategyReuse,
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentCodes = append(sentCodes, otp)
+				return nil
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-reuse",
+		Name:          "Reuse",
+		Email:         "reuse@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+			"email": "reuse@example.com",
+			"type":  "email-verification",
+		}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+		}
+	}
+	if len(sentCodes) != 2 {
+		t.Fatalf("sent codes=%v", sentCodes)
+	}
+	if sentCodes[0] != sentCodes[1] {
+		t.Fatalf("expected reused OTP, got %q then %q", sentCodes[0], sentCodes[1])
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":reuse@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != sentCodes[0]+":0" {
+		t.Fatalf("verification value %q", verification.Value)
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPReturnsProviderError(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
