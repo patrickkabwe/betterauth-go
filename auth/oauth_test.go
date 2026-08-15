@@ -106,6 +106,28 @@ func TestSignInSocialPassesLoginHint(t *testing.T) {
 	}
 }
 
+func TestSignInSocialStateCreateFails(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-state-fail", Email: "oauth-state-fail@example.com", EmailVerified: true, Name: "OAuth State Fail"},
+	}
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("CreateVerification")
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+	})
+
+	disable := true
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestOAuthCallbackCreatesSession(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	p := &staticOAuthProvider{

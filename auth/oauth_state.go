@@ -68,10 +68,12 @@ func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state stri
 	if err != nil {
 		return "", "", err
 	}
-	_ = a.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
+	if err := a.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
 		ID: vID, Identifier: constants.VerificationOAuthState + state, Value: string(raw),
 		ExpiresAt: payload.ExpiresAt, CreatedAt: now, UpdatedAt: now,
-	})
+	}); err != nil {
+		return "", "", err
+	}
 	return state, codeVerifier, nil
 }
 
