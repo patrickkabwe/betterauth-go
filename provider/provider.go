@@ -14,6 +14,36 @@ type OAuthUser struct {
 	EmailVerified bool
 }
 
+// OAuthUserMapping overrides selected OAuth user fields derived from a provider profile.
+type OAuthUserMapping struct {
+	ID            *string
+	Name          *string
+	Email         *string
+	Image         *string
+	EmailVerified *bool
+}
+
+// ApplyOAuthUserMapping applies optional user field overrides.
+func ApplyOAuthUserMapping(user OAuthUser, mapping OAuthUserMapping) OAuthUser {
+	if mapping.ID != nil {
+		user.ID = *mapping.ID
+	}
+	if mapping.Name != nil {
+		user.Name = *mapping.Name
+	}
+	if mapping.Email != nil {
+		user.Email = *mapping.Email
+	}
+	if mapping.Image != nil {
+		image := *mapping.Image
+		user.Image = &image
+	}
+	if mapping.EmailVerified != nil {
+		user.EmailVerified = *mapping.EmailVerified
+	}
+	return user
+}
+
 // UserInfo is the account-info payload from a provider.
 type UserInfo struct {
 	User OAuthUser

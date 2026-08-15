@@ -108,6 +108,47 @@ func TestGitHubGetUserInfoUsesOverride(t *testing.T) {
 	}
 }
 
+func TestGitHubGetUserInfoMapsProfileToUser(t *testing.T) {
+	transport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `[]`
+		if req.URL.Path == "/user" {
+			body = `{"id":42,"login":"octo","name":"Octo","email":"public@example.com","avatar_url":"https://img.example.com/octo.png"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+	defer func() {
+		http.DefaultTransport = transport
+	}()
+
+	mappedName := "Mapped GitHub"
+	mappedEmail := "mapped@example.com"
+	p := github.New(github.Config{
+		ClientID: "id", ClientSecret: "secret",
+		MapProfileToUser: func(_ context.Context, profile map[string]any) (provider.OAuthUserMapping, error) {
+			if profile["login"] != "octo" {
+				t.Fatalf("profile=%+v", profile)
+			}
+			return provider.OAuthUserMapping{Name: &mappedName, Email: &mappedEmail}, nil
+		},
+	})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.ID != "42" || info.User.Name != "Mapped GitHub" || info.User.Email != "mapped@example.com" {
+		t.Fatalf("user=%+v", info.User)
+	}
+	if info.Data["email"] != "public@example.com" {
+		t.Fatalf("data=%+v", info.Data)
+	}
+}
+
 func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 	transport := http.DefaultTransport
 	seenUserAgents := map[string]string{}

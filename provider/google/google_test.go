@@ -148,6 +148,31 @@ func TestGoogleGetUserInfoUsesOverride(t *testing.T) {
 	}
 }
 
+func TestGoogleGetUserInfoMapsProfileToUser(t *testing.T) {
+	claims := map[string]any{
+		"sub": "google-sub", "email": "g@example.com", "email_verified": false,
+		"name": "G User", "picture": "http://img",
+	}
+	mappedName := "Mapped Google"
+	mappedVerified := true
+	p := google.New(google.Config{
+		ClientID: "id", ClientSecret: "secret",
+		MapProfileToUser: func(_ context.Context, profile map[string]any) (provider.OAuthUserMapping, error) {
+			if profile["sub"] != "google-sub" {
+				t.Fatalf("profile=%+v", profile)
+			}
+			return provider.OAuthUserMapping{Name: &mappedName, EmailVerified: &mappedVerified}, nil
+		},
+	})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{IDToken: googleTestIDToken(claims)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.ID != "google-sub" || info.User.Name != "Mapped Google" || !info.User.EmailVerified {
+		t.Fatalf("user=%+v", info.User)
+	}
+}
+
 func TestGoogleGetUserInfoRejectsHostedDomainMismatch(t *testing.T) {
 	token := googleTestIDToken(map[string]any{
 		"sub": "google-sub", "email": "g@example.com", "email_verified": true,

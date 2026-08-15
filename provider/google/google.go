@@ -34,6 +34,7 @@ type Config struct {
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
 	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
+	MapProfileToUser         func(context.Context, map[string]any) (provider.OAuthUserMapping, error)
 }
 
 // Provider implements Google OAuth.
@@ -172,10 +173,18 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 	if picture != "" {
 		image = &picture
 	}
+	user := provider.OAuthUser{
+		ID: sub, Name: name, Email: email, Image: image, EmailVerified: verified,
+	}
+	if p.cfg.MapProfileToUser != nil {
+		mapping, err := p.cfg.MapProfileToUser(ctx, claims)
+		if err != nil {
+			return nil, err
+		}
+		user = provider.ApplyOAuthUserMapping(user, mapping)
+	}
 	return &provider.UserInfo{
-		User: provider.OAuthUser{
-			ID: sub, Name: name, Email: email, Image: image, EmailVerified: verified,
-		},
+		User: user,
 		Data: claims,
 	}, nil
 }

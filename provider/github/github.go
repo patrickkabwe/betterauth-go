@@ -35,6 +35,7 @@ type Config struct {
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
 	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
+	MapProfileToUser         func(context.Context, map[string]any) (provider.OAuthUserMapping, error)
 }
 
 // Provider implements GitHub OAuth.
@@ -164,15 +165,24 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 	if profile.AvatarURL != "" {
 		image = &profile.AvatarURL
 	}
+	data := githubProfileData(profile, email)
+	user := provider.OAuthUser{
+		ID:            fmt.Sprintf("%d", profile.ID),
+		Name:          name,
+		Email:         email,
+		Image:         image,
+		EmailVerified: verified,
+	}
+	if p.cfg.MapProfileToUser != nil {
+		mapping, err := p.cfg.MapProfileToUser(ctx, data)
+		if err != nil {
+			return nil, err
+		}
+		user = provider.ApplyOAuthUserMapping(user, mapping)
+	}
 	return &provider.UserInfo{
-		User: provider.OAuthUser{
-			ID:            fmt.Sprintf("%d", profile.ID),
-			Name:          name,
-			Email:         email,
-			Image:         image,
-			EmailVerified: verified,
-		},
-		Data: githubProfileData(profile, email),
+		User: user,
+		Data: data,
 	}, nil
 }
 
