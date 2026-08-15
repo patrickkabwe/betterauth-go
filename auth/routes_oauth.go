@@ -100,8 +100,12 @@ func handleSocialIDTokenSignIn(c *Context, p provider.SocialProvider, body signI
 		IDToken: body.IDToken.Token, Scopes: body.IDToken.Scopes, User: body.IDToken.User,
 	}
 	info, err := p.GetUserInfo(c.R.Context(), tokens)
-	if err != nil || info == nil || info.User.Email == "" {
+	if err != nil || info == nil {
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeFailedToGetUserInfo))
+		return
+	}
+	if info.User.Email == "" {
+		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeUserEmailNotFound))
 		return
 	}
 	account := oauthAccountInput{

@@ -259,6 +259,29 @@ func TestSignInSocialIDTokenPassesUserDataToProvider(t *testing.T) {
 	}
 }
 
+func TestSignInSocialIDTokenMissingEmailUsesUserEmailNotFound(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-missing-email", EmailVerified: true, Name: "OAuth Missing Email"},
+	}
+	a := oauthTestAuth(t, p)
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-missing-email"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["code"] != constants.CodeUserEmailNotFound {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestSignInSocialSendsVerificationForUnverifiedNewUser(t *testing.T) {
 	p := &staticOAuthProvider{
 		id:   "mock",
