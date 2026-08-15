@@ -56,6 +56,7 @@ type RefreshAccessTokenOpts struct {
 	ClientSecret   string
 	RefreshToken   string
 	Authentication OAuthClientAuthentication
+	Resources      []string
 	ExtraParams    map[string]string
 }
 
@@ -264,6 +265,9 @@ func RefreshAccessTokenWithOptions(ctx context.Context, opts RefreshAccessTokenO
 	headers.Set("Accept", "application/json")
 	if err := applyOAuthClientAuthentication(headers, form, opts.ClientID, opts.ClientSecret, opts.Authentication, opts.TokenURL); err != nil {
 		return nil, err
+	}
+	for _, resource := range opts.Resources {
+		form.Add("resource", resource)
 	}
 	for key, value := range opts.ExtraParams {
 		form.Set(key, value)

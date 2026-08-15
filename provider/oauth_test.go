@@ -230,8 +230,9 @@ func TestRefreshAccessTokenWithOptionsUsesBasicAuth(t *testing.T) {
 		ClientSecret:   "secret",
 		RefreshToken:   "refresh-token",
 		Authentication: OAuthClientAuthenticationBasic,
-		ExtraParams: map[string]string{
-			"resource": "https://api.example.com",
+		Resources: []string{
+			"https://api-one.example.com",
+			"https://api-two.example.com",
 		},
 	})
 	if err != nil {
@@ -241,8 +242,12 @@ func TestRefreshAccessTokenWithOptionsUsesBasicAuth(t *testing.T) {
 	if authorization != expectedAuthorization {
 		t.Fatalf("authorization=%q", authorization)
 	}
-	if formValues.Get("grant_type") != "refresh_token" || formValues.Get("refresh_token") != "refresh-token" || formValues.Get("resource") != "https://api.example.com" {
+	if formValues.Get("grant_type") != "refresh_token" || formValues.Get("refresh_token") != "refresh-token" {
 		t.Fatalf("form=%v", formValues)
+	}
+	resources := formValues["resource"]
+	if len(resources) != 2 || resources[0] != "https://api-one.example.com" || resources[1] != "https://api-two.example.com" {
+		t.Fatalf("resources=%v", resources)
 	}
 	if _, ok := formValues["client_id"]; ok {
 		t.Fatalf("form=%v", formValues)
