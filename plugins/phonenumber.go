@@ -58,18 +58,18 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 			rt(http.MethodPost, "/phone-number/verify", func(c *auth.Context) {
 				var body struct {
 					PhoneNumber string `json:"phoneNumber"`
-					OTP         string `json:"otp"`
+					Code        string `json:"code"`
 				}
-				if err := c.ParseJSON(&body); err != nil {
+				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" || body.Code == "" {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 					return
 				}
 				v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber)
-				if err != nil || v.Value != body.OTP {
+				if err != nil || v.Value != body.Code {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 					return
 				}
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
 			}),
 			rt(http.MethodPost, "/sign-in/phone-number", func(c *auth.Context) {
 				var body struct {

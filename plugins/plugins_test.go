@@ -180,6 +180,51 @@ func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberVerifyUsesCode(t *testing.T) {
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","code":"`+sentCode+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status bool `json:"status"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Status {
+		t.Fatal("expected verified status")
+	}
+}
+
+func TestPhoneNumberVerifyRejectsOTPShape(t *testing.T) {
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("send status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/phone-number/verify", `{"phoneNumber":"+1234567890","otp":"`+sentCode+`"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("verify status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	createPhoneCredentialUser(t, a, "phone-signin-user", "+1234567890", "password123")
