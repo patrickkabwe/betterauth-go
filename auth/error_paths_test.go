@@ -64,6 +64,22 @@ func TestDuplicateSignUpHashFails(t *testing.T) {
 	}
 }
 
+func TestDuplicateSignUpAutoSignInSkipsTimingHash(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	signUp(t, a1, "dupautohash@example.com")
+	a2 := newTestAuth(func(c *auth.Config) {
+		c.Store = mem
+		c.Hasher = errorHasher{}
+	})
+	resp, _ := doRequest(a2, http.MethodPost, "/sign-up/email", map[string]any{
+		"name": "Dup", "email": "dupautohash@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSignInFindUserFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("FindUserByEmail") })
 	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{

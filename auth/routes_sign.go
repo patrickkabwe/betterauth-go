@@ -94,11 +94,11 @@ func shouldSendSignUpVerification(cfg resolved) bool {
 }
 
 func handleDuplicateSignUp(c *Context, existing *types.User, password string) {
-	if _, err := c.Auth.cfg.hasher.Hash(password); err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
-		return
-	}
 	if c.Auth.cfg.emailPassword.requireEmailVerification || !c.Auth.cfg.emailPassword.autoSignIn {
+		if _, err := c.Auth.cfg.hasher.Hash(password); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		syntheticID, err := id.Generate(32)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
