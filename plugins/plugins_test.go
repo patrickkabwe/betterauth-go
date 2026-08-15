@@ -365,7 +365,7 @@ func TestBearerPluginRegistered(t *testing.T) {
 
 func TestAllPluginsCount(t *testing.T) {
 	all := plugins.All(plugins.AllOptions{})
-	if len(all) != 29 {
-		t.Fatalf("expected 29 plugins, got %d", len(all))
+	if len(all) != 30 {
+		t.Fatalf("expected 30 plugins, got %d", len(all))
 	}
 }

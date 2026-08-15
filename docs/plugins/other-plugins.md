@@ -11,6 +11,7 @@ Brief reference for plugins without dedicated guides. All are enabled via
 | SCIM | `scim` | SCIM 2.0 `/scim/v2` metadata and user provisioning endpoints |
 | Stripe | `stripe` | Checkout session creation, billing portal sessions, subscription routes, and signed webhooks |
 | SSO | `sso` | SAML provider registry, SP metadata, sign-in redirects, and ACS session creation |
+| Passkey | `passkey` | WebAuthn passkey registration options, verification, sign-in options, authentication, list, update, and delete |
 | JWT | `jwt` | JWT tokens + JWKS endpoint |
 | Multi-session | `multi-session` | Multiple concurrent sessions |
 | Custom session | `custom-session` | Transform session API response |

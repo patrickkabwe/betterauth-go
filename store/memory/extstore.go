@@ -858,3 +858,78 @@ func (s *Store) DeleteSSOProvider(_ context.Context, providerID string) error {
 	delete(s.ssoProviders, providerID)
 	return nil
 }
+
+func (s *Store) CreatePasskey(_ context.Context, passkey *types.Passkey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.passkeysByCredID[passkey.CredentialID]; ok {
+		return ErrAlreadyExists
+	}
+	cp := *passkey
+	s.passkeys[passkey.ID] = &cp
+	s.passkeysByCredID[passkey.CredentialID] = passkey.ID
+	return nil
+}
+
+func (s *Store) FindPasskeyByCredentialID(_ context.Context, credentialID string) (*types.Passkey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.passkeysByCredID[credentialID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *s.passkeys[id]
+	return &cp, nil
+}
+
+func (s *Store) ListPasskeysByUserID(_ context.Context, userID string) ([]types.Passkey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.Passkey, 0)
+	for _, passkey := range s.passkeys {
+		if passkey.UserID == userID {
+			out = append(out, *passkey)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) UpdatePasskey(_ context.Context, id string, update store.PasskeyUpdate) (*types.Passkey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	passkey, ok := s.passkeys[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if update.Name != nil {
+		passkey.Name = *update.Name
+	}
+	if update.CredentialJSON != nil {
+		passkey.CredentialJSON = *update.CredentialJSON
+	}
+	if update.Transports != nil {
+		passkey.Transports = *update.Transports
+	}
+	if update.BackedUp != nil {
+		passkey.BackedUp = *update.BackedUp
+	}
+	if update.UpdatedAt != nil {
+		passkey.UpdatedAt = *update.UpdatedAt
+	} else {
+		passkey.UpdatedAt = time.Now().UTC()
+	}
+	cp := *passkey
+	return &cp, nil
+}
+
+func (s *Store) DeletePasskey(_ context.Context, id string, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	passkey, ok := s.passkeys[id]
+	if !ok || passkey.UserID != userID {
+		return ErrNotFound
+	}
+	delete(s.passkeysByCredID, passkey.CredentialID)
+	delete(s.passkeys, id)
+	return nil
+}

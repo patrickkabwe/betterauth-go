@@ -184,3 +184,16 @@ type SSOProvider struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
+
+// Passkey stores a WebAuthn credential for a user.
+type Passkey struct {
+	ID             string    `json:"id"`
+	UserID         string    `json:"userId"`
+	Name           string    `json:"name,omitempty"`
+	CredentialID   string    `json:"credentialID"`
+	CredentialJSON string    `json:"-"`
+	Transports     string    `json:"transports,omitempty"`
+	BackedUp       bool      `json:"backedUp"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}

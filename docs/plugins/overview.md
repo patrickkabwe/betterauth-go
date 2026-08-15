@@ -27,7 +27,7 @@ Or enable everything at once:
 Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 ```
 
-## All 29 core plugins
+## All 30 core plugins
 
 | ID | Package | Description |
 |----|---------|-------------|
@@ -39,6 +39,7 @@ Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 | `scim` | `plugins.SCIM` | SCIM 2.0 user provisioning — [other](other-plugins.md) |
 | `stripe` | `plugins.Stripe` | Stripe checkout, billing portal, and webhooks — [other](other-plugins.md) |
 | `sso` | `plugins.SSO` | Enterprise SSO with SAML provider management, metadata, redirect, and ACS routes — [other](other-plugins.md) |
+| `passkey` | `plugins.Passkey` | WebAuthn passkey registration, sign-in, and management — [other](other-plugins.md) |
 | `username` | `plugins.Username` | Username sign-in — [guide](username.md) |
 | `email-otp` | `plugins.EmailOTP` | Email OTP — [guide](email-otp.md) |
 | `one-time-token` | `plugins.OneTimeToken` | Short-lived single-use tokens |

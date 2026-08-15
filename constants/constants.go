@@ -153,6 +153,7 @@ const (
 	PluginSCIM              = "scim"
 	PluginStripe            = "stripe"
 	PluginSSO               = "sso"
+	PluginPasskey           = "passkey"
 )
 
 // API error codes.

@@ -23,8 +23,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
 | Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 29 | 0 | 0 |
-| Extended packages | 6 | 0 | 4 |
+| Plugins (core package) | 30 | 0 | 0 |
+| Extended packages | 7 | 0 | 3 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -220,7 +220,7 @@ Separate npm packages in the Better Auth monorepo.
 
 | Package | Status | Description |
 |---------|--------|-------------|
-| `@better-auth/passkey` | ⬜ | WebAuthn / passkey registration & sign-in |
+| `@better-auth/passkey` | ✅ | WebAuthn / passkey registration, sign-in, and management |
 | `@better-auth/stripe` | ✅ | Checkout, billing portal, subscription routes, webhooks |
 | `@better-auth/sso` | ✅ | SAML provider registry, SP metadata, redirect sign-in, ACS session creation |
 | `@better-auth/scim` | ✅ | SCIM user provisioning |
@@ -375,7 +375,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 ### Phase 4 — Advanced auth
 
 - [x] Two-factor (TOTP + backup codes)
-- [ ] Passkeys (WebAuthn)
+- [x] Passkeys (WebAuthn)
 - [x] Username plugin
 - [x] Phone number OTP
 - [x] Anonymous sessions
@@ -415,4 +415,4 @@ https://github.com/better-auth/better-auth/tree/main/packages/better-auth/src/ap
 
 ---
 
-*Last updated: 2026-06-06 · Better Auth reference version: 1.6.x · Phase 2 (production readiness) + CLI complete. Remaining focus: passkeys/SSO/SCIM/Stripe/API keys, MongoDB & Redis adapters, more OAuth providers.*
+*Last updated: 2026-06-06 · Better Auth reference version: 1.6.x · Phase 2 (production readiness) + CLI complete. Remaining focus: MongoDB & Redis adapters, OAuth authorization server, and remaining OAuth providers.*

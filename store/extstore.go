@@ -99,6 +99,13 @@ type ExtStore interface {
 	ListSSOProvidersByUserID(ctx context.Context, userID string) ([]types.SSOProvider, error)
 	UpdateSSOProvider(ctx context.Context, providerID string, update SSOProviderUpdate) (*types.SSOProvider, error)
 	DeleteSSOProvider(ctx context.Context, providerID string) error
+
+	// Passkey
+	CreatePasskey(ctx context.Context, passkey *types.Passkey) error
+	FindPasskeyByCredentialID(ctx context.Context, credentialID string) (*types.Passkey, error)
+	ListPasskeysByUserID(ctx context.Context, userID string) ([]types.Passkey, error)
+	UpdatePasskey(ctx context.Context, id string, update PasskeyUpdate) (*types.Passkey, error)
+	DeletePasskey(ctx context.Context, id string, userID string) error
 }
 
 // APIKeyUpdate describes mutable API key fields.
@@ -122,5 +129,14 @@ type SSOProviderUpdate struct {
 	OIDCConfig     *string
 	SAMLConfig     *string
 	DomainVerified *bool
+	UpdatedAt      *time.Time
+}
+
+// PasskeyUpdate describes mutable passkey fields.
+type PasskeyUpdate struct {
+	Name           *string
+	CredentialJSON *string
+	Transports     *string
+	BackedUp       *bool
 	UpdatedAt      *time.Time
 }

@@ -1165,6 +1165,116 @@ func (s *Store) scanSSOProvider(row interface{ Scan(...any) error }) (*types.SSO
 	return &provider, nil
 }
 
+// =========================================================================
+// Passkey
+// =========================================================================
+
+var passkeyColNames = []string{
+	"id", "userId", "name", "credentialID", "credentialJSON", "transports", "backedUp", "createdAt", "updatedAt",
+}
+
+func (s *Store) CreatePasskey(ctx context.Context, passkey *types.Passkey) error {
+	_, err := s.db.ExecContext(ctx, s.q(`
+		INSERT INTO `+s.table("passkey")+` (`+s.cols(passkeyColNames...)+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		passkey.ID, passkey.UserID, nullStr(passkey.Name), passkey.CredentialID, passkey.CredentialJSON,
+		nullStr(passkey.Transports), boolToInt(passkey.BackedUp), toMillis(passkey.CreatedAt), toMillis(passkey.UpdatedAt))
+	return err
+}
+
+func (s *Store) FindPasskeyByCredentialID(ctx context.Context, credentialID string) (*types.Passkey, error) {
+	return s.scanPasskey(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(passkeyColNames...)+` FROM `+s.table("passkey")+` WHERE `+s.table("credentialID")+` = ?`), credentialID))
+}
+
+func (s *Store) ListPasskeysByUserID(ctx context.Context, userID string) ([]types.Passkey, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(passkeyColNames...)+` FROM `+s.table("passkey")+` WHERE `+s.table("userId")+` = ?`), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.Passkey, 0)
+	for rows.Next() {
+		passkey, err := s.scanPasskey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *passkey)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdatePasskey(ctx context.Context, id string, update store.PasskeyUpdate) (*types.Passkey, error) {
+	passkey, err := s.findPasskeyByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if update.Name != nil {
+		passkey.Name = *update.Name
+	}
+	if update.CredentialJSON != nil {
+		passkey.CredentialJSON = *update.CredentialJSON
+	}
+	if update.Transports != nil {
+		passkey.Transports = *update.Transports
+	}
+	if update.BackedUp != nil {
+		passkey.BackedUp = *update.BackedUp
+	}
+	if update.UpdatedAt != nil {
+		passkey.UpdatedAt = *update.UpdatedAt
+	} else {
+		passkey.UpdatedAt = time.Now().UTC()
+	}
+	_, err = s.db.ExecContext(ctx, s.q(`
+		UPDATE `+s.table("passkey")+` SET name = ?, `+s.table("credentialJSON")+` = ?, transports = ?,
+		`+s.table("backedUp")+` = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
+		nullStr(passkey.Name), passkey.CredentialJSON, nullStr(passkey.Transports),
+		boolToInt(passkey.BackedUp), toMillis(passkey.UpdatedAt), id)
+	if err != nil {
+		return nil, err
+	}
+	return passkey, nil
+}
+
+func (s *Store) DeletePasskey(ctx context.Context, id string, userID string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("passkey")+` WHERE id = ? AND `+s.table("userId")+` = ?`), id, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) findPasskeyByID(ctx context.Context, id string) (*types.Passkey, error) {
+	return s.scanPasskey(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(passkeyColNames...)+` FROM `+s.table("passkey")+` WHERE id = ?`), id))
+}
+
+func (s *Store) scanPasskey(row interface{ Scan(...any) error }) (*types.Passkey, error) {
+	var (
+		passkey    types.Passkey
+		name       sql.NullString
+		transports sql.NullString
+		backedUp   int
+		createdAt  int64
+		updatedAt  int64
+	)
+	err := row.Scan(&passkey.ID, &passkey.UserID, &name, &passkey.CredentialID, &passkey.CredentialJSON, &transports, &backedUp, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	passkey.Name = name.String
+	passkey.Transports = transports.String
+	passkey.BackedUp = backedUp != 0
+	passkey.CreatedAt = fromMillis(createdAt)
+	passkey.UpdatedAt = fromMillis(updatedAt)
+	return &passkey, nil
+}
+
 func nullZeroInt(value int) any {
 	if value == 0 {
 		return nil

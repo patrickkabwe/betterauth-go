@@ -27,6 +27,7 @@ const (
 	pluginLastLogin         = "last-login-method"
 	pluginAPIKey            = "api-key"
 	pluginSSO               = "sso"
+	pluginPasskey           = "passkey"
 )
 
 // coreStatements returns the always-present tables (user, account, session,
@@ -319,6 +320,21 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_providerId_idx ON ` + d.quoteIdent("ssoProvider") + ` (` + d.quoteIdent("providerId") + `)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_domain_idx ON ` + d.quoteIdent("ssoProvider") + ` (domain)`,
 			`CREATE INDEX IF NOT EXISTS ssoProvider_userId_idx ON ` + d.quoteIdent("ssoProvider") + ` (` + d.quoteIdent("userId") + `)`,
+		},
+		pluginPasskey: {
+			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("passkey") + ` (
+				id TEXT PRIMARY KEY,
+				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
+				name TEXT,
+				` + d.quoteIdent("credentialID") + ` TEXT NOT NULL,
+				` + d.quoteIdent("credentialJSON") + ` TEXT NOT NULL,
+				transports TEXT,
+				` + d.quoteIdent("backedUp") + ` INTEGER NOT NULL DEFAULT 0,
+				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
+				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS passkey_credentialID_idx ON ` + d.quoteIdent("passkey") + ` (` + d.quoteIdent("credentialID") + `)`,
+			`CREATE INDEX IF NOT EXISTS passkey_userId_idx ON ` + d.quoteIdent("passkey") + ` (` + d.quoteIdent("userId") + `)`,
 		},
 	}
 }
