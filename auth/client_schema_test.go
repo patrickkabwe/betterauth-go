@@ -19,6 +19,7 @@ func TestClientSchema(t *testing.T) {
 		c.Plugins = []auth.Plugin{
 			plugins.Bearer(plugins.BearerOptions{}),
 			plugins.Organization(plugins.OrganizationOptions{}),
+			plugins.Username(plugins.UsernameOptions{}),
 		}
 	})
 
@@ -39,6 +40,12 @@ func TestClientSchema(t *testing.T) {
 	}
 	if schema.User["role"].Type != "string" {
 		t.Fatal("missing role field")
+	}
+	if schema.User[constants.FieldUsername].Type != "string" {
+		t.Fatal("missing username field")
+	}
+	if schema.User[constants.FieldDisplayUsername].Type != "string" {
+		t.Fatal("missing displayUsername field")
 	}
 
 	var org *auth.ClientPluginSchema

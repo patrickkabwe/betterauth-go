@@ -229,6 +229,100 @@ func TestUsernameSignInPostNormalizationValidatesRawUsername(t *testing.T) {
 	}
 }
 
+func TestUsernameSignUpStoresNormalizedUsernameAndDisplayFallback(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-signup@example.com","password":"password123","username":"MixedUser"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "username-signup@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.UserAdditionalString(user, constants.FieldUsername) != "mixeduser" {
+		t.Fatalf("username = %q", auth.UserAdditionalString(user, constants.FieldUsername))
+	}
+	if auth.UserAdditionalString(user, constants.FieldDisplayUsername) != "MixedUser" {
+		t.Fatalf("displayUsername = %q", auth.UserAdditionalString(user, constants.FieldDisplayUsername))
+	}
+	w = post(t, a, "/sign-in/username", `{"username":"MixedUser","password":"password123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("sign-in status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameSignUpRejectsDuplicateNormalizedUsername(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-first@example.com","password":"password123","username":"DuplicateUser"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first status %d body %s", w.Code, w.Body.String())
+	}
+	w = post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-second@example.com","password":"password123","username":"duplicateuser"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("second status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameUpdateNormalizesAndRejectsDuplicateUsername(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
+	first := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-update-first@example.com","password":"password123","username":"FirstUser"}`)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status %d body %s", first.Code, first.Body.String())
+	}
+	second := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-update-second@example.com","password":"password123","username":"SecondUser"}`)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status %d body %s", second.Code, second.Body.String())
+	}
+	cookie := first.Header().Get("Set-Cookie")
+	req := httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"username":"UpdatedUser"}`))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update status %d body %s", w.Code, w.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "username-update-first@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.UserAdditionalString(user, constants.FieldUsername) != "updateduser" {
+		t.Fatalf("username = %q", auth.UserAdditionalString(user, constants.FieldUsername))
+	}
+	req = httptest.NewRequest(http.MethodPost, "/update-user", strings.NewReader(`{"username":"SecondUser"}`))
+	req.Header.Set(constants.HeaderContentType, constants.MIMEJSON)
+	req.Header.Set("Cookie", cookie)
+	w = httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate update status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameDisplayUsernameValidatorAndNormalization(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
+		DisplayUsernameValidator: func(_ context.Context, displayUsername string) (bool, error) {
+			return !strings.Contains(displayUsername, "blocked"), nil
+		},
+		DisplayUsernameNormalization: strings.TrimSpace,
+	}))
+	w := post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-display@example.com","password":"password123","username":"displayuser","displayUsername":" Display User "}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "username-display@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.UserAdditionalString(user, constants.FieldDisplayUsername) != "Display User" {
+		t.Fatalf("displayUsername = %q", auth.UserAdditionalString(user, constants.FieldDisplayUsername))
+	}
+	w = post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-display-blocked@example.com","password":"password123","username":"displayblocked","displayUsername":"blocked"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("blocked status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPhoneNumberSendOTPRequiresSender(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)

@@ -450,6 +450,7 @@ func resolveConfig(opts Config) resolved {
 	if opts.Account.UpdateAccountOnSignIn != nil {
 		updateAccountOnSignIn = *opts.Account.UpdateAccountOnSignIn
 	}
+	additionalFields := collectAdditionalUserFields(opts.User.AdditionalFields, opts.Plugins)
 
 	return resolved{
 		appName:               appName,
@@ -503,7 +504,7 @@ func resolveConfig(opts Config) resolved {
 			expiresIn:             verificationExpires,
 		},
 		user: userResolved{
-			additionalFields:            opts.User.AdditionalFields,
+			additionalFields:            additionalFields,
 			changeEmailEnabled:          changeEmailEnabled,
 			updateEmailWithoutVerify:    opts.User.ChangeEmail.UpdateEmailWithoutVerification,
 			sendChangeEmailConfirmation: opts.User.ChangeEmail.SendChangeEmailConfirmation,
@@ -540,6 +541,33 @@ func resolveConfig(opts Config) resolved {
 		skipTrailingSlashes: opts.Advanced.SkipTrailingSlashes,
 		csrfDisabled:        opts.Advanced.DisableCSRFCheck,
 	}
+}
+
+func collectAdditionalUserFields(configured map[string]AdditionalFieldDef, plugins []Plugin) map[string]AdditionalFieldDef {
+	total := len(configured)
+	for _, plugin := range plugins {
+		contributor, ok := plugin.(UserAdditionalFieldsPlugin)
+		if ok {
+			total += len(contributor.AdditionalUserFields())
+		}
+	}
+	if total == 0 {
+		return nil
+	}
+	fields := make(map[string]AdditionalFieldDef, total)
+	for _, plugin := range plugins {
+		contributor, ok := plugin.(UserAdditionalFieldsPlugin)
+		if !ok {
+			continue
+		}
+		for name, def := range contributor.AdditionalUserFields() {
+			fields[name] = def
+		}
+	}
+	for name, def := range configured {
+		fields[name] = def
+	}
+	return fields
 }
 
 func collectPasswordValidators(plugins []Plugin) []func(string) error {

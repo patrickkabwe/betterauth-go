@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -30,13 +31,28 @@ func handleSignUpEmail(c *Context) {
 		return
 	}
 
+	var raw map[string]json.RawMessage
 	var body signUpBody
-	if err := c.ParseJSON(&body); err != nil {
+	if err := c.ParseJSON(&raw); err != nil {
+		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeInvalidEmail, constants.MsgInvalidRequestBody))
+		return
+	}
+	if err := decodeRawBody(raw, &body); err != nil {
 		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeInvalidEmail, constants.MsgInvalidRequestBody))
 		return
 	}
 	if err := validateSignUpInput(c, body.Name, body.Email, body.Password); err != nil {
 		c.WriteError(err)
+		return
+	}
+	additional, fieldErr := parseAdditionalUserInput(c.Auth.cfg.user.additionalFields, raw, "create")
+	if fieldErr != nil {
+		c.WriteError(fieldErr)
+		return
+	}
+	additional, fieldErr = runUserAdditionalProcessors(c, "create", "", additional)
+	if fieldErr != nil {
+		c.WriteError(fieldErr)
 		return
 	}
 
@@ -51,7 +67,7 @@ func handleSignUpEmail(c *Context) {
 		return
 	}
 
-	user, account, err := createUserWithCredential(c, body.Name, email, body.Password, body.Image)
+	user, account, err := createUserWithCredential(c, body.Name, email, body.Password, body.Image, additional)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, apierror.CodeFailedToCreateUser))
 		return
@@ -245,7 +261,15 @@ func validateSignUpInput(c *Context, name, email, password string) *apierror.Err
 	return nil
 }
 
-func createUserWithCredential(c *Context, name, email, password string, image *string) (*types.User, *types.Account, error) {
+func decodeRawBody(raw map[string]json.RawMessage, dst any) error {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, dst)
+}
+
+func createUserWithCredential(c *Context, name string, email string, password string, image *string, additional map[string]any) (*types.User, *types.Account, error) {
 	hash, err := c.Auth.cfg.hasher.Hash(password)
 	if err != nil {
 		return nil, nil, err
@@ -258,7 +282,7 @@ func createUserWithCredential(c *Context, name, email, password string, image *s
 	user := &types.User{
 		ID: userID, Name: name, Email: email, EmailVerified: false,
 		Image: image, CreatedAt: now, UpdatedAt: now,
-		Additional: applyDefaultAdditionalFields(nil, c.Auth.cfg.user.additionalFields),
+		Additional: applyDefaultAdditionalFields(additional, c.Auth.cfg.user.additionalFields),
 	}
 	if err := c.Auth.cfg.store.CreateUser(c.R.Context(), user); err != nil {
 		return nil, nil, err

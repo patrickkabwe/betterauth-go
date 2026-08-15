@@ -46,6 +46,11 @@ func handleUpdateUser(c *Context) {
 		return
 	}
 	update.Additional = mergeAdditionalUpdate(update.Additional, phoneAdditional)
+	update.Additional, fieldErr = runUserAdditionalProcessors(c, "update", user.ID, update.Additional)
+	if fieldErr != nil {
+		c.WriteError(fieldErr)
+		return
+	}
 	if update.Name == nil && update.Image == nil && len(update.Additional) == 0 {
 		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeBodyMustBeAnObject, constants.MsgNoFieldsToUpdate))
 		return

@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 
+	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
 
@@ -31,6 +32,18 @@ type SignUpVerificationPlugin interface {
 	Plugin
 	SendVerificationOnSignUp() bool
 	SendSignUpVerification(c *Context, user *types.User) error
+}
+
+// UserAdditionalFieldsPlugin contributes user additional-field schema.
+type UserAdditionalFieldsPlugin interface {
+	Plugin
+	AdditionalUserFields() map[string]AdditionalFieldDef
+}
+
+// UserAdditionalProcessorPlugin validates and normalizes user additional fields.
+type UserAdditionalProcessorPlugin interface {
+	Plugin
+	ProcessUserAdditional(c *Context, action string, currentUserID string, fields map[string]any) (map[string]any, *apierror.Error)
 }
 
 // PluginRoute is an HTTP route registered by a plugin.
@@ -141,4 +154,20 @@ func runSignUpVerificationPlugins(c *Context, plugins []Plugin, user *types.User
 		}
 	}
 	return nil
+}
+
+func runUserAdditionalProcessors(c *Context, action string, currentUserID string, fields map[string]any) (map[string]any, *apierror.Error) {
+	out := fields
+	for _, plugin := range c.Auth.cfg.plugins {
+		processor, ok := plugin.(UserAdditionalProcessorPlugin)
+		if !ok {
+			continue
+		}
+		next, err := processor.ProcessUserAdditional(c, action, currentUserID, out)
+		if err != nil {
+			return nil, err
+		}
+		out = next
+	}
+	return out, nil
 }
