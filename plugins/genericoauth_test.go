@@ -1,11 +1,14 @@
 package plugins_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
 )
 
@@ -71,5 +74,78 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	}
 	if values := query["prompt"]; len(values) != 1 {
 		t.Fatalf("prompt values=%v", values)
+	}
+}
+
+func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "https://app.example.com/dashboard" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthCallbackRejectsProviderMismatch(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+			{
+				ProviderID:       "other",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+	if err := a.CreateVerification(context.Background(), constants.VerificationOAuth2State+"state", "oidc|https://app.example.com/dashboard", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := get(t, a, "/oauth2/callback/other?code=code&state=state")
+	if callback.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
 	}
 }

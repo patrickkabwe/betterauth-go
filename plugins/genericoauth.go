@@ -3,6 +3,7 @@ package plugins
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -76,8 +77,15 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
 					return
 				}
-				_ = v
-				c.Redirect(c.Auth.BaseURL() + "?oauth=success&provider=" + providerID)
+				storedProviderID, callbackURL, ok := parseGenericOAuthStateValue(v.Value)
+				if !ok || storedProviderID != providerID {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
+					return
+				}
+				if callbackURL == "" {
+					callbackURL = c.Auth.BaseURL()
+				}
+				c.Redirect(callbackURL)
 			}),
 			rt(http.MethodPost, "/oauth2/link", func(c *auth.Context) {
 				_, _, ok := c.RequireSession()
@@ -88,6 +96,14 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 			}),
 		},
 	}
+}
+
+func parseGenericOAuthStateValue(value string) (string, string, bool) {
+	providerID, callbackURL, ok := strings.Cut(value, "|")
+	if !ok || providerID == "" {
+		return "", "", false
+	}
+	return providerID, callbackURL, true
 }
 
 func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string) url.Values {
