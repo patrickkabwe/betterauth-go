@@ -10,8 +10,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
 	"github.com/patrickkabwe/betterauth-go/internal/crypto"
 	"github.com/patrickkabwe/betterauth-go/provider"
-	"github.com/patrickkabwe/betterauth-go/provider/github"
-	"github.com/patrickkabwe/betterauth-go/provider/google"
+	"github.com/patrickkabwe/betterauth-go/provider/oauth2provider"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -558,7 +557,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 		providers = make(map[string]provider.SocialProvider)
 	}
 	if opts.Google.ClientID != "" && opts.Google.ClientSecret != "" && !opts.Google.Disabled {
-		providers[constants.ProviderGoogle] = google.New(google.Config{
+		providers[constants.ProviderGoogle] = oauth2provider.GoogleWithIDToken(oauth2provider.Options{
 			ClientID: opts.Google.ClientID, ClientSecret: opts.Google.ClientSecret, Scopes: opts.Google.Scopes,
 			AuthorizationEndpoint: opts.Google.AuthorizationEndpoint, RedirectURI: opts.Google.RedirectURI,
 			AccessType: opts.Google.AccessType, Display: opts.Google.Display, Prompt: opts.Google.Prompt, HD: opts.Google.HD,
@@ -570,7 +569,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 		})
 	}
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
-		providers[constants.ProviderGitHub] = github.New(github.Config{
+		providers[constants.ProviderGitHub] = oauth2provider.GitHub(oauth2provider.Options{
 			ClientID: opts.GitHub.ClientID, ClientSecret: opts.GitHub.ClientSecret, Scopes: opts.GitHub.Scopes,
 			AuthorizationEndpoint: opts.GitHub.AuthorizationEndpoint, RedirectURI: opts.GitHub.RedirectURI,
 			Prompt:                opts.GitHub.Prompt,

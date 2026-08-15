@@ -2,16 +2,12 @@ package oauth2provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
-	"github.com/patrickkabwe/betterauth-go/internal/jwt"
 	"github.com/patrickkabwe/betterauth-go/provider"
 )
 
@@ -47,65 +43,9 @@ type Options struct {
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
+	DisableIDTokenSignIn     bool
 	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
 	MapProfileToUser         func(context.Context, map[string]any) (provider.OAuthUserMapping, error)
-}
-
-// Google creates a Google OAuth provider.
-func Google(opts Options) *Provider {
-	params := cloneStringMap(opts.AuthorizationParams)
-	params["include_granted_scopes"] = "true"
-	if opts.AccessType != "" {
-		params["access_type"] = opts.AccessType
-	}
-	if opts.HD != "" {
-		params["hd"] = opts.HD
-	}
-	return New(Config{
-		ID: ProviderGoogle, Name: "Google",
-		ClientID: opts.ClientID, ClientSecret: opts.ClientSecret,
-		Scopes: []string{"email", "profile", "openid"}, AdditionalScopes: opts.Scopes, DisableDefaultScope: opts.DisableDefaultScope,
-		AuthorizationEndpoint: endpoint(opts.AuthorizationEndpoint, "https://accounts.google.com/o/oauth2/v2/auth"),
-		TokenEndpoint:         endpoint(opts.TokenEndpoint, "https://oauth2.googleapis.com/token"),
-		RedirectURI:           opts.RedirectURI,
-		Prompt:                opts.Prompt,
-		AuthorizationParams:   params,
-		AuthorizationParamsAppend: func(values *url.Values, urlOpts provider.AuthorizationURLOpts) {
-			display := opts.Display
-			if urlOpts.Display != "" {
-				display = urlOpts.Display
-			}
-			if display != "" {
-				values.Set("display", display)
-			}
-		},
-		UsePKCE:               true,
-		AlwaysSendScope:       true,
-		DisableImplicitSignUp: opts.DisableImplicitSignUp, DisableSignUp: opts.DisableSignUp,
-		OverrideUserInfoOnSignIn: opts.OverrideUserInfoOnSignIn,
-		GetUserInfo:              googleUserInfo(opts),
-		MapProfileToUser:         opts.MapProfileToUser,
-	})
-}
-
-// GitHub creates a GitHub OAuth provider.
-func GitHub(opts Options) *Provider {
-	return New(Config{
-		ID: ProviderGitHub, Name: "GitHub",
-		ClientID: opts.ClientID, ClientSecret: opts.ClientSecret,
-		Scopes: []string{"read:user", "user:email"}, AdditionalScopes: opts.Scopes, DisableDefaultScope: opts.DisableDefaultScope,
-		AuthorizationEndpoint: endpoint(opts.AuthorizationEndpoint, "https://github.com/login/oauth/authorize"),
-		TokenEndpoint:         endpoint(opts.TokenEndpoint, "https://github.com/login/oauth/access_token"),
-		UserInfoEndpoint:      endpoint(opts.UserInfoEndpoint, "https://api.github.com/user"),
-		RedirectURI:           opts.RedirectURI,
-		Prompt:                opts.Prompt,
-		AuthorizationParams:   opts.AuthorizationParams,
-		AlwaysSendScope:       true,
-		DisableImplicitSignUp: opts.DisableImplicitSignUp, DisableSignUp: opts.DisableSignUp,
-		OverrideUserInfoOnSignIn: opts.OverrideUserInfoOnSignIn,
-		GetUserInfo:              githubUserInfo(opts),
-		MapProfileToUser:         opts.MapProfileToUser,
-	})
 }
 
 // Discord creates a Discord OAuth provider.
@@ -126,168 +66,6 @@ func Discord(opts Options) *Provider {
 		MapProfileToUser:         opts.MapProfileToUser,
 		ProfileMapper:            mapDiscordProfile,
 	})
-}
-
-func googleUserInfo(opts Options) func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error) {
-	if opts.GetUserInfo != nil {
-		return opts.GetUserInfo
-	}
-	return func(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
-		if tokens.IDToken == "" {
-			return nil, fmt.Errorf("google id_token missing")
-		}
-		claims, err := jwt.DecodePayload(tokens.IDToken)
-		if err != nil {
-			return nil, err
-		}
-		if !hostedDomainAllowed(opts.HD, claims["hd"]) {
-			return nil, nil
-		}
-		user := provider.OAuthUser{
-			ID: stringField(claims, "sub"), Name: stringField(claims, "name"),
-			Email: stringField(claims, "email"), Image: optionalImage(stringField(claims, "picture")),
-			EmailVerified: boolField(claims, "email_verified"),
-		}
-		if opts.MapProfileToUser != nil {
-			mapping, err := opts.MapProfileToUser(ctx, claims)
-			if err != nil {
-				return nil, err
-			}
-			user = provider.ApplyOAuthUserMapping(user, mapping)
-		}
-		return &provider.UserInfo{User: user, Data: claims}, nil
-	}
-}
-
-func githubUserInfo(opts Options) func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error) {
-	if opts.GetUserInfo != nil {
-		return opts.GetUserInfo
-	}
-	userEndpoint := endpoint(opts.UserInfoEndpoint, "https://api.github.com/user")
-	emailEndpoint := endpoint(opts.EmailEndpoint, "https://api.github.com/user/emails")
-	return func(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
-		if tokens.AccessToken == "" {
-			return nil, fmt.Errorf("github access token missing")
-		}
-		profile, err := githubFetchMap(ctx, userEndpoint, tokens.AccessToken)
-		if err != nil {
-			return nil, err
-		}
-		emails, _ := githubFetchEmails(ctx, emailEndpoint, tokens.AccessToken)
-		email := githubSelectedEmail(stringField(profile, "email"), emails)
-		verified := githubEmailVerified(email, emails)
-		profile["email"] = email
-		user := provider.OAuthUser{
-			ID: stringField(profile, "id"), Name: firstString(stringField(profile, "name"), stringField(profile, "login")),
-			Email: email, Image: optionalImage(stringField(profile, "avatar_url")), EmailVerified: verified,
-		}
-		if opts.MapProfileToUser != nil {
-			mapping, err := opts.MapProfileToUser(ctx, profile)
-			if err != nil {
-				return nil, err
-			}
-			user = provider.ApplyOAuthUserMapping(user, mapping)
-		}
-		return &provider.UserInfo{User: user, Data: profile}, nil
-	}
-}
-
-type githubEmail struct {
-	Email    string `json:"email"`
-	Primary  bool   `json:"primary"`
-	Verified bool   `json:"verified"`
-}
-
-func githubFetchMap(ctx context.Context, endpoint string, accessToken string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", defaultUserAgent)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("github profile failed: status=%d body=%s", resp.StatusCode, string(body))
-	}
-	var profile map[string]any
-	if err := json.Unmarshal(body, &profile); err != nil {
-		return nil, err
-	}
-	return profile, nil
-}
-
-func githubFetchEmails(ctx context.Context, endpoint string, accessToken string) ([]githubEmail, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", defaultUserAgent)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("github emails failed: status=%d body=%s", resp.StatusCode, string(body))
-	}
-	var emails []githubEmail
-	if err := json.Unmarshal(body, &emails); err != nil {
-		return nil, err
-	}
-	return emails, nil
-}
-
-func githubSelectedEmail(profileEmail string, emails []githubEmail) string {
-	if profileEmail != "" {
-		return profileEmail
-	}
-	for _, email := range emails {
-		if email.Primary {
-			return email.Email
-		}
-	}
-	if len(emails) > 0 {
-		return emails[0].Email
-	}
-	return ""
-}
-
-func githubEmailVerified(selectedEmail string, emails []githubEmail) bool {
-	for _, email := range emails {
-		if email.Email == selectedEmail {
-			return email.Verified
-		}
-	}
-	return false
-}
-
-func hostedDomainAllowed(configuredHostedDomain string, tokenHostedDomain any) bool {
-	if configuredHostedDomain == "" {
-		return true
-	}
-	hostedDomain, ok := tokenHostedDomain.(string)
-	if !ok || hostedDomain == "" {
-		return false
-	}
-	if configuredHostedDomain == "*" {
-		return true
-	}
-	return hostedDomain == configuredHostedDomain
 }
 
 // Dropbox creates a Dropbox OAuth provider.
