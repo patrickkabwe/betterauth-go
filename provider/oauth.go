@@ -122,15 +122,36 @@ func TokensFromMap(data map[string]any) *OAuthTokens {
 		tokens.IDToken = v
 	}
 	tokens.Scopes = tokenScopes(data["scope"])
-	if exp, ok := data["expires_in"].(float64); ok {
+	if exp, ok := tokenSeconds(data["expires_in"]); ok {
 		t := time.Now().Add(time.Duration(exp) * time.Second)
 		tokens.AccessTokenExpiresAt = &t
 	}
-	if exp, ok := data["refresh_token_expires_in"].(float64); ok {
+	if exp, ok := tokenSeconds(data["refresh_token_expires_in"]); ok {
 		t := time.Now().Add(time.Duration(exp) * time.Second)
 		tokens.RefreshTokenExpiresAt = &t
 	}
 	return tokens
+}
+
+func tokenSeconds(value any) (float64, bool) {
+	switch seconds := value.(type) {
+	case float64:
+		return seconds, true
+	case float32:
+		return float64(seconds), true
+	case int:
+		return float64(seconds), true
+	case int64:
+		return float64(seconds), true
+	case json.Number:
+		value, err := seconds.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return value, true
+	default:
+		return 0, false
+	}
 }
 
 func tokenScopes(value any) []string {

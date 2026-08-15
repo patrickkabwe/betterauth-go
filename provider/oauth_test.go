@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -95,6 +96,16 @@ func TestTokensFromMapMapsOAuthTokenFields(t *testing.T) {
 	if tokens.Raw["provider_id"] != "provider-specific" {
 		t.Fatalf("raw mutated with input map: %v", tokens.Raw)
 	}
+}
+
+func TestTokensFromMapMapsNonFloatExpiryFields(t *testing.T) {
+	tokens := TokensFromMap(map[string]any{
+		"expires_in":               60,
+		"refresh_token_expires_in": json.Number("120"),
+	})
+
+	assertExpiryWithin(t, tokens.AccessTokenExpiresAt, time.Minute)
+	assertExpiryWithin(t, tokens.RefreshTokenExpiresAt, 2*time.Minute)
 }
 
 func TestTokensFromMapMapsArrayScopes(t *testing.T) {
