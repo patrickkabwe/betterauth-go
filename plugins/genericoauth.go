@@ -214,7 +214,7 @@ func handleGenericOAuthCallback(c *auth.Context, providers map[string]GenericOAu
 	}
 	state := values.Get("state")
 	if state == "" {
-		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "state_not_found", "")
 		return
 	}
 	p, ok := providers[providerID]
@@ -224,12 +224,16 @@ func handleGenericOAuthCallback(c *auth.Context, providers map[string]GenericOAu
 	}
 	v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationOAuth2State+state)
 	if err != nil {
-		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), "state_mismatch", "")
 		return
 	}
-	stateData, ok := parseGenericOAuthStateValue(v.Value)
-	if !ok || stateData.ProviderID != providerID {
-		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
+	stateData, stateError := parseGenericOAuthStateValue(v.Value)
+	if stateError != "" {
+		redirectGenericOAuthError(c, genericOAuthDefaultErrorURL(c), stateError, "")
+		return
+	}
+	if stateData.ProviderID != providerID {
+		redirectGenericOAuthError(c, genericOAuthCallbackErrorURL(c, stateData), "state_mismatch", "")
 		return
 	}
 	callbackURL := stateData.CallbackURL
@@ -624,16 +628,16 @@ func genericOAuthExpectedIssuer(c *auth.Context, p GenericOAuthProviderConfig) (
 	return discovery.Issuer, nil
 }
 
-func parseGenericOAuthStateValue(value string) (genericOAuthStatePayload, bool) {
+func parseGenericOAuthStateValue(value string) (genericOAuthStatePayload, string) {
 	var payload genericOAuthStatePayload
 	if err := json.Unmarshal([]byte(value), &payload); err == nil && payload.ProviderID != "" {
-		return payload, true
+		return payload, ""
 	}
 	providerID, callbackURL, ok := strings.Cut(value, "|")
 	if !ok || providerID == "" {
-		return genericOAuthStatePayload{}, false
+		return genericOAuthStatePayload{}, "state_invalid"
 	}
-	return genericOAuthStatePayload{ProviderID: providerID, CallbackURL: callbackURL}, true
+	return genericOAuthStatePayload{ProviderID: providerID, CallbackURL: callbackURL}, ""
 }
 
 type genericOAuthStateInput struct {

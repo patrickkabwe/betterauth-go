@@ -1861,8 +1861,83 @@ func TestGenericOAuthCallbackRejectsProviderMismatch(t *testing.T) {
 	}
 
 	callback := get(t, a, "/oauth2/callback/other?code=code&state=state")
-	if callback.Code != http.StatusBadRequest {
+	if callback.Code != http.StatusFound {
 		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "http://localhost:8080/api/auth/error?error=state_mismatch" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthCallbackRedirectsMissingState(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code")
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "http://localhost:8080/api/auth/error?error=state_not_found" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthCallbackRedirectsStateMismatch(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state=missing")
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "http://localhost:8080/api/auth/error?error=state_mismatch" {
+		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthCallbackRedirectsMalformedState(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+	if err := a.CreateVerification(context.Background(), constants.VerificationOAuth2State+"state", "{malformed", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state=state")
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "http://localhost:8080/api/auth/error?error=state_invalid" {
+		t.Fatalf("Location=%q", location)
 	}
 }
 
