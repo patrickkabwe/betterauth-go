@@ -162,7 +162,7 @@ func handleOAuthCallback(c *Context) {
 		errorURL = stateData.ErrorURL
 	}
 	if errParam := q.Get("error"); errParam != "" {
-		redirectOAuthError(c, errorURL, errParam)
+		redirectOAuthErrorWithDescription(c, errorURL, errParam, q.Get("error_description"))
 		return
 	}
 	if code == "" || state == "" {
@@ -300,8 +300,16 @@ func stringFromOAuthCallbackValue(value any) string {
 }
 
 func redirectOAuthError(c *Context, errorURL, code string) {
+	redirectOAuthErrorWithDescription(c, errorURL, code, "")
+}
+
+func redirectOAuthErrorWithDescription(c *Context, errorURL, code, description string) {
 	if errorURL == "" {
 		errorURL = c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/error"
 	}
-	c.Redirect(appendQuery(errorURL, "error", code))
+	target := appendQuery(errorURL, "error", code)
+	if description != "" {
+		target = appendQuery(target, "error_description", description)
+	}
+	c.Redirect(target)
 }

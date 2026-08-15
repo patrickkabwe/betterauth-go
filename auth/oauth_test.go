@@ -177,12 +177,12 @@ func TestOAuthCallbackProviderErrorUsesStateErrorCallbackURL(t *testing.T) {
 		t.Fatal("missing state in auth url")
 	}
 
-	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?error=access_denied&state="+url.QueryEscape(state), nil, nil)
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?error=access_denied&error_description=User+denied+access&state="+url.QueryEscape(state), nil, nil)
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("callback status=%d", resp.StatusCode)
 	}
 	location := resp.Header.Get("Location")
-	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=access_denied") {
+	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=access_denied") || !strings.Contains(location, "error_description=User+denied+access") {
 		t.Fatalf("redirect=%s", location)
 	}
 }
