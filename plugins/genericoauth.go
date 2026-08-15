@@ -104,13 +104,14 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/sign-in/oauth2", func(c *auth.Context) {
 				var body struct {
-					ProviderID         string   `json:"providerId"`
-					CallbackURL        string   `json:"callbackURL"`
-					NewUserCallbackURL string   `json:"newUserCallbackURL"`
-					ErrorCallbackURL   string   `json:"errorCallbackURL"`
-					DisableRedirect    bool     `json:"disableRedirect"`
-					Scopes             []string `json:"scopes"`
-					RequestSignUp      bool     `json:"requestSignUp"`
+					ProviderID         string         `json:"providerId"`
+					CallbackURL        string         `json:"callbackURL"`
+					NewUserCallbackURL string         `json:"newUserCallbackURL"`
+					ErrorCallbackURL   string         `json:"errorCallbackURL"`
+					DisableRedirect    bool           `json:"disableRedirect"`
+					Scopes             []string       `json:"scopes"`
+					RequestSignUp      bool           `json:"requestSignUp"`
+					AdditionalData     map[string]any `json:"additionalData"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
@@ -127,12 +128,13 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					return
 				}
 				state, codeVerifier, err := createGenericOAuthState(c, genericOAuthStateInput{
-					ProviderID:    body.ProviderID,
-					CallbackURL:   body.CallbackURL,
-					NewUserURL:    body.NewUserCallbackURL,
-					ErrorURL:      body.ErrorCallbackURL,
-					RequestSignUp: body.RequestSignUp,
-					UsePKCE:       p.PKCE,
+					ProviderID:     body.ProviderID,
+					CallbackURL:    body.CallbackURL,
+					NewUserURL:     body.NewUserCallbackURL,
+					ErrorURL:       body.ErrorCallbackURL,
+					RequestSignUp:  body.RequestSignUp,
+					AdditionalData: body.AdditionalData,
+					UsePKCE:        p.PKCE,
 				})
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -641,25 +643,29 @@ func parseGenericOAuthStateValue(value string) (genericOAuthStatePayload, string
 }
 
 type genericOAuthStateInput struct {
-	ProviderID    string
-	CallbackURL   string
-	NewUserURL    string
-	ErrorURL      string
-	LinkUserID    string
-	LinkEmail     string
-	RequestSignUp bool
-	UsePKCE       bool
+	ProviderID     string
+	CallbackURL    string
+	NewUserURL     string
+	ErrorURL       string
+	LinkUserID     string
+	LinkEmail      string
+	RequestSignUp  bool
+	AdditionalData map[string]any
+	UsePKCE        bool
 }
 
 type genericOAuthStatePayload struct {
-	ProviderID    string `json:"providerId"`
-	CallbackURL   string `json:"callbackURL"`
-	NewUserURL    string `json:"newUserURL,omitempty"`
-	ErrorURL      string `json:"errorURL,omitempty"`
-	CodeVerifier  string `json:"codeVerifier,omitempty"`
-	LinkUserID    string `json:"linkUserId,omitempty"`
-	LinkEmail     string `json:"linkEmail,omitempty"`
-	RequestSignUp bool   `json:"requestSignUp,omitempty"`
+	ProviderID     string         `json:"providerId"`
+	CallbackURL    string         `json:"callbackURL"`
+	NewUserURL     string         `json:"newUserURL,omitempty"`
+	ErrorURL       string         `json:"errorURL,omitempty"`
+	CodeVerifier   string         `json:"codeVerifier,omitempty"`
+	LinkUserID     string         `json:"linkUserId,omitempty"`
+	LinkEmail      string         `json:"linkEmail,omitempty"`
+	RequestSignUp  bool           `json:"requestSignUp,omitempty"`
+	AdditionalData map[string]any `json:"-"`
+	OAuthState     string         `json:"oauthState,omitempty"`
+	ExpiresAt      time.Time      `json:"expiresAt"`
 }
 
 func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (string, string, error) {
@@ -675,17 +681,21 @@ func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (str
 	if err != nil {
 		return "", "", err
 	}
+	expiresAt := time.Now().Add(10 * time.Minute)
 	payload := genericOAuthStatePayload{
-		ProviderID:    input.ProviderID,
-		CallbackURL:   input.CallbackURL,
-		NewUserURL:    input.NewUserURL,
-		ErrorURL:      input.ErrorURL,
-		CodeVerifier:  codeVerifier,
-		LinkUserID:    input.LinkUserID,
-		LinkEmail:     input.LinkEmail,
-		RequestSignUp: input.RequestSignUp,
+		ProviderID:     input.ProviderID,
+		CallbackURL:    input.CallbackURL,
+		NewUserURL:     input.NewUserURL,
+		ErrorURL:       input.ErrorURL,
+		CodeVerifier:   codeVerifier,
+		LinkUserID:     input.LinkUserID,
+		LinkEmail:      input.LinkEmail,
+		RequestSignUp:  input.RequestSignUp,
+		AdditionalData: sanitizeGenericOAuthStateAdditionalData(input.AdditionalData),
+		OAuthState:     state,
+		ExpiresAt:      expiresAt,
 	}
-	value, err := json.Marshal(payload)
+	value, err := marshalGenericOAuthStatePayload(payload)
 	if err != nil {
 		return "", "", err
 	}
@@ -693,6 +703,64 @@ func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (str
 		return "", "", err
 	}
 	return state, codeVerifier, nil
+}
+
+func sanitizeGenericOAuthStateAdditionalData(additional map[string]any) map[string]any {
+	if len(additional) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(additional))
+	for key, value := range additional {
+		if isReservedGenericOAuthStateKey(key) {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isReservedGenericOAuthStateKey(key string) bool {
+	switch key {
+	case "providerId", "callbackURL", "newUserURL", "errorURL", "codeVerifier", "link", "linkUserId", "linkEmail", "requestSignUp", "oauthState", "expiresAt":
+		return true
+	default:
+		return false
+	}
+}
+
+func marshalGenericOAuthStatePayload(payload genericOAuthStatePayload) ([]byte, error) {
+	data := make(map[string]any, len(payload.AdditionalData)+10)
+	for key, value := range payload.AdditionalData {
+		data[key] = value
+	}
+	data["providerId"] = payload.ProviderID
+	data["callbackURL"] = payload.CallbackURL
+	if payload.NewUserURL != "" {
+		data["newUserURL"] = payload.NewUserURL
+	}
+	if payload.ErrorURL != "" {
+		data["errorURL"] = payload.ErrorURL
+	}
+	if payload.CodeVerifier != "" {
+		data["codeVerifier"] = payload.CodeVerifier
+	}
+	if payload.LinkUserID != "" {
+		data["linkUserId"] = payload.LinkUserID
+	}
+	if payload.LinkEmail != "" {
+		data["linkEmail"] = payload.LinkEmail
+	}
+	if payload.RequestSignUp {
+		data["requestSignUp"] = payload.RequestSignUp
+	}
+	if payload.OAuthState != "" {
+		data["oauthState"] = payload.OAuthState
+	}
+	data["expiresAt"] = payload.ExpiresAt
+	return json.Marshal(data)
 }
 
 func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProviderConfig, code string, codeVerifier string) (*provider.OAuthTokens, error) {

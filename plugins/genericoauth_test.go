@@ -174,6 +174,64 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthSignInStoresAdditionalStateData(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+				PKCE:             true,
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"/dashboard","errorCallbackURL":"/error","additionalData":{"invitedBy":"user-123","providerId":"bad-provider","callbackURL":"bad-callback","errorURL":"bad-error","codeVerifier":"bad-verifier","link":{"email":"bad@example.com","userId":"bad-user"},"oauthState":"bad-state","expiresAt":"bad-expiry"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationOAuth2State+state)
+	if err != nil {
+		t.Fatalf("find state: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(verification.Value), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["invitedBy"] != "user-123" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if _, ok := payload["additionalData"]; ok {
+		t.Fatalf("additionalData should be flattened: %+v", payload)
+	}
+	if payload["providerId"] != "oidc" || payload["callbackURL"] != "/dashboard" || payload["errorURL"] != "/error" || payload["oauthState"] != state {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload["codeVerifier"] == "" || payload["codeVerifier"] == "bad-verifier" || payload["expiresAt"] == "bad-expiry" {
+		t.Fatalf("reserved fields were overridden: %+v", payload)
+	}
+	if _, ok := payload["link"]; ok {
+		t.Fatalf("link should not be overridden: %+v", payload)
+	}
+}
+
 func TestGenericOAuthSignInAuthorizationURLParamsFunc(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
