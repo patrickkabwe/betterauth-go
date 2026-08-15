@@ -89,6 +89,9 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 // TokensFromMap converts a token endpoint JSON body into OAuthTokens.
 func TokensFromMap(data map[string]any) *OAuthTokens {
 	tokens := &OAuthTokens{Raw: cloneTokenData(data)}
+	if v, ok := data["token_type"].(string); ok {
+		tokens.TokenType = v
+	}
 	if v, ok := data["access_token"].(string); ok {
 		tokens.AccessToken = v
 	}
@@ -104,6 +107,10 @@ func TokensFromMap(data map[string]any) *OAuthTokens {
 	if exp, ok := data["expires_in"].(float64); ok {
 		t := time.Now().Add(time.Duration(exp) * time.Second)
 		tokens.AccessTokenExpiresAt = &t
+	}
+	if exp, ok := data["refresh_token_expires_in"].(float64); ok {
+		t := time.Now().Add(time.Duration(exp) * time.Second)
+		tokens.RefreshTokenExpiresAt = &t
 	}
 	return tokens
 }

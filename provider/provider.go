@@ -22,6 +22,7 @@ type UserInfo struct {
 
 // OAuthTokens holds OAuth token data for a linked account.
 type OAuthTokens struct {
+	TokenType             string
 	AccessToken           string
 	RefreshToken          string
 	AccessTokenExpiresAt  *time.Time
