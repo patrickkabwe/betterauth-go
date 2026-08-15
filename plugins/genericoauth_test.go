@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -117,6 +118,67 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	}
 	if location := callback.Header().Get("Location"); location != "https://app.example.com/dashboard" {
 		t.Fatalf("Location=%q", location)
+	}
+}
+
+func TestGenericOAuthSignInUsesDiscoveryURL(t *testing.T) {
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Discovery") != "secret" {
+			t.Fatalf("X-Discovery=%q", r.Header.Get("X-Discovery"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"authorization_endpoint":"https://discovery.example.com/oauth/authorize?tenant=workspace","token_endpoint":"https://discovery.example.com/oauth/token"}`))
+	}))
+	defer discoveryServer.Close()
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID: "oidc", ClientID: "client", ClientSecret: "secret",
+				DiscoveryURL: discoveryServer.URL,
+				DiscoveryHeaders: map[string]string{
+					"X-Discovery": "secret",
+				},
+				Scopes: []string{"openid"},
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","disableRedirect":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "discovery.example.com" || parsed.Path != "/oauth/authorize" {
+		t.Fatalf("url=%s", body.URL)
+	}
+	query := parsed.Query()
+	if query.Get("tenant") != "workspace" || query.Get("client_id") != "client" || query.Get("scope") != "openid" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+}
+
+func TestGenericOAuthSignInRejectsIncompleteConfig(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID: "oidc", ClientID: "client", ClientSecret: "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
 }
 

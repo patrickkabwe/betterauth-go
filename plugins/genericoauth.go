@@ -1,6 +1,9 @@
 package plugins
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +21,8 @@ type GenericOAuthProviderConfig struct {
 	ProviderID             string
 	ClientID               string
 	ClientSecret           string
+	DiscoveryURL           string
+	DiscoveryHeaders       map[string]string
 	AuthorizationURL       string
 	TokenURL               string
 	UserInfoURL            string
@@ -60,10 +65,15 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeProviderNotFound))
 					return
 				}
+				authorizationURL, err := genericOAuthSignInAuthorizationURL(c, p)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+					return
+				}
 				state, _ := id.Generate(32)
 				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
 				q := genericOAuthAuthorizationValues(c, p, state, body.Scopes)
-				redirectURL := provider.BuildAuthURL(p.AuthorizationURL, q)
+				redirectURL := provider.BuildAuthURL(authorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
 			}),
 			rt(http.MethodGet, "/oauth2/callback/{providerId}", func(c *auth.Context) {
@@ -98,6 +108,60 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 			}),
 		},
 	}
+}
+
+func genericOAuthSignInAuthorizationURL(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
+	authorizationURL := p.AuthorizationURL
+	tokenURL := p.TokenURL
+	if p.DiscoveryURL != "" {
+		discovery, err := genericOAuthDiscovery(c, p)
+		if err != nil {
+			return "", err
+		}
+		if discovery.AuthorizationEndpoint != "" {
+			authorizationURL = discovery.AuthorizationEndpoint
+		}
+		if discovery.TokenEndpoint != "" {
+			tokenURL = discovery.TokenEndpoint
+		}
+	}
+	if authorizationURL == "" || tokenURL == "" {
+		return "", fmt.Errorf("invalid generic oauth configuration for provider %q: authorizationURL=%q tokenURL=%q", p.ProviderID, authorizationURL, tokenURL)
+	}
+	return authorizationURL, nil
+}
+
+type genericOAuthDiscoveryDocument struct {
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+}
+
+func genericOAuthDiscovery(c *auth.Context, p GenericOAuthProviderConfig) (*genericOAuthDiscoveryDocument, error) {
+	req, err := http.NewRequestWithContext(c.R.Context(), http.MethodGet, p.DiscoveryURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(constants.HeaderAccept, constants.MIMEJSON)
+	for key, value := range p.DiscoveryHeaders {
+		req.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("generic oauth discovery failed for provider %q at %q with status %d: %s", p.ProviderID, p.DiscoveryURL, resp.StatusCode, string(body))
+	}
+	var discovery genericOAuthDiscoveryDocument
+	if err := json.Unmarshal(body, &discovery); err != nil {
+		return nil, err
+	}
+	return &discovery, nil
 }
 
 func parseGenericOAuthStateValue(value string) (string, string, bool) {
