@@ -895,12 +895,27 @@ func TestOAuthPostCallbackQueryOverridesBody(t *testing.T) {
 
 func TestGoogleProviderWiring(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
-		c.Google = auth.GoogleProviderConfig{ClientID: "gid", ClientSecret: "gsecret"}
+		c.Google = auth.GoogleProviderConfig{
+			ClientID: "gid", ClientSecret: "gsecret",
+			AccessType: "online", Prompt: "select_account", HD: "example.com",
+		}
 	})
 	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
 		"provider": "google", "disableRedirect": true,
 	}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var result types.SocialSignInResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("access_type") != "online" || query.Get("prompt") != "select_account" || query.Get("hd") != "example.com" {
+		t.Fatalf("query=%s", query.Encode())
 	}
 }

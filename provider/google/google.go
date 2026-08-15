@@ -25,6 +25,7 @@ type Config struct {
 	Scopes                   []string
 	AccessType               string
 	Prompt                   string
+	HD                       string
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
@@ -91,6 +92,9 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
 	}
+	if p.cfg.HD != "" {
+		params.Set("hd", p.cfg.HD)
+	}
 	if opts.LoginHint != "" {
 		params.Set("login_hint", opts.LoginHint)
 	}
@@ -121,6 +125,9 @@ func (p *Provider) GetUserInfo(_ context.Context, tokens provider.OAuthTokens) (
 	if err != nil {
 		return nil, err
 	}
+	if !hostedDomainAllowed(p.cfg.HD, claims["hd"]) {
+		return nil, nil
+	}
 	email, _ := claims["email"].(string)
 	name, _ := claims["name"].(string)
 	picture, _ := claims["picture"].(string)
@@ -136,6 +143,20 @@ func (p *Provider) GetUserInfo(_ context.Context, tokens provider.OAuthTokens) (
 		},
 		Data: claims,
 	}, nil
+}
+
+func hostedDomainAllowed(configuredHostedDomain string, tokenHostedDomain any) bool {
+	if configuredHostedDomain == "" {
+		return true
+	}
+	hostedDomain, ok := tokenHostedDomain.(string)
+	if !ok || hostedDomain == "" {
+		return false
+	}
+	if configuredHostedDomain == "*" {
+		return true
+	}
+	return hostedDomain == configuredHostedDomain
 }
 
 func (p *Provider) RefreshAccessToken(ctx context.Context, refreshToken string) (*provider.OAuthTokens, error) {
