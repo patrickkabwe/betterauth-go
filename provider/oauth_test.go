@@ -80,6 +80,41 @@ func TestExchangeAuthorizationCodeMergesExtraParams(t *testing.T) {
 	}
 }
 
+func TestExchangeAuthorizationCodeOverwritesExtraParamsWhenEnabled(t *testing.T) {
+	var formValues url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-token"}`))
+	}))
+	defer server.Close()
+
+	_, err := ExchangeAuthorizationCode(context.Background(), CodeExchangeOpts{
+		TokenURL:       server.URL,
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		Code:           "code",
+		RedirectURI:    "https://app.example.com/callback",
+		ExtraOverwrite: true,
+		ExtraParams: map[string]string{
+			"redirect_uri": "https://provider.example.com/callback",
+			"audience":     "api",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formValues.Get("redirect_uri") != "https://provider.example.com/callback" || formValues.Get("audience") != "api" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("grant_type") != "authorization_code" || formValues.Get("code") != "code" {
+		t.Fatalf("form=%v", formValues)
+	}
+}
+
 func TestExchangeAuthorizationCodeSupportsRequestOptions(t *testing.T) {
 	var formValues url.Values
 	var authorization string

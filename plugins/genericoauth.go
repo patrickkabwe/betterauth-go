@@ -44,6 +44,7 @@ type GenericOAuthProviderConfig struct {
 	AccessTokenExpiresIn    int
 	AuthorizationHeaders    map[string]string
 	AuthorizationURLParams  map[string]string
+	TokenURLParams          map[string]string
 }
 
 // GenericOAuthOptions configures the generic OAuth plugin.
@@ -374,6 +375,8 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 		CodeVerifier:   codeVerifier,
 		Authentication: provider.OAuthClientAuthenticationPost,
 		Headers:        p.AuthorizationHeaders,
+		ExtraParams:    p.TokenURLParams,
+		ExtraOverwrite: true,
 	})
 	if err != nil {
 		return nil, err

@@ -39,6 +39,7 @@ type CodeExchangeOpts struct {
 	Headers        map[string]string
 	Resources      []string
 	ExtraParams    map[string]string
+	ExtraOverwrite bool
 }
 
 // OAuthClientAuthentication controls how client credentials are sent.
@@ -90,7 +91,11 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 		}
 	}
 	for k, v := range opts.ExtraParams {
-		if _, ok := form[k]; !ok {
+		if opts.ExtraOverwrite {
+			form.Set(k, v)
+			continue
+		}
+		if _, exists := form[k]; !exists {
 			form.Set(k, v)
 		}
 	}
