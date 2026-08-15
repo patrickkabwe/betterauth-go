@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
 	"github.com/patrickkabwe/betterauth-go/store/memory"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 func newTestAuth(t *testing.T, p ...auth.Plugin) *auth.Auth {
@@ -178,6 +180,39 @@ func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberSignInUsesPassword(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	createPhoneCredentialUser(t, a, "phone-signin-user", "+1234567890", "password123")
+
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Token string `json:"token"`
+		User  struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Token == "" {
+		t.Fatal("expected token")
+	}
+	if resp.User.ID != "phone-signin-user" {
+		t.Fatalf("user id %q", resp.User.ID)
+	}
+}
+
+func TestPhoneNumberSignInRejectsOTPShape(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","otp":"123456"}`)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestOneTimeTokenFlow(t *testing.T) {
 	a := newTestAuth(t, plugins.OneTimeToken(plugins.OneTimeTokenOptions{}))
 	// create user via anonymous first
@@ -250,5 +285,32 @@ func TestAllPluginsCount(t *testing.T) {
 	all := plugins.All(plugins.AllOptions{})
 	if len(all) != 24 {
 		t.Fatalf("expected 24 plugins, got %d", len(all))
+	}
+}
+
+func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string) {
+	t.Helper()
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID: userID, Name: "Phone User", Email: "phone@example.com",
+		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
+		Additional: map[string]any{
+			constants.FieldPhoneNumber:   phoneNumber,
+			constants.FieldPhoneVerified: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashedPassword, err := a.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.Store().CreateAccount(context.Background(), &types.Account{
+		ID: "phone-signin-account", AccountID: userID, ProviderID: constants.ProviderCredential,
+		UserID: userID, Password: hashedPassword, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

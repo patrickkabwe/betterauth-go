@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
-	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 // PhoneNumberOptions configures SMS OTP sign-in.
@@ -76,33 +74,33 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 			rt(http.MethodPost, "/sign-in/phone-number", func(c *auth.Context) {
 				var body struct {
 					PhoneNumber string `json:"phoneNumber"`
-					OTP         string `json:"otp"`
+					Password    string `json:"password"`
+					RememberMe  *bool  `json:"rememberMe"`
 				}
-				if err := c.ParseJSON(&body); err != nil {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
-					return
-				}
-				v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber)
-				if err != nil || v.Value != body.OTP {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" || body.Password == "" {
+					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
 					return
 				}
 				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
 				if err != nil {
-					now := time.Now()
-					userID, _ := id.Generate(32)
-					email := fmt.Sprintf("%s@%s", body.PhoneNumber, constants.DomainPhone)
-					user = &types.User{
-						ID: userID, Name: body.PhoneNumber, Email: email,
-						CreatedAt: now, UpdatedAt: now,
-						Additional: map[string]any{
-							constants.FieldPhoneNumber:   body.PhoneNumber,
-							constants.FieldPhoneVerified: true,
-						},
-					}
-					_ = c.Auth.Store().CreateUser(c.R.Context(), user)
+					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
 				}
-				sess, err := c.Auth.NewSession(c, user.ID, true)
+				account, err := c.Auth.Store().FindAccountByUserAndProvider(c.R.Context(), user.ID, constants.ProviderCredential)
+				if err != nil || account.Password == "" {
+					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
+				}
+				ok, _ := c.Auth.VerifyPassword(account.Password, body.Password)
+				if !ok {
+					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
+				}
+				remember := true
+				if body.RememberMe != nil {
+					remember = *body.RememberMe
+				}
+				sess, err := c.Auth.NewSession(c, user.ID, remember)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeFailedToCreateSession))
 					return
