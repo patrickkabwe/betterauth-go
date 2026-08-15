@@ -1093,7 +1093,12 @@ func TestEmailOTPPluginCheckDeletesExpiredOTP(t *testing.T) {
 }
 
 func TestEmailOTPPluginResetPasswordCreatesCredentialAndVerifiesEmail(t *testing.T) {
+	var resetUser types.User
 	a := newTestAuth(func(c *auth.Config) {
+		c.EmailAndPassword.OnPasswordReset = func(_ context.Context, user types.User) error {
+			resetUser = user
+			return nil
+		}
 		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
 	})
 	now := time.Now()
@@ -1138,6 +1143,12 @@ func TestEmailOTPPluginResetPasswordCreatesCredentialAndVerifiesEmail(t *testing
 	}
 	if !user.EmailVerified {
 		t.Fatal("expected reset password to mark email verified")
+	}
+	if resetUser.Email != "reset-create@example.com" {
+		t.Fatalf("reset callback user email = %q", resetUser.Email)
+	}
+	if !resetUser.EmailVerified {
+		t.Fatal("expected reset callback to receive verified user")
 	}
 }
 

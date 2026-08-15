@@ -530,12 +530,27 @@ func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) 
 
 func TestPhoneNumberResetPasswordUpdatesCredentialPassword(t *testing.T) {
 	resetCode := ""
-	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
-		SendPasswordResetOTP: func(_ context.Context, _ string, otp string) error {
-			resetCode = otp
-			return nil
+	var resetUser types.User
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   memory.New(),
+		EmailAndPassword: auth.EmailAndPasswordConfig{
+			OnPasswordReset: func(_ context.Context, user types.User) error {
+				resetUser = user
+				return nil
+			},
 		},
-	}))
+		Plugins: []auth.Plugin{plugins.PhoneNumber(plugins.PhoneNumberOptions{
+			SendPasswordResetOTP: func(_ context.Context, _ string, otp string) error {
+				resetCode = otp
+				return nil
+			},
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	createPhoneCredentialUser(t, a, "phone-reset-user", "+1234567890", "password123")
 
 	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567890"}`)
@@ -554,6 +569,9 @@ func TestPhoneNumberResetPasswordUpdatesCredentialPassword(t *testing.T) {
 	}
 	if !resp.Status {
 		t.Fatal("expected reset status")
+	}
+	if resetUser.ID != "phone-reset-user" {
+		t.Fatalf("reset callback user id = %q", resetUser.ID)
 	}
 	account, err := a.Store().FindAccountByUserAndProvider(context.Background(), "phone-reset-user", constants.ProviderCredential)
 	if err != nil {

@@ -81,9 +81,14 @@ func TestCORS(t *testing.T) {
 
 func TestPasswordResetFlow(t *testing.T) {
 	var resetData types.ResetPasswordEmailData
+	var resetUser types.User
 	a := newTestAuth(func(c *auth.Config) {
 		c.EmailAndPassword.SendResetPassword = func(_ context.Context, data types.ResetPasswordEmailData) error {
 			resetData = data
+			return nil
+		}
+		c.EmailAndPassword.OnPasswordReset = func(_ context.Context, user types.User) error {
+			resetUser = user
 			return nil
 		}
 	})
@@ -109,6 +114,9 @@ func TestPasswordResetFlow(t *testing.T) {
 	}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatal("reset password failed")
+	}
+	if resetUser.Email != "reset@example.com" {
+		t.Fatalf("reset callback user email = %q", resetUser.Email)
 	}
 
 	resp, data := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{

@@ -131,6 +131,7 @@ type EmailAndPasswordConfig struct {
 	MinPasswordLength             int
 	MaxPasswordLength             int
 	SendResetPassword             func(ctx context.Context, data types.ResetPasswordEmailData) error
+	OnPasswordReset               func(ctx context.Context, user types.User) error
 	ResetPasswordTokenExpiresIn   time.Duration
 	RevokeSessionsOnPasswordReset bool
 }
@@ -239,6 +240,7 @@ type emailPasswordResolved struct {
 	requireEmailVerification      bool
 	autoSignIn                    bool
 	sendResetPassword             func(ctx context.Context, data types.ResetPasswordEmailData) error
+	onPasswordReset               func(ctx context.Context, user types.User) error
 	resetPasswordTokenExpires     time.Duration
 	revokeSessionsOnPasswordReset bool
 }
@@ -490,6 +492,7 @@ func resolveConfig(opts Config) resolved {
 			requireEmailVerification:      opts.EmailAndPassword.RequireEmailVerification,
 			autoSignIn:                    autoSignIn,
 			sendResetPassword:             opts.EmailAndPassword.SendResetPassword,
+			onPasswordReset:               opts.EmailAndPassword.OnPasswordReset,
 			resetPasswordTokenExpires:     resetExpires,
 			revokeSessionsOnPasswordReset: opts.EmailAndPassword.RevokeSessionsOnPasswordReset,
 		},

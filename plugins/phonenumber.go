@@ -326,6 +326,10 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
+				if err := c.Auth.RunPasswordResetCallback(c.R.Context(), user.ID); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
 				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
 			}),
 		},

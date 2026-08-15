@@ -115,6 +115,21 @@ func (a *Auth) RevokeSessionsOnPasswordReset(ctx context.Context, userID string)
 	return a.cfg.store.DeleteAllSessionsByUserID(ctx, userID)
 }
 
+// RunPasswordResetCallback runs the configured password reset callback.
+func (a *Auth) RunPasswordResetCallback(ctx context.Context, userID string) error {
+	if a.cfg.emailPassword.onPasswordReset == nil {
+		return nil
+	}
+	user, err := a.cfg.store.FindUserByID(ctx, userID)
+	if errors.Is(err, berrors.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return a.cfg.emailPassword.onPasswordReset(ctx, *user)
+}
+
 // ParseAdditionalUserCreateInput parses configured user fields for plugin user creation.
 func (a *Auth) ParseAdditionalUserCreateInput(raw map[string]json.RawMessage) (map[string]any, *apierror.Error) {
 	return parseAdditionalUserInput(a.cfg.user.additionalFields, raw, "create")
