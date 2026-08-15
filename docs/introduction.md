@@ -23,7 +23,7 @@ backend is Go.
 | Language / runtime | Node / Bun / Deno | Go |
 | Client SDKs | ✅ official | ✅ same SDKs, unchanged |
 | Email/password, sessions | ✅ | ✅ |
-| Social OAuth | 35+ providers | Google, GitHub built-in + generic OAuth plugin |
+| Social OAuth | 35+ providers | Google, GitHub, Discord, Dropbox, Figma, GitLab, LinkedIn, Microsoft, Notion, Slack, Spotify, Twitch, Vercel + generic OAuth plugin |
 | Plugins | many | 24 core plugins |
 | Adapters | Kysely, Drizzle, Prisma, … | driver-agnostic SQL (Postgres/SQLite/MySQL) + `Store` interface |
 | Plugin/extra fields | dedicated columns | plugin columns + JSON custom fields |

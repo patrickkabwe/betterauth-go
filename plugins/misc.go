@@ -56,7 +56,7 @@ func OneTap(opts OneTapOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCredential))
 					return
 				}
-				// Decode JWT payload (middle segment) without full verification for dev parity stub
+				// Decode the JWT payload segment without signature verification.
 				parts := splitJWT(body.Credential)
 				if len(parts) < 2 {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCredential))
@@ -180,10 +180,10 @@ func DeviceAuthorization(opts DeviceAuthorizationOptions) auth.Plugin {
 				})
 				c.WriteJSON(http.StatusOK, map[string]any{
 					"device_code":      deviceCode,
-					"user_code":          userCode,
-					"verification_uri":   c.Auth.BaseURL() + c.Auth.BasePath() + "/device",
-					"expires_in":         int(expires.Seconds()),
-					"interval":           interval,
+					"user_code":        userCode,
+					"verification_uri": c.Auth.BaseURL() + c.Auth.BasePath() + "/device",
+					"expires_in":       int(expires.Seconds()),
+					"interval":         interval,
 				})
 			}),
 			rt(http.MethodPost, "/device/token", func(c *auth.Context) {

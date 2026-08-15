@@ -8,16 +8,19 @@ import (
 )
 
 const (
-	ProviderGoogle  = constants.ProviderGoogle
-	ProviderGitHub  = constants.ProviderGitHub
-	ProviderDiscord = constants.ProviderDiscord
-	ProviderDropbox = constants.ProviderDropbox
-	ProviderFigma   = constants.ProviderFigma
-	ProviderGitLab  = constants.ProviderGitLab
-	ProviderNotion  = constants.ProviderNotion
-	ProviderSlack   = constants.ProviderSlack
-	ProviderSpotify = constants.ProviderSpotify
-	ProviderVercel  = constants.ProviderVercel
+	ProviderGoogle    = constants.ProviderGoogle
+	ProviderGitHub    = constants.ProviderGitHub
+	ProviderDiscord   = constants.ProviderDiscord
+	ProviderDropbox   = constants.ProviderDropbox
+	ProviderFigma     = constants.ProviderFigma
+	ProviderGitLab    = constants.ProviderGitLab
+	ProviderLinkedIn  = constants.ProviderLinkedIn
+	ProviderMicrosoft = constants.ProviderMicrosoft
+	ProviderNotion    = constants.ProviderNotion
+	ProviderSlack     = constants.ProviderSlack
+	ProviderSpotify   = constants.ProviderSpotify
+	ProviderTwitch    = constants.ProviderTwitch
+	ProviderVercel    = constants.ProviderVercel
 )
 
 // Options configures one of the built-in OAuth2 providers in this package.

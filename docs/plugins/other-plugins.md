@@ -10,7 +10,7 @@ Brief reference for plugins without dedicated guides. All are enabled via
 | i18n | `i18n` | Translates API error messages by code using header, cookie, session, or callback locale detection |
 | SCIM | `scim` | SCIM 2.0 `/scim/v2` metadata and user provisioning endpoints |
 | Stripe | `stripe` | Checkout session creation, billing portal sessions, subscription routes, and signed webhooks |
-| SSO | `sso` | SAML provider registry, SP metadata, sign-in redirects, and ACS session creation |
+| SSO | `sso` | SAML and OIDC provider registry, sign-in redirects, SAML SP metadata, ACS callbacks, and OIDC callbacks |
 | Passkey | `passkey` | WebAuthn passkey registration options, verification, sign-in options, authentication, list, update, and delete |
 | JWT | `jwt` | JWT tokens + JWKS endpoint |
 | Multi-session | `multi-session` | Multiple concurrent sessions |

@@ -20,7 +20,7 @@ while keeping existing clients.
 | Kysely / Drizzle / Prisma adapter | `store/sql` or custom `Store` |
 | Plugin fields as DB columns | Same JS-compatible columns for supported plugins |
 | `npx @better-auth/cli --config auth.ts` | Embed `core.Run` with `*auth.Auth` |
-| 35+ built-in OAuth providers | Google, GitHub + generic-oauth plugin |
+| 35+ built-in OAuth providers | Google, GitHub, Discord, Dropbox, Figma, GitLab, LinkedIn, Microsoft, Notion, Slack, Spotify, Twitch, Vercel + generic-oauth plugin |
 | `auth.api.*` typed routes | Partial helpers on `*auth.Auth` |
 | Framework handlers (`toNextJsHandler`) | Mount `http.Handler` manually |
 
@@ -60,8 +60,8 @@ Change only `baseURL` in `createAuthClient` — no client code changes otherwise
 
 ### 5. Verify parity
 
-Check the [ROADMAP](../../ROADMAP.md) for features not yet implemented (passkey,
-Stripe, SAML SSO, extended OAuth providers, etc.).
+Check the [ROADMAP](../../ROADMAP.md) for features not yet implemented and
+remaining long-tail OAuth providers.
 
 ## Config mapping cheat sheet
 

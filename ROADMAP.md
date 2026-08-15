@@ -151,8 +151,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Kick | ⬜ |
 | LINE | ⬜ |
 | Linear | ⬜ |
-| LinkedIn | ⬜ |
-| Microsoft Entra ID | ⬜ |
+| LinkedIn | ✅ |
+| Microsoft Entra ID | ✅ |
 | Naver | ⬜ |
 | Notion | ✅ |
 | Paybin | ⬜ |
@@ -165,7 +165,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Slack | ✅ |
 | Spotify | ✅ |
 | TikTok | ⬜ |
-| Twitch | ⬜ |
+| Twitch | ✅ |
 | Twitter / X | ⬜ |
 | Vercel | ✅ |
 | VK | ⬜ |
@@ -368,6 +368,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 
 - [x] OAuth core (`/sign-in/social`, `/callback/:provider`)
 - [x] Google + GitHub providers (highest demand)
+- [x] Standard OAuth providers: Discord, Dropbox, Figma, GitLab, LinkedIn, Microsoft Entra ID, Notion, Slack, Spotify, Twitch, Vercel
 - [x] Generic OAuth plugin
 - [x] Magic link
 - [x] Email OTP
@@ -384,7 +385,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 
 - [x] Organization plugin (teams, invites, roles)
 - [x] Admin plugin
-- [x] SSO (SAML)
+- [x] SSO (SAML + OIDC)
 - [x] OIDC provider
 - [x] SCIM provisioning
 
@@ -415,4 +416,4 @@ https://github.com/better-auth/better-auth/tree/main/packages/better-auth/src/ap
 
 ---
 
-*Last updated: 2026-06-06 · Better Auth reference version: 1.6.x · Phase 2 (production readiness) + CLI complete. Remaining focus: MongoDB & Redis adapters, OAuth authorization server, and remaining OAuth providers.*
+*Last updated: 2026-08-16 · Better Auth reference version: 1.6.x · Current focus: Go server-side `api` object, MongoDB & Redis adapters, and remaining long-tail OAuth providers.*

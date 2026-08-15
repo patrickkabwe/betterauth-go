@@ -21,7 +21,7 @@ the Go API.
 ## Authentication
 
 - [Email & password](authentication/email-password.md)
-- [Social providers](authentication/social-providers.md) — Google, GitHub, generic OAuth
+- [Social providers](authentication/social-providers.md) — built-in OAuth providers and generic OAuth
 - [User management](authentication/user-management.md) — update, change email/password, delete
 - [Account management](authentication/account-management.md) — link/unlink providers, tokens
 

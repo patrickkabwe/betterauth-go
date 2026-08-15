@@ -10,7 +10,7 @@ curl http://localhost:8080/api/auth/list-accounts \
   -H 'Cookie: better-auth.session_token=…'
 ```
 
-Returns all provider accounts linked to the current user (Google, GitHub,
+Returns all provider accounts linked to the current user (OAuth providers,
 credential, etc.).
 
 ## Account info

@@ -9,9 +9,12 @@ const (
 	ProviderDropbox    = "dropbox"
 	ProviderFigma      = "figma"
 	ProviderGitLab     = "gitlab"
+	ProviderLinkedIn   = "linkedin"
+	ProviderMicrosoft  = "microsoft"
 	ProviderNotion     = "notion"
 	ProviderSlack      = "slack"
 	ProviderSpotify    = "spotify"
+	ProviderTwitch     = "twitch"
 	ProviderVercel     = "vercel"
 )
 
@@ -64,6 +67,7 @@ const (
 	VerificationResetPassword = "reset-password:"
 	VerificationOAuthState    = "oauth-state:"
 	VerificationOAuth2State   = "oauth2-state:"
+	VerificationSSOOIDCState  = "sso-oidc-state:"
 	VerificationEmailOTP      = "email-otp:"
 	VerificationPhoneOTP      = "phone-otp:"
 	VerificationOneTimeToken  = "one-time-token:"

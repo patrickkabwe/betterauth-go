@@ -43,6 +43,43 @@ func TestProviderAuthorizationURLUsesScopesAndPKCE(t *testing.T) {
 	}
 }
 
+func TestAdditionalBuiltInProviderAuthorizationURLs(t *testing.T) {
+	cases := []struct {
+		name  string
+		id    string
+		scope string
+		new   func(Options) *Provider
+	}{
+		{name: "LinkedIn", id: ProviderLinkedIn, scope: "openid profile email", new: LinkedIn},
+		{name: "Microsoft", id: ProviderMicrosoft, scope: "openid profile email", new: Microsoft},
+		{name: "Twitch", id: ProviderTwitch, scope: "user:read:email", new: Twitch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := tc.new(Options{
+				ClientID:              "client-id",
+				ClientSecret:          "client-secret",
+				AuthorizationEndpoint: "https://accounts.example.test/" + tc.id + "/authorize",
+				RedirectURI:           "https://app.example.test/callback/" + tc.id,
+			})
+			rawURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+				State: "state-1", CodeVerifier: "verifier-1",
+			})
+			if err != nil {
+				t.Fatalf("authorization url: %v", err)
+			}
+			parsed, err := url.Parse(rawURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := parsed.Query()
+			if parsed.Path != "/"+tc.id+"/authorize" || query.Get("scope") != tc.scope || query.Get("code_challenge") == "" {
+				t.Fatalf("url=%s query=%s", rawURL, query.Encode())
+			}
+		})
+	}
+}
+
 func TestGoogleProviderAuthorizationURLUsesSharedProviderPath(t *testing.T) {
 	p := Google(Options{
 		ClientID:            "client-id",

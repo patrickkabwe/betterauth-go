@@ -38,7 +38,7 @@ Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 | `i18n` | `plugins.I18n` | Locale-aware API error messages — [other](other-plugins.md) |
 | `scim` | `plugins.SCIM` | SCIM 2.0 user provisioning — [other](other-plugins.md) |
 | `stripe` | `plugins.Stripe` | Stripe checkout, billing portal, and webhooks — [other](other-plugins.md) |
-| `sso` | `plugins.SSO` | Enterprise SSO with SAML provider management, metadata, redirect, and ACS routes — [other](other-plugins.md) |
+| `sso` | `plugins.SSO` | Enterprise SSO with SAML and OIDC provider management, redirects, SAML metadata/ACS, and OIDC callbacks — [other](other-plugins.md) |
 | `passkey` | `plugins.Passkey` | WebAuthn passkey registration, sign-in, and management — [other](other-plugins.md) |
 | `username` | `plugins.Username` | Username sign-in — [guide](username.md) |
 | `email-otp` | `plugins.EmailOTP` | Email OTP — [guide](email-otp.md) |

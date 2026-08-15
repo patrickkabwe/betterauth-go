@@ -2,7 +2,8 @@
 
 Social sign-in uses OAuth 2.0. Google and GitHub have top-level config helpers.
 Additional built-in constructors are available for Discord, Dropbox, Figma,
-GitLab, Notion, Slack, Spotify, and Vercel.
+GitLab, LinkedIn, Microsoft Entra ID, Notion, Slack, Spotify, Twitch, and
+Vercel.
 
 ## Google
 
@@ -62,8 +63,8 @@ a, err := auth.New(auth.Config{
 ```
 
 The constructors share Better Auth's provider IDs and profile mappings for:
-`discord`, `dropbox`, `figma`, `gitlab`, `notion`, `slack`, `spotify`, and
-`vercel`.
+`discord`, `dropbox`, `figma`, `gitlab`, `linkedin`, `microsoft`, `notion`,
+`slack`, `spotify`, `twitch`, and `vercel`.
 
 ## Sign in with social
 
@@ -132,7 +133,7 @@ Account: auth.AccountConfig{
 
 ## Generic OAuth plugin
 
-For providers beyond Google and GitHub, enable the generic-oauth plugin:
+For providers beyond the built-in constructors, enable the generic-oauth plugin:
 
 ```go
 import "github.com/patrickkabwe/betterauth-go/plugins"
