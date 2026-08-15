@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,15 @@ func completeGenericOAuthSignIn(t *testing.T, a *auth.Auth, providerID string) *
 		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
 	}
 	return callback
+}
+
+func postForm(t *testing.T, a *auth.Auth, path string, values url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+	req.Header.Set(constants.HeaderContentType, "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	return w
 }
 
 func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
@@ -292,6 +302,72 @@ func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	}
 	if len(callback.Result().Cookies()) == 0 {
 		t.Fatal("expected session cookie")
+	}
+}
+
+func TestGenericOAuthCallbackAcceptsFormPost(t *testing.T) {
+	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "form-post-account", "Form Post User", "generic-oauth-form-post@example.com", `{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`)
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+				UserInfoURL:      oauthServer.URL + "/userinfo",
+				ResponseMode:     "form_post",
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+	if responseMode := parsed.Query().Get("response_mode"); responseMode != "form_post" {
+		t.Fatalf("response_mode=%q", responseMode)
+	}
+
+	callback := postForm(t, a, "/oauth2/callback/oidc", url.Values{
+		"code":  {"code"},
+		"state": {state},
+	})
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "https://app.example.com/dashboard" {
+		t.Fatalf("Location=%q", location)
+	}
+	if !*tokenRequestSeen {
+		t.Fatal("expected token endpoint request")
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "generic-oauth-form-post@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "form-post-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.UserID != user.ID || account.AccessToken != "access-token" {
+		t.Fatalf("account=%+v user=%+v", account, user)
 	}
 }
 
