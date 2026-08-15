@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -403,6 +405,51 @@ func TestLinkSocialRedirect(t *testing.T) {
 	_ = json.Unmarshal(data, &result)
 	if result.URL == "" || !result.Redirect {
 		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestLinkSocialOAuthCallbackAccountLookupFails(t *testing.T) {
+	fs := wrapStore("").(*failStore)
+	p := &staticOAuthProvider{
+		id:      "google",
+		authURL: "https://accounts.google.com/o/oauth2/auth",
+		user:    provider.OAuthUser{ID: "google-lookup-fail", Email: "link-lookup-fail@example.com", EmailVerified: true, Name: "Lookup Fail"},
+	}
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.Store = fs
+		c.SocialProviders = map[string]provider.SocialProvider{"google": p}
+	})
+	cookies := signUp(t, a, "link-lookup-fail@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider":         "google",
+		"callbackURL":      "http://localhost:3000/done",
+		"errorCallbackURL": "http://localhost:3000/oauth-error",
+		"disableRedirect":  true,
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var result types.LinkSocialResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+	fs.failOn = "FindAccountByProviderAndAccountID"
+
+	resp, _ = doRequest(a, http.MethodGet, "/callback/google?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=unable_to_link_account") {
+		t.Fatalf("redirect=%s", location)
 	}
 }
 

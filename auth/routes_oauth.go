@@ -2,11 +2,13 @@ package auth
 
 import (
 	"encoding/json"
-	constants "github.com/patrickkabwe/betterauth-go/constants"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
+	constants "github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/types"
@@ -248,6 +250,10 @@ func handleOAuthLinkCallback(c *Context, stateData *oauthStatePayload, userInfo 
 	existing, err := c.Auth.cfg.store.FindAccountByProviderAndAccountID(c.R.Context(), account.ProviderID, account.AccountID)
 	if err == nil && existing.UserID != stateData.Link.UserID {
 		redirectOAuthError(c, errorURL, "account_already_linked_to_different_user")
+		return
+	}
+	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+		redirectOAuthError(c, errorURL, "unable_to_link_account")
 		return
 	}
 

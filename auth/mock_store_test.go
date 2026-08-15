@@ -80,6 +80,9 @@ func (f *failStore) FindAccountByUserAndProvider(ctx context.Context, userID, pr
 }
 
 func (f *failStore) FindAccountByProviderAndAccountID(ctx context.Context, providerID, accountID string) (*types.Account, error) {
+	if f.failOn == "FindAccountByProviderAndAccountID" {
+		return nil, berrors.ErrInjected
+	}
 	return f.inner.FindAccountByProviderAndAccountID(ctx, providerID, accountID)
 }
 
