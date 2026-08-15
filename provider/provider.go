@@ -37,6 +37,7 @@ type AuthorizationURLOpts struct {
 	CodeVerifier string
 	RedirectURI  string
 	Scopes       []string
+	Display      string
 	LoginHint    string
 }
 

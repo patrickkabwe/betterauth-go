@@ -23,6 +23,7 @@ type signInSocialBody struct {
 	IDToken            *linkSocialIDTokenBody `json:"idToken,omitempty"`
 	Scopes             []string               `json:"scopes,omitempty"`
 	RequestSignUp      *bool                  `json:"requestSignUp,omitempty"`
+	Display            string                 `json:"display,omitempty"`
 	LoginHint          string                 `json:"loginHint,omitempty"`
 	AdditionalData     map[string]any         `json:"additionalData,omitempty"`
 }
@@ -68,7 +69,7 @@ func handleSignInSocial(c *Context) {
 
 	redirectURI := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/callback/" + oauthP.ID()
 	authURL, err := oauthP.CreateAuthorizationURL(c.R.Context(), provider.AuthorizationURLOpts{
-		State: state, CodeVerifier: codeVerifier, RedirectURI: redirectURI, Scopes: body.Scopes, LoginHint: body.LoginHint,
+		State: state, CodeVerifier: codeVerifier, RedirectURI: redirectURI, Scopes: body.Scopes, Display: body.Display, LoginHint: body.LoginHint,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))

@@ -121,6 +121,27 @@ func TestSignInSocialPassesLoginHint(t *testing.T) {
 	}
 }
 
+func TestSignInSocialPassesDisplay(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-1", Email: "oauth@example.com", EmailVerified: true, Name: "OAuth"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"display":         "touch",
+		"disableRedirect": disable,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	if p.opts.Display != "touch" {
+		t.Fatalf("display = %q", p.opts.Display)
+	}
+}
+
 func TestSignInSocialStateCreateFails(t *testing.T) {
 	p := &staticOAuthProvider{
 		id:   "mock",

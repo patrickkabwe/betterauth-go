@@ -100,8 +100,12 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
 	}
-	if p.cfg.Display != "" {
-		params.Set("display", p.cfg.Display)
+	display := p.cfg.Display
+	if opts.Display != "" {
+		display = opts.Display
+	}
+	if display != "" {
+		params.Set("display", display)
 	}
 	if p.cfg.HD != "" {
 		params.Set("hd", p.cfg.HD)
