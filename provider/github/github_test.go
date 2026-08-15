@@ -42,7 +42,7 @@ func TestGitHubAuthURLIncludesPromptAndLoginHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := githubAuthURLQuery(t, authURL)
-	if query.Get("prompt") != "select_account" || query.Get("login_hint") != "octocat" {
+	if query.Get("response_type") != "code" || query.Get("prompt") != "select_account" || query.Get("login_hint") != "octocat" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 }

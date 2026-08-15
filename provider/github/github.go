@@ -79,6 +79,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	}
 	params := url.Values{}
 	params.Set("client_id", p.cfg.ClientID)
+	params.Set("response_type", "code")
 	params.Set("redirect_uri", opts.RedirectURI)
 	scopes := p.defaultScopes(opts.Scopes)
 	if len(scopes) > 0 {
