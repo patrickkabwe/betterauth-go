@@ -17,9 +17,10 @@ import (
 
 // EmailOTPOptions configures email OTP flows.
 type EmailOTPOptions struct {
-	SendOTP   func(ctx context.Context, email, otp, typ string) error
-	ExpiresIn time.Duration
-	OTPLength int
+	SendOTP       func(ctx context.Context, email, otp, typ string) error
+	ExpiresIn     time.Duration
+	OTPLength     int
+	DisableSignUp bool
 }
 
 func (o EmailOTPOptions) length() int {
@@ -210,12 +211,14 @@ func verifyEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 	}
 }
 
-func signInEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
+func signInEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		var body struct {
-			Email      string `json:"email"`
-			OTP        string `json:"otp"`
-			RememberMe *bool  `json:"rememberMe"`
+			Email      string  `json:"email"`
+			OTP        string  `json:"otp"`
+			Name       string  `json:"name"`
+			Image      *string `json:"image"`
+			RememberMe *bool   `json:"rememberMe"`
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
@@ -225,10 +228,34 @@ func signInEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		user, err := c.Auth.Store().FindUserByEmail(c.R.Context(), auth.NormalizeEmail(body.Email))
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeUserNotFound))
+		email := auth.NormalizeEmail(body.Email)
+		user, err := c.Auth.Store().FindUserByEmail(c.R.Context(), email)
+		if errors.Is(err, berrors.ErrNotFound) {
+			if opts.DisableSignUp {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+				return
+			}
+			user, err = c.Auth.CreateUser(c.R.Context(), body.Name, email, body.Image, nil)
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, constants.CodeFailedToCreateUser))
+				return
+			}
+			verified := true
+			user, err = c.Auth.Store().UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+				return
+			}
+		} else if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 			return
+		} else if !user.EmailVerified {
+			verified := true
+			user, err = c.Auth.Store().UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+				return
+			}
 		}
 		remember := true
 		if body.RememberMe != nil {

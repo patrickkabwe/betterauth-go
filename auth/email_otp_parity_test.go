@@ -143,3 +143,53 @@ func TestEmailOTPPluginPasswordResetDoesNotSendForUnknownEmail(t *testing.T) {
 		t.Fatalf("verification error=%v", err)
 	}
 }
+
+func TestEmailOTPPluginSignInCreatesVerifiedUser(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
+	})
+	err := a.CreateVerification(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":new-sign-in@example.com", "123456", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
+		"email": "new-sign-in@example.com",
+		"otp":   "123456",
+		"name":  "New Sign In",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "new-sign-in@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Name != "New Sign In" || !user.EmailVerified {
+		t.Fatalf("user=%+v", user)
+	}
+}
+
+func TestEmailOTPPluginSignInRespectsDisableSignUp(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			DisableSignUp: true,
+		})}
+	})
+	err := a.CreateVerification(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":disabled-sign-in@example.com", "123456", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
+		"email": "disabled-sign-in@example.com",
+		"otp":   "123456",
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	_, err = a.Store().FindUserByEmail(context.Background(), "disabled-sign-in@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("user lookup error=%v", err)
+	}
+}
