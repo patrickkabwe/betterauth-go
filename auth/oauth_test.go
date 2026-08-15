@@ -255,6 +255,26 @@ func TestSignInSocialIDTokenPassesUserDataToProvider(t *testing.T) {
 	}
 }
 
+func TestSignInSocialUserLookupFails(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-lookup-fail", Email: "oauth-lookup-fail@example.com", EmailVerified: true, Name: "OAuth Lookup Fail"},
+	}
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("FindUserByEmail")
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+	})
+
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-lookup-fail"},
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSignInSocialImplicitLinkRequiresVerifiedLocalEmail(t *testing.T) {
 	p := &staticOAuthProvider{
 		id:   "mock",

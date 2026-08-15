@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"time"
 
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -35,6 +37,9 @@ func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, acco
 	}
 
 	existing, err := a.cfg.store.FindUserByEmail(c.R.Context(), email)
+	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+		return nil, err
+	}
 	isRegister := err != nil
 
 	if !isRegister {
