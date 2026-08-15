@@ -189,7 +189,10 @@ func handleChangeEmail(c *Context) {
 			return
 		}
 		if canSendVerification {
-			_ = sendVerificationEmailToUser(c, updated, callback)
+			if err := sendVerificationEmailToUser(c, updated, callback); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+				return
+			}
 		}
 		c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 		return
@@ -216,7 +219,10 @@ func handleChangeEmail(c *Context) {
 	verifyURL := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/verify-email?token=" + url.QueryEscape(token) + "&callbackURL=" + url.QueryEscape(callback)
 	targetUser := types.CloneUser(user)
 	targetUser.Email = newEmail
-	_ = sendFn(c.R.Context(), types.VerificationEmailData{User: targetUser, URL: verifyURL, Token: token})
+	if err := sendFn(c.R.Context(), types.VerificationEmailData{User: targetUser, URL: verifyURL, Token: token}); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
 

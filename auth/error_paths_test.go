@@ -396,6 +396,43 @@ func TestChangeEmailInvalidBody(t *testing.T) {
 	}
 }
 
+func TestChangeEmailUpdateWithoutVerificationSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.User.ChangeEmail.Enabled = true
+		c.User.ChangeEmail.UpdateEmailWithoutVerification = true
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	cookies := signUp(t, a, "ceunverifiedsendfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/change-email", map[string]any{
+		"newEmail": "ceunverifiedsendfail-new@example.com",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestChangeEmailConfirmationSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.User.ChangeEmail.Enabled = true
+		c.User.ChangeEmail.SendChangeEmailConfirmation = func(_ context.Context, _ types.ChangeEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return nil
+		}
+	})
+	cookies := signUp(t, a, "ceconfirmfail@example.com")
+	verifyUserEmail(t, a, "ceconfirmfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/change-email", map[string]any{
+		"newEmail": "ceconfirmfail-new@example.com",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestVerifyPasswordNoCredential(t *testing.T) {
 	a := newTestAuth()
 	cookies := oauthOnlySession(t, a)
