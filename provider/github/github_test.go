@@ -33,6 +33,20 @@ func TestGitHubAuthURLCanDisableDefaultScopes(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthURLIncludesPromptAndLoginHint(t *testing.T) {
+	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", Prompt: "select_account"})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github", LoginHint: "octocat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := githubAuthURLQuery(t, authURL)
+	if query.Get("prompt") != "select_account" || query.Get("login_hint") != "octocat" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+}
+
 func TestGitHubAuthURLOmitsScopeWhenDefaultScopesDisabled(t *testing.T) {
 	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{

@@ -88,6 +88,7 @@ type GitHubProviderConfig struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	Prompt                   string
 	DisableDefaultScope      bool
 	Disabled                 bool
 	DisableImplicitSignUp    bool
@@ -559,6 +560,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
 		providers[constants.ProviderGitHub] = github.New(github.Config{
 			ClientID: opts.GitHub.ClientID, ClientSecret: opts.GitHub.ClientSecret, Scopes: opts.GitHub.Scopes,
+			Prompt:                opts.GitHub.Prompt,
 			DisableDefaultScope:   opts.GitHub.DisableDefaultScope,
 			DisableImplicitSignUp: opts.GitHub.DisableImplicitSignUp, DisableSignUp: opts.GitHub.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.GitHub.OverrideUserInfoOnSignIn,

@@ -26,6 +26,7 @@ type Config struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	Prompt                   string
 	DisableDefaultScope      bool
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
@@ -84,6 +85,12 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 		params.Set("scope", strings.Join(scopes, " "))
 	}
 	params.Set("state", opts.State)
+	if p.cfg.Prompt != "" {
+		params.Set("prompt", p.cfg.Prompt)
+	}
+	if opts.LoginHint != "" {
+		params.Set("login_hint", opts.LoginHint)
+	}
 	return provider.BuildAuthURL(authEndpoint, params), nil
 }
 
