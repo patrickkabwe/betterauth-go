@@ -102,11 +102,12 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 
 func (p *Provider) ValidateAuthorizationCode(ctx context.Context, code, _, redirectURI string) (*provider.OAuthTokens, error) {
 	data, err := provider.ExchangeAuthorizationCode(ctx, provider.CodeExchangeOpts{
-		TokenURL:     tokenEndpoint,
-		ClientID:     p.cfg.ClientID,
-		ClientSecret: p.cfg.ClientSecret,
-		Code:         code,
-		RedirectURI:  p.redirectURI(redirectURI),
+		TokenURL:       tokenEndpoint,
+		ClientID:       p.cfg.ClientID,
+		ClientSecret:   p.cfg.ClientSecret,
+		Code:           code,
+		RedirectURI:    p.redirectURI(redirectURI),
+		Authentication: provider.OAuthClientAuthenticationPost,
 	})
 	if err != nil {
 		return nil, err

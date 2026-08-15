@@ -27,13 +27,18 @@ type OAuthProvider interface {
 
 // CodeExchangeOpts configures an authorization-code token exchange.
 type CodeExchangeOpts struct {
-	TokenURL     string
-	ClientID     string
-	ClientSecret string
-	Code         string
-	RedirectURI  string
-	CodeVerifier string
-	ExtraParams  map[string]string
+	TokenURL       string
+	ClientID       string
+	ClientSecret   string
+	ClientKey      string
+	Code           string
+	RedirectURI    string
+	CodeVerifier   string
+	DeviceID       string
+	Authentication OAuthClientAuthentication
+	Headers        map[string]string
+	Resources      []string
+	ExtraParams    map[string]string
 }
 
 // OAuthClientAuthentication controls how client credentials are sent.
@@ -57,16 +62,30 @@ type RefreshAccessTokenOpts struct {
 // ExchangeAuthorizationCode performs a standard OAuth2 code exchange.
 func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[string]any, error) {
 	form := url.Values{}
+	headers := http.Header{}
+	headers.Set("Content-Type", "application/x-www-form-urlencoded")
+	headers.Set("Accept", "application/json")
+	for key, value := range opts.Headers {
+		headers.Set(key, value)
+	}
 	if opts.Code != "" {
 		form.Set("grant_type", "authorization_code")
 		form.Set("code", opts.Code)
 		form.Set("redirect_uri", opts.RedirectURI)
-		form.Set("client_id", opts.ClientID)
-		if opts.ClientSecret != "" {
-			form.Set("client_secret", opts.ClientSecret)
-		}
 		if opts.CodeVerifier != "" {
 			form.Set("code_verifier", opts.CodeVerifier)
+		}
+		if opts.ClientKey != "" {
+			form.Set("client_key", opts.ClientKey)
+		}
+		if opts.DeviceID != "" {
+			form.Set("device_id", opts.DeviceID)
+		}
+		for _, resource := range opts.Resources {
+			form.Add("resource", resource)
+		}
+		if err := applyOAuthClientAuthentication(headers, form, opts.ClientID, opts.ClientSecret, opts.Authentication, opts.TokenURL); err != nil {
+			return nil, err
 		}
 	}
 	for k, v := range opts.ExtraParams {
@@ -79,8 +98,7 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
+	req.Header = headers
 
 	resp, err := noRedirectHTTPClient().Do(req)
 	if err != nil {
@@ -244,17 +262,8 @@ func RefreshAccessTokenWithOptions(ctx context.Context, opts RefreshAccessTokenO
 	headers := http.Header{}
 	headers.Set("Content-Type", "application/x-www-form-urlencoded")
 	headers.Set("Accept", "application/json")
-	switch opts.Authentication {
-	case OAuthClientAuthenticationPost:
-		form.Set("client_id", opts.ClientID)
-		if opts.ClientSecret != "" {
-			form.Set("client_secret", opts.ClientSecret)
-		}
-	case OAuthClientAuthenticationBasic:
-		credentials := opts.ClientID + ":" + opts.ClientSecret
-		headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(credentials)))
-	default:
-		return nil, fmt.Errorf("unsupported oauth client authentication %q for token endpoint %q", opts.Authentication, opts.TokenURL)
+	if err := applyOAuthClientAuthentication(headers, form, opts.ClientID, opts.ClientSecret, opts.Authentication, opts.TokenURL); err != nil {
+		return nil, err
 	}
 	for key, value := range opts.ExtraParams {
 		form.Set(key, value)
@@ -288,4 +297,20 @@ func RefreshAccessTokenWithOptions(ctx context.Context, opts RefreshAccessTokenO
 		return nil, fmt.Errorf("oauth refresh error for endpoint %q: %s", opts.TokenURL, errCode)
 	}
 	return TokensFromMap(data), nil
+}
+
+func applyOAuthClientAuthentication(headers http.Header, form url.Values, clientID, clientSecret string, authentication OAuthClientAuthentication, tokenURL string) error {
+	switch authentication {
+	case "", OAuthClientAuthenticationPost:
+		form.Set("client_id", clientID)
+		if clientSecret != "" {
+			form.Set("client_secret", clientSecret)
+		}
+	case OAuthClientAuthenticationBasic:
+		credentials := clientID + ":" + clientSecret
+		headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(credentials)))
+	default:
+		return fmt.Errorf("unsupported oauth client authentication %q for token endpoint %q", authentication, tokenURL)
+	}
+	return nil
 }

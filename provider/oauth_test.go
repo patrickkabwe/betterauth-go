@@ -80,6 +80,72 @@ func TestExchangeAuthorizationCodeMergesExtraParams(t *testing.T) {
 	}
 }
 
+func TestExchangeAuthorizationCodeSupportsRequestOptions(t *testing.T) {
+	var formValues url.Values
+	var authorization string
+	var customHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		customHeader = r.Header.Get("X-Provider")
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-token"}`))
+	}))
+	defer server.Close()
+
+	_, err := ExchangeAuthorizationCode(context.Background(), CodeExchangeOpts{
+		TokenURL:       server.URL,
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		ClientKey:      "client-key",
+		Code:           "code",
+		RedirectURI:    "https://app.example.com/callback",
+		CodeVerifier:   "verifier",
+		DeviceID:       "device-id",
+		Authentication: OAuthClientAuthenticationBasic,
+		Headers: map[string]string{
+			"X-Provider": "custom",
+		},
+		Resources: []string{
+			"https://api-one.example.com",
+			"https://api-two.example.com",
+		},
+		ExtraParams: map[string]string{
+			"audience":   "api",
+			"grant_type": "custom",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedAuthorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("client:secret"))
+	if authorization != expectedAuthorization || customHeader != "custom" {
+		t.Fatalf("authorization=%q customHeader=%q", authorization, customHeader)
+	}
+	if formValues.Get("grant_type") != "authorization_code" || formValues.Get("code") != "code" || formValues.Get("redirect_uri") != "https://app.example.com/callback" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("code_verifier") != "verifier" || formValues.Get("client_key") != "client-key" || formValues.Get("device_id") != "device-id" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("audience") != "api" {
+		t.Fatalf("form=%v", formValues)
+	}
+	resources := formValues["resource"]
+	if len(resources) != 2 || resources[0] != "https://api-one.example.com" || resources[1] != "https://api-two.example.com" {
+		t.Fatalf("resources=%v", resources)
+	}
+	if _, ok := formValues["client_id"]; ok {
+		t.Fatalf("form=%v", formValues)
+	}
+	if _, ok := formValues["client_secret"]; ok {
+		t.Fatalf("form=%v", formValues)
+	}
+}
+
 func TestRefreshAccessTokenOmitsEmptyClientSecret(t *testing.T) {
 	var formValues url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
