@@ -84,6 +84,7 @@ type GoogleProviderConfig struct {
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
+	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
 }
 
 // GitHubProviderConfig configures the built-in GitHub OAuth provider.
@@ -99,6 +100,7 @@ type GitHubProviderConfig struct {
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
+	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
 }
 
 // AccountConfig configures account linking and management.
@@ -561,6 +563,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 			DisableDefaultScope:   opts.Google.DisableDefaultScope,
 			DisableImplicitSignUp: opts.Google.DisableImplicitSignUp, DisableSignUp: opts.Google.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.Google.OverrideUserInfoOnSignIn,
+			GetUserInfo:              opts.Google.GetUserInfo,
 		})
 	}
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
@@ -571,6 +574,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 			DisableDefaultScope:   opts.GitHub.DisableDefaultScope,
 			DisableImplicitSignUp: opts.GitHub.DisableImplicitSignUp, DisableSignUp: opts.GitHub.DisableSignUp,
 			OverrideUserInfoOnSignIn: opts.GitHub.OverrideUserInfoOnSignIn,
+			GetUserInfo:              opts.GitHub.GetUserInfo,
 		})
 	}
 	return providers

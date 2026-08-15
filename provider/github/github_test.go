@@ -86,6 +86,25 @@ func TestGitHubAuthURLOmitsScopeWhenDefaultScopesDisabled(t *testing.T) {
 	}
 }
 
+func TestGitHubGetUserInfoUsesOverride(t *testing.T) {
+	p := github.New(github.Config{
+		ClientID: "id", ClientSecret: "secret",
+		GetUserInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+			return &provider.UserInfo{
+				User: provider.OAuthUser{ID: "custom-github", Email: tokens.AccessToken + "@example.com", EmailVerified: true},
+				Data: map[string]any{"source": "override"},
+			}, nil
+		},
+	})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "custom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.ID != "custom-github" || info.User.Email != "custom@example.com" || info.Data["source"] != "override" {
+		t.Fatalf("info=%+v", info)
+	}
+}
+
 func TestGitHubSignUpPolicy(t *testing.T) {
 	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {

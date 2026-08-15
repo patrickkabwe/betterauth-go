@@ -129,6 +129,25 @@ func TestGoogleGetUserInfoFromIDToken(t *testing.T) {
 	}
 }
 
+func TestGoogleGetUserInfoUsesOverride(t *testing.T) {
+	p := google.New(google.Config{
+		ClientID: "id", ClientSecret: "secret",
+		GetUserInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+			return &provider.UserInfo{
+				User: provider.OAuthUser{ID: "custom-google", Email: tokens.AccessToken + "@example.com", EmailVerified: true},
+				Data: map[string]any{"source": "override"},
+			}, nil
+		},
+	})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "custom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.ID != "custom-google" || info.User.Email != "custom@example.com" || info.Data["source"] != "override" {
+		t.Fatalf("info=%+v", info)
+	}
+}
+
 func TestGoogleGetUserInfoRejectsHostedDomainMismatch(t *testing.T) {
 	token := googleTestIDToken(map[string]any{
 		"sub": "google-sub", "email": "g@example.com", "email_verified": true,

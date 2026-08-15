@@ -33,6 +33,7 @@ type Config struct {
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool
+	GetUserInfo              func(context.Context, provider.OAuthTokens) (*provider.UserInfo, error)
 }
 
 // Provider implements Google OAuth.
@@ -147,7 +148,10 @@ func (p *Provider) redirectURI(defaultRedirectURI string) string {
 	return defaultRedirectURI
 }
 
-func (p *Provider) GetUserInfo(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+	if p.cfg.GetUserInfo != nil {
+		return p.cfg.GetUserInfo(ctx, tokens)
+	}
 	idToken := tokens.IDToken
 	if idToken == "" {
 		return nil, fmt.Errorf("google id_token missing")
