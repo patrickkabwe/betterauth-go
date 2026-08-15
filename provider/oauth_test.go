@@ -1,9 +1,43 @@
 package provider
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestExchangeAuthorizationCodeRefusesRedirect(t *testing.T) {
+	internalHit := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			http.Redirect(w, r, "/internal-token", http.StatusFound)
+		case "/internal-token":
+			internalHit = true
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"leaked-internal-token"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := ExchangeAuthorizationCode(context.Background(), CodeExchangeOpts{
+		TokenURL:     server.URL + "/token",
+		ClientID:     "client",
+		ClientSecret: "secret",
+		Code:         "code",
+		RedirectURI:  server.URL + "/callback",
+	})
+	if err == nil {
+		t.Fatal("expected redirect error")
+	}
+	if internalHit {
+		t.Fatal("redirect target was reached")
+	}
+}
 
 func TestTokensFromMapMapsOAuthTokenFields(t *testing.T) {
 	data := map[string]any{

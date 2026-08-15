@@ -62,11 +62,15 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := noRedirectHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if isRedirectStatus(resp.StatusCode) {
+		return nil, fmt.Errorf("oauth endpoint %q returned an HTTP redirect; configure the final endpoint URL", opts.TokenURL)
+	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -84,6 +88,22 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 		return nil, fmt.Errorf("oauth error: %s", errCode)
 	}
 	return data, nil
+}
+
+func noRedirectHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func isRedirectStatus(status int) bool {
+	return status == http.StatusMovedPermanently ||
+		status == http.StatusFound ||
+		status == http.StatusSeeOther ||
+		status == http.StatusTemporaryRedirect ||
+		status == http.StatusPermanentRedirect
 }
 
 // TokensFromMap converts a token endpoint JSON body into OAuthTokens.
