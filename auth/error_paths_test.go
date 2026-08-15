@@ -296,6 +296,37 @@ func TestSignUpCreateAccountFails(t *testing.T) {
 	}
 }
 
+func TestRequestPasswordResetCreateVerificationFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("CreateVerification")
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, _ types.ResetPasswordEmailData) error {
+			return nil
+		}
+	})
+	signUp(t, a, "rpverifycreate@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "rpverifycreate@example.com",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestRequestPasswordResetSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, _ types.ResetPasswordEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	signUp(t, a, "rpsendfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "rpsendfail@example.com",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestResetPasswordHashFails(t *testing.T) {
 	var resetData types.ResetPasswordEmailData
 	mem := memory.New()
@@ -322,6 +353,49 @@ func TestResetPasswordHashFails(t *testing.T) {
 	}, nil)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("reused token status=%d", resp.StatusCode)
+	}
+}
+
+func TestResetPasswordCreateAccountFails(t *testing.T) {
+	var resetData types.ResetPasswordEmailData
+	fs := wrapStore("CreateAccount").(*failStore)
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = fs
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, data types.ResetPasswordEmailData) error {
+			resetData = data
+			return nil
+		}
+	})
+	_ = oauthOnlyCookies(t, fs, "reset-create-account-fail", "reset-create-account-fail@example.com")
+	_, _ = doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "reset-create-account-fail@example.com",
+	}, nil)
+	resp, _ := doRequest(a, http.MethodPost, "/reset-password", map[string]any{
+		"token": resetData.Token, "newPassword": "newpassword1",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestResetPasswordUpdateAccountFails(t *testing.T) {
+	var resetData types.ResetPasswordEmailData
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("UpdateAccountPassword")
+		c.EmailAndPassword.SendResetPassword = func(_ context.Context, data types.ResetPasswordEmailData) error {
+			resetData = data
+			return nil
+		}
+	})
+	signUp(t, a, "rpupdateaccountfail@example.com")
+	_, _ = doRequest(a, http.MethodPost, "/request-password-reset", map[string]any{
+		"email": "rpupdateaccountfail@example.com",
+	}, nil)
+	resp, _ := doRequest(a, http.MethodPost, "/reset-password", map[string]any{
+		"token": resetData.Token, "newPassword": "newpassword1",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }
 

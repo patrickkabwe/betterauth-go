@@ -1,12 +1,14 @@
 package auth
 
 import (
-	constants "github.com/patrickkabwe/betterauth-go/constants"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/types"
@@ -46,22 +48,32 @@ func handleRequestPasswordReset(c *Context) {
 	}
 
 	now := time.Now()
-	vID, _ := id.Generate(32)
+	vID, err := id.Generate(32)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	identifier := constants.VerificationResetPassword + token
-	_ = c.Auth.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
+	if err := c.Auth.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
 		ID: vID, Identifier: identifier, Value: user.ID,
 		ExpiresAt: now.Add(c.Auth.cfg.emailPassword.resetPasswordTokenExpires),
 		CreatedAt: now, UpdatedAt: now,
-	})
+	}); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	callback := ""
 	if body.RedirectTo != "" {
 		callback = url.QueryEscape(body.RedirectTo)
 	}
 	resetURL := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/reset-password/" + token + "?callbackURL=" + callback
-	_ = c.Auth.cfg.emailPassword.sendResetPassword(c.R.Context(), types.ResetPasswordEmailData{
+	if err := c.Auth.cfg.emailPassword.sendResetPassword(c.R.Context(), types.ResetPasswordEmailData{
 		User: *user, URL: resetURL, Token: token,
-	})
+	}); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	c.WriteJSON(http.StatusOK, types.MessageStatusResponse{Status: true, Message: msg})
 }
@@ -137,14 +149,28 @@ func handleResetPassword(c *Context) {
 
 	_, err = c.Auth.cfg.store.FindAccountByUserAndProvider(c.R.Context(), v.Value, constants.ProviderCredential)
 	if err != nil {
+		if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		now := time.Now()
-		accID, _ := id.Generate(32)
-		_ = c.Auth.cfg.store.CreateAccount(c.R.Context(), &types.Account{
+		accID, err := id.Generate(32)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		if err := c.Auth.cfg.store.CreateAccount(c.R.Context(), &types.Account{
 			ID: accID, AccountID: v.Value, ProviderID: constants.ProviderCredential,
 			UserID: v.Value, Password: hash, CreatedAt: now, UpdatedAt: now,
-		})
+		}); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	} else {
-		_ = c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), v.Value, constants.ProviderCredential, hash)
+		if err := c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), v.Value, constants.ProviderCredential, hash); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 
 	if c.Auth.cfg.emailPassword.revokeSessionsOnPasswordReset {
