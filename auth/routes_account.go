@@ -343,8 +343,10 @@ func handleAccountInfo(c *Context) {
 	}
 
 	info, err := p.GetUserInfo(c.R.Context(), provider.OAuthTokens{
-		AccessToken: tokens.AccessToken,
-		IDToken:     tokens.IDToken,
+		AccessToken:          tokens.AccessToken,
+		AccessTokenExpiresAt: tokens.AccessTokenExpiresAt,
+		IDToken:              tokens.IDToken,
+		Scopes:               tokens.Scopes,
 	})
 	if err != nil || info == nil {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeFailedToGetUserInfo))

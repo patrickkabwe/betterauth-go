@@ -305,6 +305,45 @@ func TestAccountInfoRequiresAccountID(t *testing.T) {
 	}
 }
 
+func TestAccountInfoPassesScopesToProvider(t *testing.T) {
+	var seenScopes []string
+	a := testAuthWithGoogle(t, func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{
+			"google": &testSocialProvider{
+				id: "google",
+				userInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+					seenScopes = append([]string(nil), tokens.Scopes...)
+					return &provider.UserInfo{
+						User: provider.OAuthUser{ID: "gh-scoped", Name: "Scoped", Email: "linker@example.com", EmailVerified: true},
+						Data: map[string]any{"login": "scoped"},
+					}, nil
+				},
+			},
+		}
+	})
+	cookies := signUp(t, a, "linker@example.com")
+	resp, data := doRequest(a, http.MethodPost, "/link-social", map[string]any{
+		"provider": "google",
+		"idToken": map[string]any{
+			"token":       "valid-id-token",
+			"accessToken": "scoped-at",
+			"scopes":      []string{"profile", "email"},
+		},
+	}, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+	accountID := linkedAccountID(t, a, cookies, "google")
+
+	resp, data = doRequest(a, http.MethodGet, "/account-info?providerId=google&accountId="+accountID, nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	if len(seenScopes) != 2 || seenScopes[0] != "profile" || seenScopes[1] != "email" {
+		t.Fatalf("scopes=%v", seenScopes)
+	}
+}
+
 func TestAccountRoutesRejectUserIDWithoutSession(t *testing.T) {
 	a := testAuthWithGoogle(t)
 	cookies := signUp(t, a, "linker@example.com")
