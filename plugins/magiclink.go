@@ -69,16 +69,18 @@ func MagicLink(opts MagicLinkOptions) auth.Plugin {
 			rt(http.MethodGet, "/magic-link/verify", func(c *auth.Context) {
 				token := c.R.URL.Query().Get("token")
 				callbackURL := c.R.URL.Query().Get("callbackURL")
-				if callbackURL == "" {
-					callbackURL = "/"
+				hasCallbackURL := callbackURL != ""
+				resolvedCallbackURL := callbackURL
+				if resolvedCallbackURL == "" {
+					resolvedCallbackURL = "/"
 				}
 				errorURL := c.R.URL.Query().Get("errorCallbackURL")
 				if errorURL == "" {
-					errorURL = callbackURL
+					errorURL = resolvedCallbackURL
 				}
 				newUserURL := c.R.URL.Query().Get("newUserCallbackURL")
 				if newUserURL == "" {
-					newUserURL = callbackURL
+					newUserURL = resolvedCallbackURL
 				}
 				v, err := c.Auth.ConsumeVerification(c.R.Context(), token)
 				if err != nil {
@@ -117,7 +119,7 @@ func MagicLink(opts MagicLinkOptions) auth.Plugin {
 					c.Redirect(errorURL + "?error=failed_to_create_session")
 					return
 				}
-				if c.R.Header.Get(constants.HeaderAccept) == constants.MIMEJSON || c.R.URL.Query().Get("json") == "true" {
+				if !hasCallbackURL || c.R.Header.Get(constants.HeaderAccept) == constants.MIMEJSON || c.R.URL.Query().Get("json") == "true" {
 					c.WriteJSON(http.StatusOK, map[string]any{
 						"token":   sess.Token,
 						"user":    user,
@@ -129,7 +131,7 @@ func MagicLink(opts MagicLinkOptions) auth.Plugin {
 					c.Redirect(newUserURL)
 					return
 				}
-				c.Redirect(callbackURL)
+				c.Redirect(resolvedCallbackURL)
 			}),
 		},
 	}

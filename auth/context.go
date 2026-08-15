@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
@@ -49,6 +52,17 @@ func (c *Context) Redirect(url string) {
 }
 
 func (c *Context) ParseJSON(v any) error {
+	if isFormURLEncoded(c.R.Header.Get(constants.HeaderContentType)) {
+		defer c.R.Body.Close()
+		if err := c.R.ParseForm(); err != nil {
+			return err
+		}
+		body, err := marshalFormBody(c.R.PostForm, v)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(body, v)
+	}
 	defer c.R.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(c.R.Body, 1<<20))
 	if err != nil {
@@ -58,6 +72,60 @@ func (c *Context) ParseJSON(v any) error {
 		return nil
 	}
 	return json.Unmarshal(body, v)
+}
+
+func isFormURLEncoded(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded")
+}
+
+func marshalFormBody(values url.Values, dst any) ([]byte, error) {
+	obj := make(map[string]any, len(values))
+	boolFields := jsonBoolFields(dst)
+	for key, list := range values {
+		if len(list) == 0 {
+			continue
+		}
+		value := list[0]
+		if boolFields[key] {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return nil, err
+			}
+			obj[key] = parsed
+			continue
+		}
+		obj[key] = value
+	}
+	return json.Marshal(obj)
+}
+
+func jsonBoolFields(dst any) map[string]bool {
+	fields := map[string]bool{"rememberMe": true}
+	t := reflect.TypeOf(dst)
+	if t == nil {
+		return fields
+	}
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return fields
+	}
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		ft := field.Type
+		if ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Bool {
+			fields[name] = true
+		}
+	}
+	return fields
 }
 
 func (c *Context) ClientIP() string {

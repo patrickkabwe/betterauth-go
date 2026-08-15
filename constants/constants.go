@@ -70,7 +70,7 @@ const (
 const (
 	EmailOTPTypeVerification   = "email-verification"
 	EmailOTPTypeForgetPassword = "forget-password"
-	EmailOTPTypeEmailChange    = "email-change"
+	EmailOTPTypeEmailChange    = "change-email"
 )
 
 // Domain suffixes for synthetic emails.
@@ -212,6 +212,7 @@ const (
 	CodeCaptchaRequired             = "CAPTCHA_REQUIRED"
 	CodeCaptchaInvalid              = "CAPTCHA_INVALID"
 	CodeNotAnonymous                = "NOT_ANONYMOUS"
+	CodeAnonymousSignInAgain        = "ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY"
 	CodeNotImpersonating            = "NOT_IMPERSONATING"
 	CodeTwoFactorNotEnabled         = "TWO_FACTOR_NOT_ENABLED"
 	CodeOrgNotFound                 = "ORG_NOT_FOUND"
@@ -301,6 +302,7 @@ const (
 	MsgCaptchaRequired             = "Captcha token required"
 	MsgCaptchaInvalid              = "Invalid captcha"
 	MsgNotAnonymous                = "User is not anonymous"
+	MsgAnonymousSignInAgain        = "Anonymous users cannot sign in again anonymously"
 	MsgNotImpersonating            = "Not impersonating"
 	MsgTwoFactorNotEnabled         = "2FA not enabled"
 	MsgFailedToGenerateTOTP        = "Failed to generate TOTP"
@@ -427,6 +429,7 @@ var apiMessages = map[string]string{
 	CodeCaptchaRequired:             MsgCaptchaRequired,
 	CodeCaptchaInvalid:              MsgCaptchaInvalid,
 	CodeNotAnonymous:                MsgNotAnonymous,
+	CodeAnonymousSignInAgain:        MsgAnonymousSignInAgain,
 	CodeNotImpersonating:            MsgNotImpersonating,
 	CodeTwoFactorNotEnabled:         MsgTwoFactorNotEnabled,
 	CodeOrgNotFound:                 MsgOrgNotFound,

@@ -13,6 +13,8 @@ import (
 )
 
 func handleGetSession(c *Context) {
+	c.W.Header().Set("cache-control", "no-store")
+	c.W.Header().Set("pragma", "no-cache")
 	if c.R.Method == http.MethodPost && !c.Auth.cfg.deferSessionRefresh {
 		c.WriteError(apierror.WithCode(http.StatusMethodNotAllowed, apierror.CodeMethodNotAllowed))
 		return
@@ -46,7 +48,7 @@ func handleGetSession(c *Context) {
 }
 
 func handleListSessions(c *Context) {
-	sess, _, ok := c.requireSessionWithOpts(SessionOpts{DisableCookieCache: true})
+	sess, _, ok := c.requireFreshSession(SessionOpts{DisableCookieCache: true})
 	if !ok {
 		return
 	}

@@ -103,9 +103,11 @@ func (a *Auth) getValidAccessToken(c *Context, userID, providerID, accountID str
 			scope := strings.Join(newTokens.Scopes, ",")
 			update.Scope = &scope
 		}
-		if updated, err := a.cfg.store.UpdateAccount(c.R.Context(), account.ID, update); err == nil {
-			account = updated
+		updated, err := a.cfg.store.UpdateAccount(c.R.Context(), account.ID, update)
+		if err != nil {
+			return nil, apierror.New(http.StatusBadRequest, apierror.CodeFailedToGetAccessToken, constants.MsgFailedValidAccessToken)
 		}
+		account = updated
 		accessToken = newTokens.AccessToken
 		accessTokenExpiresAt = newTokens.AccessTokenExpiresAt
 		if newTokens.IDToken != "" {

@@ -16,13 +16,14 @@ type oauthLinkState struct {
 }
 
 type oauthStatePayload struct {
-	CallbackURL   string          `json:"callbackURL"`
-	CodeVerifier  string          `json:"codeVerifier"`
-	ErrorURL      string          `json:"errorURL,omitempty"`
-	NewUserURL    string          `json:"newUserURL,omitempty"`
-	Link          *oauthLinkState `json:"link,omitempty"`
-	RequestSignUp bool            `json:"requestSignUp,omitempty"`
-	ExpiresAt     time.Time       `json:"expiresAt"`
+	CallbackURL    string          `json:"callbackURL"`
+	CodeVerifier   string          `json:"codeVerifier"`
+	ErrorURL       string          `json:"errorURL,omitempty"`
+	NewUserURL     string          `json:"newUserURL,omitempty"`
+	Link           *oauthLinkState `json:"link,omitempty"`
+	RequestSignUp  bool            `json:"requestSignUp,omitempty"`
+	AdditionalData map[string]any  `json:"additionalData,omitempty"`
+	ExpiresAt      time.Time       `json:"expiresAt"`
 }
 
 type oauthStateInput struct {
@@ -31,6 +32,7 @@ type oauthStateInput struct {
 	NewUserCallbackURL string
 	Link               *oauthLinkState
 	RequestSignUp      bool
+	AdditionalData     map[string]any
 }
 
 func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state string, codeVerifier string, err error) {
@@ -48,13 +50,14 @@ func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state stri
 	}
 	now := time.Now()
 	payload := oauthStatePayload{
-		CallbackURL:   callback,
-		CodeVerifier:  codeVerifier,
-		ErrorURL:      input.ErrorCallbackURL,
-		NewUserURL:    input.NewUserCallbackURL,
-		Link:          input.Link,
-		RequestSignUp: input.RequestSignUp,
-		ExpiresAt:     now.Add(10 * time.Minute),
+		CallbackURL:    callback,
+		CodeVerifier:   codeVerifier,
+		ErrorURL:       input.ErrorCallbackURL,
+		NewUserURL:     input.NewUserCallbackURL,
+		Link:           input.Link,
+		RequestSignUp:  input.RequestSignUp,
+		AdditionalData: input.AdditionalData,
+		ExpiresAt:      now.Add(10 * time.Minute),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

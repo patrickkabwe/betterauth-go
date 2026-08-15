@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,29 @@ func doRequestWithHeaders(a *auth.Auth, method, path string, body any, cookies [
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+
+	rr := httptest.NewRecorder()
+	http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := path
+		if i := strings.Index(path, "?"); i >= 0 {
+			r.URL.RawQuery = path[i+1:]
+			clean = path[:i]
+		}
+		r.URL.Path = clean
+		a.Handler().ServeHTTP(w, r)
+	}).ServeHTTP(rr, req)
+
+	resp := rr.Result()
+	data, _ := io.ReadAll(resp.Body)
+	return resp, data
+}
+
+func doFormRequest(a *auth.Auth, method, path string, body url.Values, cookies []*http.Cookie) (*http.Response, []byte) {
+	req := httptest.NewRequest(method, "http://example.com/api/auth"+path, strings.NewReader(body.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	for _, c := range cookies {
 		req.AddCookie(c)
 	}

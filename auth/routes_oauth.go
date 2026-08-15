@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"encoding/json"
 	constants "github.com/patrickkabwe/betterauth-go/constants"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
@@ -19,6 +21,8 @@ type signInSocialBody struct {
 	IDToken            *linkSocialIDTokenBody `json:"idToken,omitempty"`
 	Scopes             []string               `json:"scopes,omitempty"`
 	RequestSignUp      *bool                  `json:"requestSignUp,omitempty"`
+	LoginHint          string                 `json:"loginHint,omitempty"`
+	AdditionalData     map[string]any         `json:"additionalData,omitempty"`
 }
 
 func handleSignInSocial(c *Context) {
@@ -53,6 +57,7 @@ func handleSignInSocial(c *Context) {
 	state, codeVerifier, err := c.Auth.generateOAuthState(c, oauthStateInput{
 		CallbackURL: body.CallbackURL, ErrorCallbackURL: body.ErrorCallbackURL,
 		NewUserCallbackURL: body.NewUserCallbackURL, RequestSignUp: requestSignUp,
+		AdditionalData: body.AdditionalData,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
@@ -61,7 +66,7 @@ func handleSignInSocial(c *Context) {
 
 	redirectURI := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/callback/" + oauthP.ID()
 	authURL, err := oauthP.CreateAuthorizationURL(c.R.Context(), provider.AuthorizationURLOpts{
-		State: state, CodeVerifier: codeVerifier, RedirectURI: redirectURI, Scopes: body.Scopes,
+		State: state, CodeVerifier: codeVerifier, RedirectURI: redirectURI, Scopes: body.Scopes, LoginHint: body.LoginHint,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
@@ -116,6 +121,11 @@ func handleSocialIDTokenSignIn(c *Context, p provider.SocialProvider, body signI
 func handleOAuthCallback(c *Context) {
 	providerID := c.Vars["provider"]
 	defaultErrorURL := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/error"
+
+	if c.R.Method == http.MethodPost {
+		redirectOAuthPostCallback(c, providerID)
+		return
+	}
 
 	p, ok := c.Auth.socialProvider(providerID)
 	if !ok {
@@ -205,7 +215,7 @@ func handleOAuthLinkCallback(c *Context, stateData *oauthStatePayload, userInfo 
 		redirectOAuthError(c, errorURL, "unable_to_link_account")
 		return
 	}
-	if strings.EqualFold(userInfo.Email, stateData.Link.Email) && !c.Auth.cfg.account.allowDifferentEmails {
+	if !strings.EqualFold(userInfo.Email, stateData.Link.Email) && !c.Auth.cfg.account.allowDifferentEmails {
 		redirectOAuthError(c, errorURL, "email_doesn't_match")
 		return
 	}
@@ -232,6 +242,51 @@ func handleOAuthLinkCallback(c *Context, stateData *oauthStatePayload, userInfo 
 	}
 	c.Auth.applyUserInfoOnLink(c, stateData.Link.UserID, userInfo)
 	c.Redirect(stateData.CallbackURL)
+}
+
+func redirectOAuthPostCallback(c *Context, providerID string) {
+	params := url.Values{}
+	for key, values := range c.R.URL.Query() {
+		for _, value := range values {
+			params.Add(key, value)
+		}
+	}
+	var body map[string]any
+	if err := c.ParseJSON(&body); err == nil {
+		for key, value := range body {
+			if value == nil {
+				continue
+			}
+			if raw, ok := value.(json.RawMessage); ok {
+				params.Set(key, strings.Trim(string(raw), `"`))
+				continue
+			}
+			params.Set(key, stringFromOAuthCallbackValue(value))
+		}
+	}
+	target := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/callback/" + providerID
+	if encoded := params.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	c.Redirect(target)
+}
+
+func stringFromOAuthCallbackValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
 }
 
 func redirectOAuthError(c *Context, errorURL, code string) {

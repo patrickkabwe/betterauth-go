@@ -27,6 +27,7 @@ var routeTable = []route{
 	{http.MethodGet, "/reset-password/{token}", handleResetPasswordCallback},
 	{http.MethodGet, "/delete-user/callback", handleDeleteUserCallback},
 	{http.MethodGet, "/callback/{provider}", handleOAuthCallback},
+	{http.MethodPost, "/callback/{provider}", handleOAuthCallback},
 
 	{http.MethodPost, "/sign-up/email", handleSignUpEmail},
 	{http.MethodPost, "/sign-in/social", handleSignInSocial},

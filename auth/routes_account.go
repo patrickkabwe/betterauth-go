@@ -45,6 +45,7 @@ type linkSocialBody struct {
 	Scopes           []string               `json:"scopes,omitempty"`
 	ErrorCallbackURL string                 `json:"errorCallbackURL,omitempty"`
 	DisableRedirect  *bool                  `json:"disableRedirect,omitempty"`
+	AdditionalData   map[string]any         `json:"additionalData,omitempty"`
 }
 
 func handleLinkSocial(c *Context) {
@@ -84,7 +85,8 @@ func handleLinkSocial(c *Context) {
 	}
 	state, codeVerifier, err := c.Auth.generateOAuthState(c, oauthStateInput{
 		CallbackURL: callback, ErrorCallbackURL: body.ErrorCallbackURL,
-		Link: &oauthLinkState{UserID: sess.UserID, Email: user.Email},
+		Link:           &oauthLinkState{UserID: sess.UserID, Email: user.Email},
+		AdditionalData: body.AdditionalData,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
@@ -188,6 +190,7 @@ func handleGetAccessToken(c *Context) {
 		AccessToken:          tokens.AccessToken,
 		AccessTokenExpiresAt: tokens.AccessTokenExpiresAt,
 		IDToken:              tokens.IDToken,
+		Scopes:               tokens.Scopes,
 	})
 }
 
@@ -265,7 +268,10 @@ func handleRefreshToken(c *Context) {
 		IDToken:               &idToken,
 		Scope:                 &scope,
 	}
-	_, _ = c.Auth.cfg.store.UpdateAccount(c.R.Context(), account.ID, update)
+	if _, err := c.Auth.cfg.store.UpdateAccount(c.R.Context(), account.ID, update); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeFailedToRefreshAccessToken))
+		return
+	}
 
 	c.WriteJSON(http.StatusOK, types.RefreshTokenResponse{
 		AccessToken:           newTokens.AccessToken,

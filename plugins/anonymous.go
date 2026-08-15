@@ -26,6 +26,10 @@ func Anonymous(opts AnonymousOptions) auth.Plugin {
 		id: constants.PluginAnonymous,
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/sign-in/anonymous", func(c *auth.Context) {
+				if _, user, err := c.GetSession(); err == nil && auth.UserAdditionalBool(user, constants.FieldIsAnonymous) {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeAnonymousSignInAgain))
+					return
+				}
 				now := time.Now()
 				userID, _ := id.Generate(32)
 				emailID, _ := id.Generate(16)

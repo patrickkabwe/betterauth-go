@@ -16,14 +16,14 @@ type User struct {
 
 // Session matches the Better Auth session model returned to clients.
 type Session struct {
-	ID        string         `json:"id"`
-	Token     string         `json:"token"`
-	UserID    string         `json:"userId"`
-	ExpiresAt time.Time      `json:"expiresAt"`
-	IPAddress string         `json:"ipAddress,omitempty"`
-	UserAgent string         `json:"userAgent,omitempty"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	ID         string         `json:"id"`
+	Token      string         `json:"token"`
+	UserID     string         `json:"userId"`
+	ExpiresAt  time.Time      `json:"expiresAt"`
+	IPAddress  string         `json:"ipAddress,omitempty"`
+	UserAgent  string         `json:"userAgent,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
 	Additional map[string]any `json:"-"`
 }
 
@@ -163,6 +163,7 @@ type AccessTokenResponse struct {
 	AccessToken          string     `json:"accessToken"`
 	AccessTokenExpiresAt *time.Time `json:"accessTokenExpiresAt,omitempty"`
 	IDToken              string     `json:"idToken,omitempty"`
+	Scopes               []string   `json:"scopes,omitempty"`
 }
 
 // RefreshTokenResponse is returned by refresh-token.
@@ -179,8 +180,8 @@ type RefreshTokenResponse struct {
 
 // AccountInfoResponse is returned by account-info.
 type AccountInfoResponse struct {
-	User OAuthUserInfo      `json:"user"`
-	Data map[string]any     `json:"data"`
+	User OAuthUserInfo  `json:"user"`
+	Data map[string]any `json:"data"`
 }
 
 // OAuthUserInfo is the user portion of account-info.

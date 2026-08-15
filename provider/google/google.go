@@ -82,6 +82,9 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
 	}
+	if opts.LoginHint != "" {
+		params.Set("login_hint", opts.LoginHint)
+	}
 	return provider.BuildAuthURL(authEndpoint, params), nil
 }
 

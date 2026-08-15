@@ -19,11 +19,13 @@ type staticOAuthProvider struct {
 	user    provider.OAuthUser
 	tokens  provider.OAuthTokens
 	authURL string
+	opts    provider.AuthorizationURLOpts
 }
 
 func (p *staticOAuthProvider) ID() string { return p.id }
 
 func (p *staticOAuthProvider) CreateAuthorizationURL(_ context.Context, opts provider.AuthorizationURLOpts) (string, error) {
+	p.opts = opts
 	base := p.authURL
 	if base == "" {
 		base = "https://oauth.example.com/authorize"
@@ -80,6 +82,27 @@ func TestSignInSocialRedirect(t *testing.T) {
 	}
 }
 
+func TestSignInSocialPassesLoginHint(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-1", Email: "oauth@example.com", EmailVerified: true, Name: "OAuth"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"loginHint":       "hint@example.com",
+		"disableRedirect": disable,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	if p.opts.LoginHint != "hint@example.com" {
+		t.Fatalf("login hint = %q", p.opts.LoginHint)
+	}
+}
+
 func TestOAuthCallbackCreatesSession(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	p := &staticOAuthProvider{
@@ -126,6 +149,44 @@ func TestOAuthCallbackCreatesSession(t *testing.T) {
 	_ = json.Unmarshal(data, &sess)
 	if sess.User.Email != "oauth-cb-unique@example.com" {
 		t.Fatalf("session=%+v", sess)
+	}
+}
+
+func TestOAuthPostCallbackRedirectsToGet(t *testing.T) {
+	p := &staticOAuthProvider{
+		id: "mock",
+		user: provider.OAuthUser{
+			ID: "mock-user-post", Email: "oauth-post@example.com", EmailVerified: true, Name: "OAuth Post",
+		},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	resp, _ := doFormRequest(a, http.MethodPost, "/callback/mock", url.Values{
+		"code":  {"abc"},
+		"state": {state},
+	}, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Path != "/api/auth/callback/mock" || location.Query().Get("code") != "abc" || location.Query().Get("state") != state {
+		t.Fatalf("location = %s", location.String())
 	}
 }
 

@@ -50,6 +50,12 @@ func handleSignUpEmail(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusUnprocessableEntity, apierror.CodeFailedToCreateUser))
 		return
 	}
+	if shouldSendSignUpVerification(c.Auth.cfg) {
+		if err := sendVerificationEmailToUser(c, user, body.CallbackURL); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+	}
 
 	if !c.Auth.cfg.emailPassword.autoSignIn {
 		c.WriteJSON(http.StatusOK, types.SignUpResponse{Token: nil, User: toUserResponse(user)})
@@ -69,6 +75,16 @@ func handleSignUpEmail(c *Context) {
 	_ = account
 	token := sess.Token
 	c.WriteJSON(http.StatusOK, types.SignUpResponse{Token: &token, User: toUserResponse(user)})
+}
+
+func shouldSendSignUpVerification(cfg resolved) bool {
+	if cfg.emailVerification.sendVerificationEmail == nil {
+		return false
+	}
+	if cfg.emailVerification.sendOnSignUp != nil {
+		return *cfg.emailVerification.sendOnSignUp
+	}
+	return cfg.emailPassword.requireEmailVerification
 }
 
 func handleDuplicateSignUp(c *Context, existing *types.User, password string) {

@@ -113,6 +113,7 @@ type EmailAndPasswordConfig struct {
 // EmailVerificationConfig configures email verification.
 type EmailVerificationConfig struct {
 	SendVerificationEmail func(ctx context.Context, data types.VerificationEmailData) error
+	SendOnSignUp          *bool
 	SendOnSignIn          bool
 	ExpiresIn             time.Duration
 }
@@ -219,6 +220,7 @@ type emailPasswordResolved struct {
 
 type emailVerificationResolved struct {
 	sendVerificationEmail func(ctx context.Context, data types.VerificationEmailData) error
+	sendOnSignUp          *bool
 	sendOnSignIn          bool
 	expiresIn             time.Duration
 }
@@ -456,6 +458,7 @@ func resolveConfig(opts Config) resolved {
 		},
 		emailVerification: emailVerificationResolved{
 			sendVerificationEmail: opts.EmailVerification.SendVerificationEmail,
+			sendOnSignUp:          opts.EmailVerification.SendOnSignUp,
 			sendOnSignIn:          opts.EmailVerification.SendOnSignIn,
 			expiresIn:             verificationExpires,
 		},

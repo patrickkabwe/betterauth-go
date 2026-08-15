@@ -82,14 +82,31 @@ func checkOTPHandler(opts EmailOTPOptions, typ string) func(*auth.Context) {
 		var body struct {
 			Email string `json:"email"`
 			OTP   string `json:"otp"`
+			Type  string `json:"type"`
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		ok := verifyStoredOTP(c, typ, body.Email, body.OTP, false)
+		otpType := typ
+		if body.Type != "" {
+			if !validEmailOTPCheckType(body.Type) {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+				return
+			}
+			otpType = body.Type
+		}
+		ok := verifyStoredOTP(c, otpType, body.Email, body.OTP, false)
 		c.WriteJSON(http.StatusOK, map[string]bool{"success": ok})
 	}
+}
+
+func validEmailOTPCheckType(typ string) bool {
+	switch typ {
+	case constants.EmailOTPTypeVerification, constants.EmailOTPTypeForgetPassword, constants.EmailOTPTypeEmailChange:
+		return true
+	}
+	return false
 }
 
 func verifyStoredOTP(c *auth.Context, typ, email, otp string, consume bool) bool {

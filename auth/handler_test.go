@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -189,6 +190,50 @@ func TestRequireEmailVerification(t *testing.T) {
 	}, nil)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d want 403", resp.StatusCode)
+	}
+}
+
+func TestSignUpEmailAcceptsFormURLEncoded(t *testing.T) {
+	a := newTestAuth()
+	resp, data := doFormRequest(a, http.MethodPost, "/sign-up/email", url.Values{
+		"name":     {"Form User"},
+		"email":    {"form-signup@example.com"},
+		"password": {"password123"},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
+func TestSignInEmailAcceptsFormURLEncoded(t *testing.T) {
+	a := newTestAuth()
+	signUp(t, a, "form-signin@example.com")
+	resp, data := doFormRequest(a, http.MethodPost, "/sign-in/email", url.Values{
+		"email":    {"form-signin@example.com"},
+		"password": {"password123"},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
+func TestSignUpEmailSendsVerificationWhenRequired(t *testing.T) {
+	sent := false
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailAndPassword.RequireEmailVerification = true
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, data types.VerificationEmailData) error {
+			sent = data.User.Email == "verify-signup@example.com" && data.URL != "" && data.Token != ""
+			return nil
+		}
+	})
+	resp, data := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
+		"name": "Verify Signup", "email": "verify-signup@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if !sent {
+		t.Fatal("expected verification email on sign up")
 	}
 }
 

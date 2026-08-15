@@ -36,6 +36,7 @@ type AuthorizationURLOpts struct {
 	CodeVerifier string
 	RedirectURI  string
 	Scopes       []string
+	LoginHint    string
 }
 
 // SocialProvider implements OAuth/social account operations for a single provider.
