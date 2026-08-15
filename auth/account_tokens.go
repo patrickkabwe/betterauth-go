@@ -23,7 +23,7 @@ func (a *Auth) socialProvider(providerID string) (provider.SocialProvider, bool)
 func (a *Auth) resolveAccountUserID(c *Context, userID string) (string, *apierror.Error) {
 	sess, user, err := c.GetSession()
 	if err != nil || user == nil {
-		if c.R != nil && userID == "" {
+		if c.R != nil {
 			return "", apierror.WithCode(http.StatusUnauthorized, apierror.CodeUnauthorized)
 		}
 		if userID == "" {

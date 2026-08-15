@@ -305,6 +305,38 @@ func TestAccountInfoRequiresAccountID(t *testing.T) {
 	}
 }
 
+func TestAccountRoutesRejectUserIDWithoutSession(t *testing.T) {
+	a := testAuthWithGoogle(t)
+	cookies := signUp(t, a, "linker@example.com")
+	resp, data := linkGoogleAccount(t, a, cookies, "at-info", "rt-info")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("link status=%d %s", resp.StatusCode, data)
+	}
+	userID := mustUserID(t, a, cookies)
+	accountID := linkedAccountID(t, a, cookies, "google")
+
+	resp, _ = doRequest(a, http.MethodGet, "/account-info?accountId="+accountID+"&userId="+userID, nil, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("account-info status=%d", resp.StatusCode)
+	}
+
+	resp, _ = doRequest(a, http.MethodPost, "/get-access-token", map[string]any{
+		"providerId": "google",
+		"userId":     userID,
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("get-access-token status=%d", resp.StatusCode)
+	}
+
+	resp, _ = doRequest(a, http.MethodPost, "/refresh-token", map[string]any{
+		"providerId": "google",
+		"userId":     userID,
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("refresh-token status=%d", resp.StatusCode)
+	}
+}
+
 func TestGetAccessTokenAutoRefresh(t *testing.T) {
 	expired := time.Now().Add(-time.Minute)
 	a := testAuthWithGoogle(t)
