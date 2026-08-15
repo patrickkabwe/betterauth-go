@@ -87,7 +87,7 @@ func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo pr
 		if updated := a.applyUserInfoOnLink(c, user.ID, userInfo); updated != nil {
 			user = updated
 		}
-	} else {
+	} else if a.cfg.account.updateAccountOnSignIn {
 		if err := a.updateOAuthAccountTokens(c, linked.ID, account); err != nil {
 			return nil, err
 		}

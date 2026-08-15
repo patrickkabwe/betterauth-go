@@ -90,7 +90,8 @@ type GitHubProviderConfig struct {
 
 // AccountConfig configures account linking and management.
 type AccountConfig struct {
-	AccountLinking AccountLinkingConfig
+	AccountLinking        AccountLinkingConfig
+	UpdateAccountOnSignIn *bool
 }
 
 // AccountLinkingConfig configures social account linking rules.
@@ -257,6 +258,7 @@ type accountResolved struct {
 	allowDifferentEmails      bool
 	allowUnlinkingAll         bool
 	updateUserInfoOnLink      bool
+	updateAccountOnSignIn     bool
 	disableImplicitLinking    bool
 	requireLocalEmailVerified bool
 }
@@ -425,6 +427,10 @@ func resolveConfig(opts Config) resolved {
 	if opts.Account.AccountLinking.RequireLocalEmailVerified != nil {
 		requireLocalEmailVerified = *opts.Account.AccountLinking.RequireLocalEmailVerified
 	}
+	updateAccountOnSignIn := true
+	if opts.Account.UpdateAccountOnSignIn != nil {
+		updateAccountOnSignIn = *opts.Account.UpdateAccountOnSignIn
+	}
 
 	return resolved{
 		appName:               appName,
@@ -493,6 +499,7 @@ func resolveConfig(opts Config) resolved {
 			allowDifferentEmails:      opts.Account.AccountLinking.AllowDifferentEmails,
 			allowUnlinkingAll:         opts.Account.AccountLinking.AllowUnlinkingAll,
 			updateUserInfoOnLink:      opts.Account.AccountLinking.UpdateUserInfoOnLink,
+			updateAccountOnSignIn:     updateAccountOnSignIn,
 			disableImplicitLinking:    opts.Account.AccountLinking.DisableImplicitLinking,
 			requireLocalEmailVerified: requireLocalEmailVerified,
 		},
