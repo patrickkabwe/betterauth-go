@@ -23,8 +23,10 @@ const minimumVerificationEmailDuration = 500 * time.Millisecond
 
 func handleSendVerificationEmail(c *Context) {
 	if c.Auth.cfg.emailVerification.sendVerificationEmail == nil {
-		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeVerificationEmailNotEnabled))
-		return
+		if _, ok := emailVerificationOverridePlugin(c.Auth.cfg.plugins); !ok {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeVerificationEmailNotEnabled))
+			return
+		}
 	}
 
 	var body sendVerificationEmailBody
@@ -74,6 +76,9 @@ func handleSendVerificationEmail(c *Context) {
 }
 
 func sendVerificationEmailToUser(c *Context, user *types.User, callbackURL string) error {
+	if plugin, ok := emailVerificationOverridePlugin(c.Auth.cfg.plugins); ok {
+		return plugin.SendVerificationEmail(c, user)
+	}
 	token, err := createEmailVerificationToken(c, user.Email, nil)
 	if err != nil {
 		return err

@@ -20,18 +20,20 @@ import (
 
 // EmailOTPOptions configures email OTP flows.
 type EmailOTPOptions struct {
-	SendOTP         func(ctx context.Context, email, otp, typ string) error
-	GenerateOTP     EmailOTPGenerateOTP
-	ExpiresIn       time.Duration
-	OTPLength       int
-	DisableSignUp   bool
-	AllowedAttempts int
-	ChangeEmail     EmailOTPChangeEmailOptions
-	ResendStrategy  EmailOTPResendStrategy
-	StoreOTP        EmailOTPStoreOTP
-	HashOTP         EmailOTPHashOTP
-	EncryptOTP      EmailOTPEncryptOTP
-	DecryptOTP      EmailOTPDecryptOTP
+	SendOTP                          func(ctx context.Context, email, otp, typ string) error
+	GenerateOTP                      EmailOTPGenerateOTP
+	ExpiresIn                        time.Duration
+	OTPLength                        int
+	DisableSignUp                    bool
+	AllowedAttempts                  int
+	ChangeEmail                      EmailOTPChangeEmailOptions
+	ResendStrategy                   EmailOTPResendStrategy
+	StoreOTP                         EmailOTPStoreOTP
+	HashOTP                          EmailOTPHashOTP
+	EncryptOTP                       EmailOTPEncryptOTP
+	DecryptOTP                       EmailOTPDecryptOTP
+	SendVerificationOnSignUp         bool
+	OverrideDefaultEmailVerification bool
 }
 
 // EmailOTPGenerateOTP generates an OTP for an email OTP flow.
@@ -91,22 +93,58 @@ func (o EmailOTPOptions) allowedAttempts() int {
 
 // EmailOTP adds email one-time password authentication.
 func EmailOTP(opts EmailOTPOptions) auth.Plugin {
-	return basePlugin{
-		id: constants.PluginEmailOTP,
-		routes: []auth.PluginRoute{
-			rt(http.MethodPost, "/email-otp/send-verification-otp", sendVerificationOTPHandler(opts)),
-			srt(http.MethodPost, "/email-otp/create-verification-otp", createVerificationOTPHandler(opts)),
-			srt(http.MethodGet, "/email-otp/get-verification-otp", getVerificationOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/check-verification-otp", checkOTPHandler(opts, constants.EmailOTPTypeVerification)),
-			rt(http.MethodPost, "/email-otp/verify-email", verifyEmailOTPHandler(opts)),
-			rt(http.MethodPost, "/sign-in/email-otp", signInEmailOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/request-password-reset", requestPasswordResetEmailOTPHandler(opts)),
-			rt(http.MethodPost, "/forget-password/email-otp", requestPasswordResetEmailOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/reset-password", resetPasswordOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/request-email-change", requestEmailChangeOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/change-email", changeEmailOTPHandler(opts)),
+	return emailOTPPlugin{
+		basePlugin: basePlugin{
+			id: constants.PluginEmailOTP,
+			routes: []auth.PluginRoute{
+				rt(http.MethodPost, "/email-otp/send-verification-otp", sendVerificationOTPHandler(opts)),
+				srt(http.MethodPost, "/email-otp/create-verification-otp", createVerificationOTPHandler(opts)),
+				srt(http.MethodGet, "/email-otp/get-verification-otp", getVerificationOTPHandler(opts)),
+				rt(http.MethodPost, "/email-otp/check-verification-otp", checkOTPHandler(opts, constants.EmailOTPTypeVerification)),
+				rt(http.MethodPost, "/email-otp/verify-email", verifyEmailOTPHandler(opts)),
+				rt(http.MethodPost, "/sign-in/email-otp", signInEmailOTPHandler(opts)),
+				rt(http.MethodPost, "/email-otp/request-password-reset", requestPasswordResetEmailOTPHandler(opts)),
+				rt(http.MethodPost, "/forget-password/email-otp", requestPasswordResetEmailOTPHandler(opts)),
+				rt(http.MethodPost, "/email-otp/reset-password", resetPasswordOTPHandler(opts)),
+				rt(http.MethodPost, "/email-otp/request-email-change", requestEmailChangeOTPHandler(opts)),
+				rt(http.MethodPost, "/email-otp/change-email", changeEmailOTPHandler(opts)),
+			},
 		},
+		opts: opts,
 	}
+}
+
+type emailOTPPlugin struct {
+	basePlugin
+	opts EmailOTPOptions
+}
+
+func (p emailOTPPlugin) OverrideEmailVerification() bool {
+	return p.opts.OverrideDefaultEmailVerification
+}
+
+func (p emailOTPPlugin) SendVerificationOnSignUp() bool {
+	return p.opts.SendVerificationOnSignUp && !p.opts.OverrideDefaultEmailVerification
+}
+
+func (p emailOTPPlugin) SendVerificationEmail(c *auth.Context, user *types.User) error {
+	return sendEmailVerificationOTP(c, p.opts, user.Email)
+}
+
+func (p emailOTPPlugin) SendSignUpVerification(c *auth.Context, user *types.User) error {
+	return sendEmailVerificationOTP(c, p.opts, user.Email)
+}
+
+func sendEmailVerificationOTP(c *auth.Context, opts EmailOTPOptions, email string) error {
+	if opts.SendOTP == nil {
+		return errors.New("email otp sender is not configured")
+	}
+	normalizedEmail := auth.NormalizeEmail(email)
+	otp, ok := createEmailOTP(c, opts, normalizedEmail, constants.EmailOTPTypeVerification, otpIdentifier(constants.EmailOTPTypeVerification, normalizedEmail))
+	if !ok {
+		return errors.New("failed to create email verification otp")
+	}
+	return opts.SendOTP(c.R.Context(), normalizedEmail, otp, constants.EmailOTPTypeVerification)
 }
 
 func sendVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {

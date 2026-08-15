@@ -62,6 +62,10 @@ func handleSignUpEmail(c *Context) {
 			return
 		}
 	}
+	if err := runSignUpVerificationPlugins(c, c.Auth.cfg.plugins, user); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	if !c.Auth.cfg.emailPassword.autoSignIn {
 		c.WriteJSON(http.StatusOK, types.SignUpResponse{Token: nil, User: toUserResponse(user)})
@@ -85,7 +89,9 @@ func handleSignUpEmail(c *Context) {
 
 func shouldSendSignUpVerification(cfg resolved) bool {
 	if cfg.emailVerification.sendVerificationEmail == nil {
-		return false
+		if _, ok := emailVerificationOverridePlugin(cfg.plugins); !ok {
+			return false
+		}
 	}
 	if cfg.emailVerification.sendOnSignUp != nil {
 		return *cfg.emailVerification.sendOnSignUp

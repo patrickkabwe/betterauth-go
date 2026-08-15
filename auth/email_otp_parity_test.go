@@ -583,6 +583,143 @@ func TestEmailOTPPluginEncryptedStoreOTPCanReturnReuseAndVerifyCode(t *testing.T
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOnSignUpSendsOTP(t *testing.T) {
+	var sentEmail string
+	var sentOTP string
+	var sentType string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			SendVerificationOnSignUp: true,
+			SendOTP: func(_ context.Context, email string, otp string, typ string) error {
+				sentEmail = email
+				sentOTP = otp
+				sentType = typ
+				return nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
+		"name":     "Sign Up OTP",
+		"email":    "signup-otp@example.com",
+		"password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign up status=%d body=%s", resp.StatusCode, data)
+	}
+	if sentEmail != "signup-otp@example.com" {
+		t.Fatalf("sent email=%q", sentEmail)
+	}
+	if sentType != constants.EmailOTPTypeVerification {
+		t.Fatalf("sent type=%q", sentType)
+	}
+	if sentOTP == "" {
+		t.Fatal("otp was not sent")
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":signup-otp@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != sentOTP+":0" {
+		t.Fatalf("verification value=%q", verification.Value)
+	}
+}
+
+func TestEmailOTPPluginOverrideDefaultEmailVerificationUsesOTP(t *testing.T) {
+	sendOnSignUp := true
+	defaultSenderCalled := false
+	var sentOTP string
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailVerification.SendOnSignUp = &sendOnSignUp
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			defaultSenderCalled = true
+			return nil
+		}
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			OverrideDefaultEmailVerification: true,
+			SendVerificationOnSignUp:         true,
+			SendOTP: func(_ context.Context, _ string, otp string, typ string) error {
+				if typ == constants.EmailOTPTypeVerification {
+					sentOTP = otp
+				}
+				return nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
+		"name":     "Override OTP",
+		"email":    "override-otp@example.com",
+		"password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign up status=%d body=%s", resp.StatusCode, data)
+	}
+	if defaultSenderCalled {
+		t.Fatal("default verification sender should not be called when override is enabled")
+	}
+	if sentOTP == "" {
+		t.Fatal("otp was not sent")
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/email-otp/verify-email", map[string]any{
+		"email": "override-otp@example.com",
+		"otp":   sentOTP,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("verify status=%d body=%s", resp.StatusCode, data)
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "override-otp@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.EmailVerified {
+		t.Fatal("expected email to be verified")
+	}
+}
+
+func TestEmailOTPPluginOverrideDefaultSendVerificationEmailRoute(t *testing.T) {
+	var sentEmail string
+	var sentOTP string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			OverrideDefaultEmailVerification: true,
+			SendOTP: func(_ context.Context, email string, otp string, typ string) error {
+				if typ == constants.EmailOTPTypeVerification {
+					sentEmail = email
+					sentOTP = otp
+				}
+				return nil
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "override-route-user",
+		Name:          "Override Route",
+		Email:         "override-route@example.com",
+		EmailVerified: false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/send-verification-email", map[string]any{
+		"email": "override-route@example.com",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("send status=%d body=%s", resp.StatusCode, data)
+	}
+	if sentEmail != "override-route@example.com" {
+		t.Fatalf("sent email=%q", sentEmail)
+	}
+	if sentOTP == "" {
+		t.Fatal("otp was not sent")
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
 	var sentCodes []string
 	a := newTestAuth(func(c *auth.Config) {

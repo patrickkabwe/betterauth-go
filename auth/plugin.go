@@ -1,6 +1,10 @@
 package auth
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/patrickkabwe/betterauth-go/types"
+)
 
 // Plugin extends Better Auth with routes and lifecycle hooks.
 type Plugin interface {
@@ -13,6 +17,20 @@ type Plugin interface {
 type PasswordValidatorPlugin interface {
 	Plugin
 	ValidatePassword(password string) error
+}
+
+// EmailVerificationSenderPlugin can replace the core verification email sender.
+type EmailVerificationSenderPlugin interface {
+	Plugin
+	OverrideEmailVerification() bool
+	SendVerificationEmail(c *Context, user *types.User) error
+}
+
+// SignUpVerificationPlugin can send additional verification after email sign-up.
+type SignUpVerificationPlugin interface {
+	Plugin
+	SendVerificationOnSignUp() bool
+	SendSignUpVerification(c *Context, user *types.User) error
 }
 
 // PluginRoute is an HTTP route registered by a plugin.
@@ -100,4 +118,27 @@ func runPluginAfterHooks(c *Context, plugins []Plugin) {
 	if c.pendingAuthToken != "" && !c.authTokenExposed {
 		c.ExposeAuthToken(c.pendingAuthToken)
 	}
+}
+
+func emailVerificationOverridePlugin(plugins []Plugin) (EmailVerificationSenderPlugin, bool) {
+	for _, plugin := range plugins {
+		sender, ok := plugin.(EmailVerificationSenderPlugin)
+		if ok && sender.OverrideEmailVerification() {
+			return sender, true
+		}
+	}
+	return nil, false
+}
+
+func runSignUpVerificationPlugins(c *Context, plugins []Plugin, user *types.User) error {
+	for _, plugin := range plugins {
+		sender, ok := plugin.(SignUpVerificationPlugin)
+		if !ok || !sender.SendVerificationOnSignUp() {
+			continue
+		}
+		if err := sender.SendSignUpVerification(c, user); err != nil {
+			return err
+		}
+	}
+	return nil
 }
