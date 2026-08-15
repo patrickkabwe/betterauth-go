@@ -174,6 +174,61 @@ func TestUsernameSignInCallbackURL(t *testing.T) {
 	}
 }
 
+func TestUsernameAvailabilityUsesCustomValidatorAndNormalization(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
+		UsernameValidator: func(_ context.Context, username string) (bool, error) {
+			return !strings.Contains(username, " "), nil
+		},
+		UsernameNormalization: func(username string) string {
+			return strings.ReplaceAll(username, "-", "_")
+		},
+	}))
+	createUsernameCredentialUser(t, a, "username-normalized-available-user", "username-normalized-available@example.com", "dash_user", "password123", true)
+
+	w := post(t, a, "/is-username-available", `{"username":"dash-user"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Available bool `json:"available"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Available {
+		t.Fatal("expected normalized username to be unavailable")
+	}
+}
+
+func TestUsernameSignInUsesCustomNormalization(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
+		UsernameNormalization: func(username string) string {
+			return strings.ReplaceAll(username, "-", "_")
+		},
+	}))
+	createUsernameCredentialUser(t, a, "username-normalized-signin-user", "username-normalized-signin@example.com", "dash_user", "password123", true)
+
+	w := post(t, a, "/sign-in/username", `{"username":"dash-user","password":"password123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsernameSignInPostNormalizationValidatesRawUsername(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{
+		UsernameNormalization: func(username string) string {
+			return strings.ReplaceAll(username, "-", "_")
+		},
+		UsernameValidationOrder: plugins.UsernameValidationPostNormalization,
+	}))
+	createUsernameCredentialUser(t, a, "username-post-validation-user", "username-post-validation@example.com", "dash_user", "password123", true)
+
+	w := post(t, a, "/sign-in/username", `{"username":"dash-user","password":"password123"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPhoneNumberSendOTPRequiresSender(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
