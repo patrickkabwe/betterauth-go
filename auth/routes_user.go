@@ -251,13 +251,23 @@ func handleSetPassword(c *Context) {
 	}
 	now := time.Now()
 	if err == nil && account != nil {
-		_ = c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), user.ID, constants.ProviderCredential, hash)
+		if err := c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), user.ID, constants.ProviderCredential, hash); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	} else {
-		accID, _ := id.Generate(32)
-		_ = c.Auth.cfg.store.CreateAccount(c.R.Context(), &types.Account{
+		accID, err := id.Generate(32)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		if err := c.Auth.cfg.store.CreateAccount(c.R.Context(), &types.Account{
 			ID: accID, AccountID: user.ID, ProviderID: constants.ProviderCredential,
 			UserID: user.ID, Password: hash, CreatedAt: now, UpdatedAt: now,
-		})
+		}); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }

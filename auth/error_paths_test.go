@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
+	"github.com/patrickkabwe/betterauth-go/constants"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/jwt"
 	"github.com/patrickkabwe/betterauth-go/store/memory"
@@ -84,6 +85,41 @@ func TestChangePasswordRevokeSessionsFails(t *testing.T) {
 func TestSetPasswordHashFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Hasher = errorHasher{} })
 	cookies := oauthOnlySession(t, a)
+	resp, _ := doRequest(a, http.MethodPost, "/set-password", map[string]any{
+		"newPassword": "newpass123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSetPasswordCreateAccountFails(t *testing.T) {
+	fs := wrapStore("CreateAccount").(*failStore)
+	a := newTestAuth(func(c *auth.Config) { c.Store = fs })
+	cookies := oauthOnlyCookies(t, fs, "oauth-create-fail", "oauth-create-fail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/set-password", map[string]any{
+		"newPassword": "newpass123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSetPasswordUpdateAccountFails(t *testing.T) {
+	fs := wrapStore("UpdateAccountPassword").(*failStore)
+	a := newTestAuth(func(c *auth.Config) { c.Store = fs })
+	cookies := oauthOnlyCookies(t, fs, "oauth-update-fail", "oauth-update-fail@example.com")
+	now := time.Now()
+	if err := fs.inner.CreateAccount(context.Background(), &types.Account{
+		ID:         "credential-without-password",
+		AccountID:  "oauth-update-fail",
+		ProviderID: constants.ProviderCredential,
+		UserID:     "oauth-update-fail",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatalf("create account: %v", err)
+	}
 	resp, _ := doRequest(a, http.MethodPost, "/set-password", map[string]any{
 		"newPassword": "newpass123",
 	}, cookies)
@@ -382,4 +418,29 @@ func TestDontRememberSessionCreation(t *testing.T) {
 	if !found {
 		t.Fatal("expected dont_remember on sign-up")
 	}
+}
+
+func oauthOnlyCookies(t testingT, fs *failStore, userID string, email string) []*http.Cookie {
+	t.Helper()
+	now := time.Now()
+	if err := fs.inner.CreateUser(context.Background(), &types.User{
+		ID: userID, Name: "OAuth User", Email: email,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := fs.inner.CreateAccount(context.Background(), &types.Account{
+		ID: "github-" + userID, AccountID: "github-" + userID, ProviderID: "github",
+		UserID: userID, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	token := "session-" + userID
+	if err := fs.inner.CreateSession(context.Background(), &types.Session{
+		ID: "session-" + userID, Token: token, UserID: userID,
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return []*http.Cookie{sessionCookie(token)}
 }
