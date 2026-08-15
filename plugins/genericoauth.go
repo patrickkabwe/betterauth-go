@@ -26,6 +26,16 @@ import (
 // GenericOAuthGetUserInfo fetches user info from custom provider token data.
 type GenericOAuthGetUserInfo func(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error)
 
+// GenericOAuthGetToken exchanges an authorization code for provider tokens.
+type GenericOAuthGetToken func(ctx context.Context, params GenericOAuthGetTokenParams) (*provider.OAuthTokens, error)
+
+// GenericOAuthGetTokenParams contains the authorization-code exchange inputs.
+type GenericOAuthGetTokenParams struct {
+	Code         string
+	RedirectURI  string
+	CodeVerifier string
+}
+
 // GenericOAuthMapProfileToUser maps a provider profile into Better Auth user fields.
 type GenericOAuthMapProfileToUser func(ctx context.Context, profile map[string]any) (provider.OAuthUserMapping, error)
 
@@ -53,6 +63,7 @@ type GenericOAuthProviderConfig struct {
 	AuthorizationURLParams  map[string]string
 	TokenURLParams          map[string]string
 	Authentication          provider.OAuthClientAuthentication
+	GetToken                GenericOAuthGetToken
 	GetUserInfo             GenericOAuthGetUserInfo
 	MapProfileToUser        GenericOAuthMapProfileToUser
 }
@@ -372,6 +383,21 @@ func createGenericOAuthState(c *auth.Context, input genericOAuthStateInput) (str
 }
 
 func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProviderConfig, code string, codeVerifier string) (*provider.OAuthTokens, error) {
+	redirectURI := genericOAuthRedirectURI(c, p)
+	if p.GetToken != nil {
+		tokens, err := p.GetToken(c.R.Context(), GenericOAuthGetTokenParams{
+			Code:         code,
+			RedirectURI:  redirectURI,
+			CodeVerifier: codeVerifier,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if tokens == nil {
+			return nil, errors.New("tokens are missing")
+		}
+		return genericOAuthApplyAccessTokenExpiresIn(p, tokens), nil
+	}
 	tokenURL, err := genericOAuthTokenEndpoint(c, p)
 	if err != nil {
 		return nil, err
@@ -381,7 +407,7 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 		ClientID:       p.ClientID,
 		ClientSecret:   p.ClientSecret,
 		Code:           code,
-		RedirectURI:    genericOAuthRedirectURI(c, p),
+		RedirectURI:    redirectURI,
 		CodeVerifier:   codeVerifier,
 		Authentication: p.Authentication,
 		Headers:        p.AuthorizationHeaders,
@@ -392,11 +418,15 @@ func genericOAuthExchangeAuthorizationCode(c *auth.Context, p GenericOAuthProvid
 		return nil, err
 	}
 	tokens := provider.TokensFromMap(data)
+	return genericOAuthApplyAccessTokenExpiresIn(p, tokens), nil
+}
+
+func genericOAuthApplyAccessTokenExpiresIn(p GenericOAuthProviderConfig, tokens *provider.OAuthTokens) *provider.OAuthTokens {
 	if tokens.AccessTokenExpiresAt == nil && p.AccessTokenExpiresIn > 0 {
 		expiresAt := time.Now().Add(time.Duration(p.AccessTokenExpiresIn) * time.Second)
 		tokens.AccessTokenExpiresAt = &expiresAt
 	}
-	return tokens, nil
+	return tokens
 }
 
 func genericOAuthTokenEndpoint(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {

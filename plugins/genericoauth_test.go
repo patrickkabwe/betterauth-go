@@ -663,6 +663,101 @@ func TestGenericOAuthCallbackUsesCustomGetUserInfo(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthCallbackUsesCustomGetToken(t *testing.T) {
+	tokenEndpointHit := false
+	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			tokenEndpointHit = true
+			http.Error(w, "unexpected token endpoint", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer oauthServer.Close()
+
+	var receivedParams plugins.GenericOAuthGetTokenParams
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:           "oidc",
+				ClientID:             "client",
+				ClientSecret:         "secret",
+				AuthorizationURL:     "https://idp.example.com/oauth/authorize",
+				TokenURL:             oauthServer.URL + "/token",
+				UserInfoURL:          "https://idp.example.com/oauth/userinfo",
+				PKCE:                 true,
+				AccessTokenExpiresIn: 3600,
+				GetToken: func(_ context.Context, params plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+					receivedParams = params
+					return &provider.OAuthTokens{
+						AccessToken:  "custom-access-token",
+						RefreshToken: "custom-refresh-token",
+					}, nil
+				},
+				GetUserInfo: func(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+					if tokens.AccessToken != "custom-access-token" {
+						t.Fatalf("tokens=%+v", tokens)
+					}
+					return &provider.UserInfo{
+						User: provider.OAuthUser{
+							ID:            "custom-token-account",
+							Name:          "Custom Token User",
+							Email:         "custom-token@example.com",
+							EmailVerified: true,
+						},
+					}, nil
+				},
+			},
+		},
+	}))
+
+	beforeCallback := time.Now()
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	state := query.Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if tokenEndpointHit {
+		t.Fatal("standard token endpoint should not be called")
+	}
+	if receivedParams.Code != "code" || receivedParams.RedirectURI != "http://localhost:8080/api/auth/oauth2/callback/oidc" || receivedParams.CodeVerifier == "" {
+		t.Fatalf("params=%+v", receivedParams)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "custom-token-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.AccessToken != "custom-access-token" || account.RefreshToken != "custom-refresh-token" {
+		t.Fatalf("account=%+v", account)
+	}
+	if account.AccessTokenExpiresAt == nil {
+		t.Fatalf("access token expiry missing: %+v", account)
+	}
+	if account.AccessTokenExpiresAt.Before(beforeCallback.Add(3590*time.Second)) || account.AccessTokenExpiresAt.After(beforeCallback.Add(3610*time.Second)) {
+		t.Fatalf("access token expiry=%s", account.AccessTokenExpiresAt.Format(time.RFC3339))
+	}
+}
+
 func TestGenericOAuthCallbackMapsProfileToUser(t *testing.T) {
 	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
