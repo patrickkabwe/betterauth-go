@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,9 @@ import (
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
+
+// GenericOAuthGetUserInfo fetches user info from custom provider token data.
+type GenericOAuthGetUserInfo func(ctx context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error)
 
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
 type GenericOAuthProviderConfig struct {
@@ -46,6 +50,7 @@ type GenericOAuthProviderConfig struct {
 	AuthorizationURLParams  map[string]string
 	TokenURLParams          map[string]string
 	Authentication          provider.OAuthClientAuthentication
+	GetUserInfo             GenericOAuthGetUserInfo
 }
 
 // GenericOAuthOptions configures the generic OAuth plugin.
@@ -428,6 +433,16 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 	if tokens == nil || tokens.AccessToken == "" {
 		return provider.OAuthUser{}, errors.New("access token missing")
 	}
+	if p.GetUserInfo != nil {
+		info, err := p.GetUserInfo(c.R.Context(), *tokens)
+		if err != nil {
+			return provider.OAuthUser{}, err
+		}
+		if info == nil {
+			return provider.OAuthUser{}, errors.New("user info is missing")
+		}
+		return normalizeGenericOAuthUser(info.User)
+	}
 	userInfoURL, err := genericOAuthUserInfoEndpoint(c, p)
 	if err != nil {
 		return provider.OAuthUser{}, err
@@ -459,26 +474,30 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 
 func genericOAuthUserFromMap(data map[string]any) (provider.OAuthUser, error) {
 	accountID := firstGenericOAuthString(data, "id", "sub")
-	if accountID == "" {
-		return provider.OAuthUser{}, errors.New("id is missing")
-	}
 	name := firstGenericOAuthString(data, "name")
-	if name == "" {
-		return provider.OAuthUser{}, errors.New("name is missing")
-	}
-	email := auth.NormalizeEmail(firstGenericOAuthString(data, "email"))
-	if email == "" {
-		return provider.OAuthUser{}, errors.New("email is missing")
-	}
 	imageValue := firstGenericOAuthString(data, "image", "picture", "avatar_url")
 	var image *string
 	if imageValue != "" {
 		image = &imageValue
 	}
 	emailVerified, _ := data["email_verified"].(bool)
-	return provider.OAuthUser{
-		ID: accountID, Name: name, Email: email, Image: image, EmailVerified: emailVerified,
-	}, nil
+	return normalizeGenericOAuthUser(provider.OAuthUser{
+		ID: accountID, Name: name, Email: firstGenericOAuthString(data, "email"), Image: image, EmailVerified: emailVerified,
+	})
+}
+
+func normalizeGenericOAuthUser(user provider.OAuthUser) (provider.OAuthUser, error) {
+	if user.ID == "" {
+		return provider.OAuthUser{}, errors.New("id is missing")
+	}
+	if user.Name == "" {
+		return provider.OAuthUser{}, errors.New("name is missing")
+	}
+	user.Email = auth.NormalizeEmail(user.Email)
+	if user.Email == "" {
+		return provider.OAuthUser{}, errors.New("email is missing")
+	}
+	return user, nil
 }
 
 func firstGenericOAuthString(data map[string]any, keys ...string) string {
