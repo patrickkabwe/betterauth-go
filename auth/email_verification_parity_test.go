@@ -43,6 +43,25 @@ func TestSendVerificationEmailDoesNotSendToVerifiedUserWithoutSession(t *testing
 	}
 }
 
+func TestSendVerificationEmailWithoutSessionUsesMinimumDuration(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return nil
+		}
+	})
+	started := time.Now()
+	resp, data := doRequest(a, http.MethodPost, "/send-verification-email", map[string]any{
+		"email": "missing-minimum-duration@example.com",
+	}, nil)
+	elapsed := time.Since(started)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if elapsed < 450*time.Millisecond {
+		t.Fatalf("elapsed=%s", elapsed)
+	}
+}
+
 func TestSendVerificationEmailRejectsSessionEmailMismatch(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {

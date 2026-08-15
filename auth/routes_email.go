@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/jwt"
@@ -16,6 +17,8 @@ type sendVerificationEmailBody struct {
 	Email       string `json:"email"`
 	CallbackURL string `json:"callbackURL"`
 }
+
+const minimumVerificationEmailDuration = 500 * time.Millisecond
 
 func handleSendVerificationEmail(c *Context) {
 	if c.Auth.cfg.emailVerification.sendVerificationEmail == nil {
@@ -47,14 +50,18 @@ func handleSendVerificationEmail(c *Context) {
 		return
 	}
 
+	started := time.Now()
+	var sendErr error
 	user, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
 	if err != nil || user.EmailVerified {
 		_, _ = createEmailVerificationToken(c, email, nil)
-		c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
-		return
+	} else {
+		sendErr = sendVerificationEmailToUser(c, user, body.CallbackURL)
 	}
-
-	if err := sendVerificationEmailToUser(c, user, body.CallbackURL); err != nil {
+	if remaining := minimumVerificationEmailDuration - time.Since(started); remaining > 0 {
+		time.Sleep(remaining)
+	}
+	if sendErr != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return
 	}
