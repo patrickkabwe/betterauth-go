@@ -59,6 +59,28 @@ func TestChangePasswordHashFails(t *testing.T) {
 	}
 }
 
+func TestChangePasswordUpdatePasswordFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("UpdateAccountPassword") })
+	cookies := signUp(t, a, "uppassfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/change-password", map[string]any{
+		"currentPassword": "password123", "newPassword": "newpass123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestChangePasswordRevokeSessionsFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteAllSessionsByUserID") })
+	cookies := signUp(t, a, "changerevokefail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/change-password", map[string]any{
+		"currentPassword": "password123", "newPassword": "newpass123", "revokeOtherSessions": true,
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSetPasswordHashFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Hasher = errorHasher{} })
 	cookies := oauthOnlySession(t, a)

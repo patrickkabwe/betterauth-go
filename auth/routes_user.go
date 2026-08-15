@@ -98,11 +98,17 @@ func handleChangePassword(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return
 	}
-	_ = c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), user.ID, constants.ProviderCredential, hash)
+	if err := c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), user.ID, constants.ProviderCredential, hash); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	var newToken *string
 	if body.RevokeOtherSessions != nil && *body.RevokeOtherSessions {
-		_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID)
+		if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		newSess, err := c.Auth.createSession(c, user.ID, !cookie.IsDontRememberAny(c.R, c.Auth.cfg.cookie, c.Auth.cfg.secrets))
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeFailedToCreateSession))

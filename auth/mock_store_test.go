@@ -57,6 +57,9 @@ func (f *failStore) UpdateAccount(ctx context.Context, id string, update store.A
 }
 
 func (f *failStore) UpdateAccountPassword(ctx context.Context, userID, providerID, password string) error {
+	if f.failOn == "UpdateAccountPassword" {
+		return berrors.ErrInjected
+	}
 	return f.inner.UpdateAccountPassword(ctx, userID, providerID, password)
 }
 
