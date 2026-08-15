@@ -27,6 +27,7 @@ type PhoneNumberOptions struct {
 	SignUpOnVerification   *PhoneNumberSignUpOnVerificationOptions
 	ExpiresIn              time.Duration
 	AllowedAttempts        int
+	RequireVerification    bool
 }
 
 // PhoneNumberSignUpOnVerificationOptions configures user creation on phone verification.
@@ -42,6 +43,7 @@ const (
 	codeOTPExpired         = "OTP_EXPIRED"
 	codeTooManyAttempts    = "TOO_MANY_ATTEMPTS"
 	codeInvalidPhoneNumber = "INVALID_PHONE_NUMBER"
+	codePhoneNotVerified   = "PHONE_NUMBER_NOT_VERIFIED"
 )
 
 // PhoneNumber adds phone number OTP authentication.
@@ -189,6 +191,25 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
 				if err != nil {
 					c.WriteError(apierror.New(http.StatusUnauthorized, "INVALID_PHONE_NUMBER_OR_PASSWORD", "Invalid phone number or password"))
+					return
+				}
+				if opts.RequireVerification && !auth.UserAdditionalBool(user, constants.FieldPhoneVerified) {
+					if opts.SendOTP != nil {
+						otp, err := numericOTP(6)
+						if err != nil {
+							c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+							return
+						}
+						if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp, expires); err != nil {
+							c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+							return
+						}
+						if err := opts.SendOTP(c.R.Context(), body.PhoneNumber, otp); err != nil {
+							c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+							return
+						}
+					}
+					c.WriteError(apierror.New(http.StatusUnauthorized, codePhoneNotVerified, "Phone number not verified"))
 					return
 				}
 				account, err := c.Auth.Store().FindAccountByUserAndProvider(c.R.Context(), user.ID, constants.ProviderCredential)

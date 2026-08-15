@@ -582,6 +582,54 @@ func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberSignInRequiresPhoneVerification(t *testing.T) {
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		RequireVerification: true,
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
+		},
+	}))
+	createPhoneCredentialUserWithVerification(t, a, "phone-unverified-user", "+1234567890", "password123", false)
+
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "PHONE_NUMBER_NOT_VERIFIED" {
+		t.Fatalf("code %q", resp.Code)
+	}
+	if len(sentCode) != 6 || !isDigitString(sentCode) {
+		t.Fatalf("sent code should be numeric: %q", sentCode)
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationPhoneOTP+"+1234567890")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != sentCode {
+		t.Fatalf("stored code %q sent %q", verification.Value, sentCode)
+	}
+}
+
+func TestPhoneNumberSignInAllowsVerifiedPhoneWhenRequired(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		RequireVerification: true,
+	}))
+	createPhoneCredentialUser(t, a, "phone-verified-user", "+1234567890", "password123")
+
+	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","password":"password123"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPhoneNumberSignInRejectsOTPShape(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	w := post(t, a, "/sign-in/phone-number", `{"phoneNumber":"+1234567890","otp":"123456"}`)
@@ -687,6 +735,10 @@ func TestAllPluginsCount(t *testing.T) {
 }
 
 func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string) {
+	createPhoneCredentialUserWithVerification(t, a, userID, phoneNumber, password, true)
+}
+
+func createPhoneCredentialUserWithVerification(t *testing.T, a *auth.Auth, userID string, phoneNumber string, password string, verified bool) {
 	t.Helper()
 	now := time.Now()
 	err := a.Store().CreateUser(context.Background(), &types.User{
@@ -694,7 +746,7 @@ func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneN
 		EmailVerified: true, CreatedAt: now, UpdatedAt: now,
 		Additional: map[string]any{
 			constants.FieldPhoneNumber:   phoneNumber,
-			constants.FieldPhoneVerified: true,
+			constants.FieldPhoneVerified: verified,
 		},
 	})
 	if err != nil {
