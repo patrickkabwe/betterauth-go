@@ -22,7 +22,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Core email/password auth | 9 | 0 | 0 |
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
-| Social / OAuth | 7 | 0 | 34 |
+| Social / OAuth | 8 | 0 | 34 |
 | Plugins (core package) | 24 | 0 | 1 |
 | Extended packages | 1 | 0 | 9 |
 | Infrastructure | 23 | 2 | 5 |
@@ -130,7 +130,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | OAuth state (verification store) | — | ✅ |
 | OAuth proxy (dev) | Plugin: `oauth-proxy` | ✅ |
 | Generic OAuth | Plugin: `generic-oauth` | ✅ |
-| Sign in with ID token | — | ⬜ | Apple / Google native (linking via `link-social` exists) |
+| Sign in with ID token | `POST /sign-in/social` | ✅ | Native provider `idToken` branch |
 
 ### Built-in providers (35)
 

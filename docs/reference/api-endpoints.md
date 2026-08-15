@@ -41,7 +41,7 @@ included when the plugin is enabled.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/sign-in/social` | — | Start OAuth flow |
+| POST | `/sign-in/social` | — | Start OAuth flow or native ID-token sign-in |
 | GET | `/callback/{provider}` | — | OAuth callback |
 | POST | `/link-social` | ✅ | Link provider |
 | POST | `/unlink-account` | ✅ | Unlink provider |

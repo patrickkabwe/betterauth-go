@@ -55,6 +55,19 @@ curl -X POST http://localhost:8080/api/auth/sign-in/social \
 The response includes a redirect URL. After the user completes OAuth, the
 provider redirects to `GET /callback/{provider}` on your server.
 
+Native clients can also sign in with a provider ID token when the provider
+supports token verification:
+
+```bash
+curl -X POST http://localhost:8080/api/auth/sign-in/social \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: http://localhost:3000' \
+  -d '{"provider":"google","idToken":{"token":"<id-token>","accessToken":"<access-token>"}}'
+```
+
+This returns `{ "redirect": false, "token": "...", "user": ... }` and sets the
+session cookie, matching the TypeScript server's native ID-token branch.
+
 ## Account linking
 
 Link additional providers to an existing account:
