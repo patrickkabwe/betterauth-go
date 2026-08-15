@@ -8,6 +8,7 @@ import (
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
+	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/store/memory"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -170,11 +171,38 @@ func TestDuplicateSignUpWithRequireVerification(t *testing.T) {
 		c.EmailAndPassword.RequireEmailVerification = true
 	})
 	signUp(t, a, "dupver@example.com")
-	resp, _ := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
-		"name": "Dup", "email": "dupver@example.com", "password": "password123",
+	existing, err := a.Store().FindUserByEmail(context.Background(), "dupver@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedImage := "https://example.com/stored.png"
+	storedImagePtr := &storedImage
+	storedName := "Stored Name"
+	verified := true
+	if _, err := a.Store().UpdateUser(context.Background(), existing.ID, store.UserUpdate{
+		Name:          &storedName,
+		Image:         &storedImagePtr,
+		EmailVerified: &verified,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requestImage := "https://example.com/request.png"
+	resp, data := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
+		"name": "Requested Name", "email": "DupVer@Example.com", "password": "password123", "image": requestImage,
 	}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatal("enumeration response expected")
+	}
+	var result types.SignUpResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.User.Name != "Requested Name" || result.User.Email != "dupver@example.com" || result.User.EmailVerified {
+		t.Fatalf("user=%+v", result.User)
+	}
+	if result.User.Image == nil || *result.User.Image != requestImage {
+		t.Fatalf("image=%v", result.User.Image)
 	}
 }
 

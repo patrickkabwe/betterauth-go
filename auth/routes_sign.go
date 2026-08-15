@@ -41,9 +41,9 @@ func handleSignUpEmail(c *Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(body.Email))
-	existing, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
+	_, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
 	if err == nil {
-		handleDuplicateSignUp(c, existing, body.Password)
+		handleDuplicateSignUp(c, body, email)
 		return
 	}
 	if !errors.Is(err, berrors.ErrNotFound) {
@@ -93,9 +93,9 @@ func shouldSendSignUpVerification(cfg resolved) bool {
 	return cfg.emailPassword.requireEmailVerification
 }
 
-func handleDuplicateSignUp(c *Context, existing *types.User, password string) {
+func handleDuplicateSignUp(c *Context, body signUpBody, email string) {
 	if c.Auth.cfg.emailPassword.requireEmailVerification || !c.Auth.cfg.emailPassword.autoSignIn {
-		if _, err := c.Auth.cfg.hasher.Hash(password); err != nil {
+		if _, err := c.Auth.cfg.hasher.Hash(body.Password); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 			return
 		}
@@ -109,10 +109,10 @@ func handleDuplicateSignUp(c *Context, existing *types.User, password string) {
 			Token: nil,
 			User: types.User{
 				ID:            syntheticID,
-				Name:          existing.Name,
-				Email:         existing.Email,
-				EmailVerified: existing.EmailVerified,
-				Image:         existing.Image,
+				Name:          body.Name,
+				Email:         email,
+				EmailVerified: false,
+				Image:         body.Image,
 				CreatedAt:     now,
 				UpdatedAt:     now,
 			},
