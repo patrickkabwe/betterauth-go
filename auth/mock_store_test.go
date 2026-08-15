@@ -42,6 +42,9 @@ func (f *failStore) FindUserByID(ctx context.Context, id string) (*types.User, e
 }
 
 func (f *failStore) DeleteUser(ctx context.Context, id string) error {
+	if f.failOn == "DeleteUser" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteUser(ctx, id)
 }
 
@@ -132,6 +135,9 @@ func (f *failStore) DeleteAllSessionsByUserID(ctx context.Context, userID string
 }
 
 func (f *failStore) CreateVerification(ctx context.Context, v *types.Verification) error {
+	if f.failOn == "CreateVerification" {
+		return berrors.ErrInjected
+	}
 	return f.inner.CreateVerification(ctx, v)
 }
 
@@ -140,6 +146,9 @@ func (f *failStore) FindVerificationByIdentifier(ctx context.Context, identifier
 }
 
 func (f *failStore) DeleteVerificationByIdentifier(ctx context.Context, identifier string) error {
+	if f.failOn == "DeleteVerificationByIdentifier" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteVerificationByIdentifier(ctx, identifier)
 }
 

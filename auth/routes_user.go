@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	constants "github.com/patrickkabwe/betterauth-go/constants"
+	"errors"
+	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -272,6 +274,8 @@ func handleSetPassword(c *Context) {
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
 
+var errInvalidDeleteToken = errors.New("invalid delete token")
+
 type deleteUserBody struct {
 	Password    string `json:"password"`
 	Token       string `json:"token"`
@@ -305,7 +309,7 @@ func handleDeleteUser(c *Context) {
 		}
 	case body.Token != "":
 		if err := c.Auth.completeDeleteWithToken(c, body.Token, user.ID); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidToken))
+			writeDeleteTokenError(c, err)
 			return
 		}
 		cookieDelete(c)
@@ -318,19 +322,29 @@ func handleDeleteUser(c *Context) {
 			return
 		}
 		now := time.Now()
-		vID, _ := id.Generate(32)
+		vID, err := id.Generate(32)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		identifier := "delete-account:" + token
-		_ = c.Auth.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
+		if err := c.Auth.cfg.store.CreateVerification(c.R.Context(), &types.Verification{
 			ID: vID, Identifier: identifier, Value: user.ID,
 			ExpiresAt: now.Add(c.Auth.cfg.user.deleteTokenExpires),
 			CreatedAt: now, UpdatedAt: now,
-		})
+		}); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		callback := body.CallbackURL
 		if callback == "" {
 			callback = "/"
 		}
 		deleteURL := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/delete-user/callback?token=" + url.QueryEscape(token) + "&callbackURL=" + url.QueryEscape(callback)
-		_ = c.Auth.cfg.user.sendDeleteAccount(c.R.Context(), *user, deleteURL, token)
+		if err := c.Auth.cfg.user.sendDeleteAccount(c.R.Context(), *user, deleteURL, token); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		c.WriteJSON(http.StatusOK, types.DeleteUserResponse{Success: true, Message: "Verification email sent"})
 		return
 	default:
@@ -344,10 +358,19 @@ func handleDeleteUser(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return
 	}
-	_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID)
-	_ = c.Auth.cfg.store.DeleteUser(c.R.Context(), user.ID)
+	if err := c.Auth.cfg.store.DeleteUser(c.R.Context(), user.ID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
+	if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	cookieDelete(c)
-	_ = c.Auth.runAfterDelete(c, user)
+	if err := c.Auth.runAfterDelete(c, user); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	c.WriteJSON(http.StatusOK, types.DeleteUserResponse{Success: true, Message: "User deleted"})
 }
 
@@ -391,11 +414,23 @@ func handleDeleteUserCallback(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return
 	}
-	_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID)
-	_ = c.Auth.cfg.store.DeleteUser(c.R.Context(), user.ID)
-	_ = c.Auth.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier)
+	if err := c.Auth.cfg.store.DeleteUser(c.R.Context(), user.ID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
+	if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), user.ID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
+	if err := c.Auth.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	cookieDelete(c)
-	_ = c.Auth.runAfterDelete(c, user)
+	if err := c.Auth.runAfterDelete(c, user); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	if callbackURL != "" {
 		c.Redirect(callbackURL)
@@ -407,8 +442,14 @@ func handleDeleteUserCallback(c *Context) {
 func (a *Auth) completeDeleteWithToken(c *Context, token, userID string) error {
 	identifier := "delete-account:" + token
 	v, err := a.cfg.store.FindVerificationByIdentifier(c.R.Context(), identifier)
-	if err != nil || time.Now().After(v.ExpiresAt) || v.Value != userID {
+	if err != nil {
+		if errors.Is(err, berrors.ErrNotFound) {
+			return errInvalidDeleteToken
+		}
 		return err
+	}
+	if time.Now().After(v.ExpiresAt) || v.Value != userID {
+		return errInvalidDeleteToken
 	}
 	user, err := a.cfg.store.FindUserByID(c.R.Context(), userID)
 	if err != nil {
@@ -417,11 +458,27 @@ func (a *Auth) completeDeleteWithToken(c *Context, token, userID string) error {
 	if err := a.runBeforeDelete(c, user); err != nil {
 		return err
 	}
-	_ = a.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), userID)
-	_ = a.cfg.store.DeleteUser(c.R.Context(), userID)
-	_ = a.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier)
-	_ = a.runAfterDelete(c, user)
+	if err := a.cfg.store.DeleteUser(c.R.Context(), userID); err != nil {
+		return err
+	}
+	if err := a.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), userID); err != nil {
+		return err
+	}
+	if err := a.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+		return err
+	}
+	if err := a.runAfterDelete(c, user); err != nil {
+		return err
+	}
 	return nil
+}
+
+func writeDeleteTokenError(c *Context, err error) {
+	if errors.Is(err, errInvalidDeleteToken) {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidToken))
+		return
+	}
+	c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 }
 
 func (a *Auth) runBeforeDelete(c *Context, user *types.User) error {

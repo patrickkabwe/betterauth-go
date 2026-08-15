@@ -379,6 +379,110 @@ func TestDeleteUserWrongPassword(t *testing.T) {
 	}
 }
 
+func TestDeleteUserDeleteUserFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteUser") })
+	cookies := signUp(t, a, "deluserfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/delete-user", map[string]any{
+		"password": "password123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserDeleteSessionsFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteAllSessionsByUserID") })
+	cookies := signUp(t, a, "delsessionsfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/delete-user", map[string]any{
+		"password": "password123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserAfterDeleteFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.User.DeleteUser.AfterDelete = func(_ context.Context, _ types.User) error {
+			return berrors.ErrInjected
+		}
+	})
+	cookies := signUp(t, a, "afterdeletefail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/delete-user", map[string]any{
+		"password": "password123",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserVerificationCreateFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("CreateVerification")
+		c.User.DeleteUser.SendDeleteAccountURL = func(_ context.Context, _ types.User, _, _ string) error {
+			return nil
+		}
+	})
+	cookies := signUp(t, a, "delcreateverificationfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/delete-user", map[string]any{}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserVerificationSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.User.DeleteUser.SendDeleteAccountURL = func(_ context.Context, _ types.User, _, _ string) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	cookies := signUp(t, a, "delsendfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/delete-user", map[string]any{}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserTokenDeleteUserFails(t *testing.T) {
+	fs := wrapStore("DeleteUser").(*failStore)
+	a := newTestAuth(func(c *auth.Config) { c.Store = fs })
+	cookies := signUp(t, a, "deltokdeletefail@example.com")
+	resp, data := doRequest(a, http.MethodGet, "/get-session", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d", resp.StatusCode)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	token := createDeleteVerificationForStore(t, fs, "delete-user-fails", sess.User.ID)
+	resp, _ = doRequest(a, http.MethodPost, "/delete-user", map[string]any{
+		"token": token,
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDeleteUserCallbackVerificationDeleteFails(t *testing.T) {
+	fs := wrapStore("DeleteVerificationByIdentifier").(*failStore)
+	a := newTestAuth(func(c *auth.Config) { c.Store = fs })
+	cookies := signUp(t, a, "delcbverificationfail@example.com")
+	resp, data := doRequest(a, http.MethodGet, "/get-session", nil, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d", resp.StatusCode)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	token := createDeleteVerificationForStore(t, fs, "delete-verification-fails", sess.User.ID)
+	resp, _ = doRequest(a, http.MethodGet, "/delete-user/callback?token="+token, nil, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestVerifyEmailUpdateFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("UpdateUser") })
 	signUp(t, a, "verfail@example.com")
@@ -443,4 +547,16 @@ func oauthOnlyCookies(t testingT, fs *failStore, userID string, email string) []
 		t.Fatalf("create session: %v", err)
 	}
 	return []*http.Cookie{sessionCookie(token)}
+}
+
+func createDeleteVerificationForStore(t testingT, fs *failStore, token string, userID string) string {
+	t.Helper()
+	now := time.Now()
+	if err := fs.inner.CreateVerification(context.Background(), &types.Verification{
+		ID: "verification-" + token, Identifier: "delete-account:" + token, Value: userID,
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create verification: %v", err)
+	}
+	return token
 }
