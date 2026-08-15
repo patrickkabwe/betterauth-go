@@ -100,16 +100,16 @@ func (a *Auth) canImplicitLink(providerID string, user *types.User, userInfo pro
 	if !a.cfg.account.linkingEnabled {
 		return false
 	}
+	if a.cfg.account.disableImplicitLinking {
+		return false
+	}
+	if a.cfg.account.requireLocalEmailVerified && !user.EmailVerified {
+		return false
+	}
 	if a.cfg.account.trustedProviders[providerID] {
 		return true
 	}
-	if !userInfo.EmailVerified {
-		return false
-	}
-	if !user.EmailVerified {
-		return false
-	}
-	return true
+	return userInfo.EmailVerified
 }
 
 func (a *Auth) createOAuthUser(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, email string) (*oauthUserResult, error) {

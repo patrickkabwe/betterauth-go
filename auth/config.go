@@ -96,11 +96,13 @@ type AccountConfig struct {
 // AccountLinkingConfig configures social account linking rules.
 type AccountLinkingConfig struct {
 	// Enabled defaults to true when nil.
-	Enabled              *bool
-	TrustedProviders     []string
-	AllowDifferentEmails bool
-	AllowUnlinkingAll    bool
-	UpdateUserInfoOnLink bool
+	Enabled                   *bool
+	TrustedProviders          []string
+	AllowDifferentEmails      bool
+	AllowUnlinkingAll         bool
+	UpdateUserInfoOnLink      bool
+	DisableImplicitLinking    bool
+	RequireLocalEmailVerified *bool
 }
 
 // EmailAndPasswordConfig configures email/password authentication.
@@ -250,11 +252,13 @@ type cookieCacheResolved struct {
 }
 
 type accountResolved struct {
-	linkingEnabled       bool
-	trustedProviders     map[string]bool
-	allowDifferentEmails bool
-	allowUnlinkingAll    bool
-	updateUserInfoOnLink bool
+	linkingEnabled            bool
+	trustedProviders          map[string]bool
+	allowDifferentEmails      bool
+	allowUnlinkingAll         bool
+	updateUserInfoOnLink      bool
+	disableImplicitLinking    bool
+	requireLocalEmailVerified bool
 }
 
 func resolveConfig(opts Config) resolved {
@@ -417,6 +421,10 @@ func resolveConfig(opts Config) resolved {
 	if cookieCacheStrategy == "" {
 		cookieCacheStrategy = "compact"
 	}
+	requireLocalEmailVerified := true
+	if opts.Account.AccountLinking.RequireLocalEmailVerified != nil {
+		requireLocalEmailVerified = *opts.Account.AccountLinking.RequireLocalEmailVerified
+	}
 
 	return resolved{
 		appName:               appName,
@@ -480,11 +488,13 @@ func resolveConfig(opts Config) resolved {
 			afterDelete:                 opts.User.DeleteUser.AfterDelete,
 		},
 		account: accountResolved{
-			linkingEnabled:       accountLinkingEnabled(opts.Account.AccountLinking),
-			trustedProviders:     toTrustedProviderSet(opts.Account.AccountLinking.TrustedProviders),
-			allowDifferentEmails: opts.Account.AccountLinking.AllowDifferentEmails,
-			allowUnlinkingAll:    opts.Account.AccountLinking.AllowUnlinkingAll,
-			updateUserInfoOnLink: opts.Account.AccountLinking.UpdateUserInfoOnLink,
+			linkingEnabled:            accountLinkingEnabled(opts.Account.AccountLinking),
+			trustedProviders:          toTrustedProviderSet(opts.Account.AccountLinking.TrustedProviders),
+			allowDifferentEmails:      opts.Account.AccountLinking.AllowDifferentEmails,
+			allowUnlinkingAll:         opts.Account.AccountLinking.AllowUnlinkingAll,
+			updateUserInfoOnLink:      opts.Account.AccountLinking.UpdateUserInfoOnLink,
+			disableImplicitLinking:    opts.Account.AccountLinking.DisableImplicitLinking,
+			requireLocalEmailVerified: requireLocalEmailVerified,
 		},
 		socialProviders:     buildSocialProviders(opts),
 		plugins:             opts.Plugins,

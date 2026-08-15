@@ -12,6 +12,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/provider"
+	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
 
@@ -251,6 +252,73 @@ func TestSignInSocialIDTokenPassesUserDataToProvider(t *testing.T) {
 	name, ok := p.seenTokens.User["name"].(map[string]any)
 	if !ok || name["firstName"] != "Ada" || p.seenTokens.User["email"] != "ada@example.com" {
 		t.Fatalf("user data=%+v", p.seenTokens.User)
+	}
+}
+
+func TestSignInSocialImplicitLinkRequiresVerifiedLocalEmail(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-unverified-local", Email: "oauth-local-unverified@example.com", EmailVerified: true, Name: "OAuth Local Unverified"},
+	}
+	a := oauthTestAuth(t, p)
+	signUp(t, a, "oauth-local-unverified@example.com")
+
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-unverified-local"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInSocialImplicitLinkCanSkipLocalEmailVerification(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-skip-local", Email: "oauth-skip-local@example.com", EmailVerified: true, Name: "OAuth Skip Local"},
+	}
+	requireLocal := false
+	a := newTestAuth(func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+		c.Account.AccountLinking.RequireLocalEmailVerified = &requireLocal
+	})
+	signUp(t, a, "oauth-skip-local@example.com")
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-skip-local"},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+}
+
+func TestSignInSocialDisableImplicitLinkingBlocksTrustedProvider(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-disable-link", Email: "oauth-disable-link@example.com", EmailVerified: true, Name: "OAuth Disable Link"},
+	}
+	a := oauthTestAuth(t, p)
+	cookies := signUp(t, a, "oauth-disable-link@example.com")
+	userID := mustUserID(t, a, cookies)
+	verified := true
+	if _, err := a.Store().UpdateUser(context.Background(), userID, store.UserUpdate{EmailVerified: &verified}); err != nil {
+		t.Fatalf("verify user: %v", err)
+	}
+	a = newTestAuth(func(c *auth.Config) {
+		c.Store = a.Store()
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+		c.Account.AccountLinking.DisableImplicitLinking = true
+	})
+
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-disable-link"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }
 
