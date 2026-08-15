@@ -84,7 +84,7 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				}
 				state, _ := id.Generate(32)
 				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
-				q := genericOAuthAuthorizationValues(c, p, state, body.Scopes, codeVerifier)
+				q := genericOAuthAuthorizationValues(c, p, state, genericOAuthSignInScopes(body.Scopes, p.Scopes), codeVerifier)
 				redirectURL := provider.BuildAuthURL(authorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
 			}),
@@ -121,11 +121,43 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				c.Redirect(callbackURL)
 			}),
 			rt(http.MethodPost, "/oauth2/link", func(c *auth.Context) {
+				var body struct {
+					ProviderID       string   `json:"providerId"`
+					CallbackURL      string   `json:"callbackURL"`
+					Scopes           []string `json:"scopes"`
+					ErrorCallbackURL string   `json:"errorCallbackURL"`
+				}
+				if err := c.ParseJSON(&body); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
+					return
+				}
 				_, _, ok := c.RequireSession()
 				if !ok {
 					return
 				}
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				p, ok := providers[body.ProviderID]
+				if !ok {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeProviderNotFound))
+					return
+				}
+				authorizationURL, err := genericOAuthLinkAuthorizationURL(c, p)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+					return
+				}
+				codeVerifier := ""
+				if p.PKCE {
+					codeVerifier, err = oauth2pkg.GenerateCodeVerifier()
+					if err != nil {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+						return
+					}
+				}
+				state, _ := id.Generate(32)
+				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
+				q := genericOAuthAuthorizationValues(c, p, state, genericOAuthLinkScopes(body.Scopes, p.Scopes), codeVerifier)
+				redirectURL := provider.BuildAuthURL(authorizationURL, q)
+				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": true})
 			}),
 		},
 	}
@@ -148,6 +180,23 @@ func genericOAuthSignInAuthorizationURL(c *auth.Context, p GenericOAuthProviderC
 	}
 	if authorizationURL == "" || tokenURL == "" {
 		return "", fmt.Errorf("invalid generic oauth configuration for provider %q: authorizationURL=%q tokenURL=%q", p.ProviderID, authorizationURL, tokenURL)
+	}
+	return authorizationURL, nil
+}
+
+func genericOAuthLinkAuthorizationURL(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
+	authorizationURL := p.AuthorizationURL
+	if p.DiscoveryURL != "" {
+		discovery, err := genericOAuthDiscovery(c, p)
+		if err != nil {
+			return "", err
+		}
+		if discovery.AuthorizationEndpoint != "" {
+			authorizationURL = discovery.AuthorizationEndpoint
+		}
+	}
+	if authorizationURL == "" {
+		return "", fmt.Errorf("invalid generic oauth configuration for provider %q: authorizationURL=%q", p.ProviderID, authorizationURL)
 	}
 	return authorizationURL, nil
 }
@@ -221,12 +270,11 @@ func parseGenericOAuthStateValue(value string) (string, string, bool) {
 	return providerID, callbackURL, true
 }
 
-func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, requestScopes []string, codeVerifier string) url.Values {
+func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, scopes []string, codeVerifier string) url.Values {
 	responseType := p.ResponseType
 	if responseType == "" {
 		responseType = "code"
 	}
-	scopes := genericOAuthScopes(requestScopes, p.Scopes)
 	q := url.Values{
 		"client_id":     {p.ClientID},
 		"response_type": {responseType},
@@ -260,7 +308,7 @@ func genericOAuthRedirectURI(c *auth.Context, p GenericOAuthProviderConfig) stri
 	return c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID
 }
 
-func genericOAuthScopes(requestScopes []string, configuredScopes []string) []string {
+func genericOAuthSignInScopes(requestScopes []string, configuredScopes []string) []string {
 	if len(requestScopes) == 0 {
 		return configuredScopes
 	}
@@ -268,6 +316,13 @@ func genericOAuthScopes(requestScopes []string, configuredScopes []string) []str
 	scopes = append(scopes, requestScopes...)
 	scopes = append(scopes, configuredScopes...)
 	return scopes
+}
+
+func genericOAuthLinkScopes(requestScopes []string, configuredScopes []string) []string {
+	if len(requestScopes) == 0 {
+		return configuredScopes
+	}
+	return requestScopes
 }
 
 func joinScopes(scopes []string) string {

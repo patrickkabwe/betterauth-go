@@ -83,6 +83,72 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthLinkReturnsAuthorizationURL(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize?tenant=workspace",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				Scopes:           []string{"openid", "email"},
+				PKCE:             true,
+				Prompt:           "consent",
+				AccessType:       "offline",
+				AuthorizationURLParams: map[string]string{
+					"audience": "api",
+				},
+			},
+		},
+	}))
+
+	signUp := post(t, a, "/sign-up/email", `{"name":"Link User","email":"generic-oauth-link@example.com","password":"password123"}`)
+	if signUp.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", signUp.Code, signUp.Body.String())
+	}
+	w := postWithCookies(t, a, "/oauth2/link", `{"providerId":"oidc","callbackURL":"https://app.example.com/settings","scopes":["repo"]}`, signUp.Result().Cookies())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL      string `json:"url"`
+		Redirect bool   `json:"redirect"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Redirect {
+		t.Fatalf("redirect=%v", body.Redirect)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "idp.example.com" || parsed.Path != "/oauth/authorize" {
+		t.Fatalf("url=%s", body.URL)
+	}
+	query := parsed.Query()
+	if query.Get("client_id") != "client" || query.Get("response_type") != "code" || query.Get("scope") != "repo" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("prompt") != "consent" || query.Get("access_type") != "offline" || query.Get("audience") != "api" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("tenant") != "workspace" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("redirect_uri") != "http://localhost:8080/api/auth/oauth2/callback/oidc" {
+		t.Fatalf("redirect_uri=%q", query.Get("redirect_uri"))
+	}
+	if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("state") == "" {
+		t.Fatalf("state missing: %s", query.Encode())
+	}
+}
+
 func TestGenericOAuthCallbackRedirectsToStoredCallbackURL(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{
