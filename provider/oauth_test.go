@@ -41,6 +41,44 @@ func TestExchangeAuthorizationCodeRefusesRedirect(t *testing.T) {
 	}
 }
 
+func TestExchangeAuthorizationCodeMergesExtraParams(t *testing.T) {
+	var formValues url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-token"}`))
+	}))
+	defer server.Close()
+
+	_, err := ExchangeAuthorizationCode(context.Background(), CodeExchangeOpts{
+		TokenURL:     server.URL,
+		ClientID:     "client",
+		ClientSecret: "secret",
+		Code:         "code",
+		RedirectURI:  "https://app.example.com/callback",
+		CodeVerifier: "verifier",
+		ExtraParams: map[string]string{
+			"audience":   "api",
+			"grant_type": "custom",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formValues.Get("grant_type") != "authorization_code" || formValues.Get("code") != "code" || formValues.Get("redirect_uri") != "https://app.example.com/callback" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("client_id") != "client" || formValues.Get("client_secret") != "secret" || formValues.Get("code_verifier") != "verifier" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("audience") != "api" {
+		t.Fatalf("form=%v", formValues)
+	}
+}
+
 func TestRefreshAccessTokenOmitsEmptyClientSecret(t *testing.T) {
 	var formValues url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

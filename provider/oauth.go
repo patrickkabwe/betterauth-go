@@ -38,11 +38,7 @@ type CodeExchangeOpts struct {
 // ExchangeAuthorizationCode performs a standard OAuth2 code exchange.
 func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[string]any, error) {
 	form := url.Values{}
-	if len(opts.ExtraParams) > 0 {
-		for k, v := range opts.ExtraParams {
-			form.Set(k, v)
-		}
-	} else {
+	if opts.Code != "" {
 		form.Set("grant_type", "authorization_code")
 		form.Set("code", opts.Code)
 		form.Set("redirect_uri", opts.RedirectURI)
@@ -52,6 +48,11 @@ func ExchangeAuthorizationCode(ctx context.Context, opts CodeExchangeOpts) (map[
 		}
 		if opts.CodeVerifier != "" {
 			form.Set("code_verifier", opts.CodeVerifier)
+		}
+	}
+	for k, v := range opts.ExtraParams {
+		if _, ok := form[k]; !ok {
+			form.Set(k, v)
 		}
 	}
 
