@@ -69,6 +69,7 @@ const (
 // Email OTP types.
 const (
 	EmailOTPTypeVerification   = "email-verification"
+	EmailOTPTypeSignIn         = "sign-in"
 	EmailOTPTypeForgetPassword = "forget-password"
 	EmailOTPTypeEmailChange    = "change-email"
 )
