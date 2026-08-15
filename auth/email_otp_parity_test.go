@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -191,5 +192,119 @@ func TestEmailOTPPluginSignInRespectsDisableSignUp(t *testing.T) {
 	_, err = a.Store().FindUserByEmail(context.Background(), "disabled-sign-in@example.com")
 	if !errors.Is(err, berrors.ErrNotFound) {
 		t.Fatalf("user lookup error=%v", err)
+	}
+}
+
+func TestEmailOTPPluginCheckTracksAttempts(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			AllowedAttempts: 1,
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-attempts",
+		Name:          "Attempts",
+		Email:         "attempts@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.CreateVerification(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":attempts@example.com", "123456:0", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/check-verification-otp", map[string]any{
+		"email": "attempts@example.com",
+		"otp":   "000000",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("first status=%d body=%s", resp.StatusCode, data)
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":attempts@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != "123456:1" {
+		t.Fatalf("verification value %q", verification.Value)
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/email-otp/check-verification-otp", map[string]any{
+		"email": "attempts@example.com",
+		"otp":   "000000",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("second status=%d body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "TOO_MANY_ATTEMPTS" {
+		t.Fatalf("code %q", body.Code)
+	}
+	_, err = a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeVerification+":attempts@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
+	}
+}
+
+func TestEmailOTPPluginCheckDeletesExpiredOTP(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-expired",
+		Name:          "Expired",
+		Email:         "expired@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifier := constants.VerificationEmailOTP + constants.EmailOTPTypeVerification + ":expired@example.com"
+	err = a.Store().CreateVerification(context.Background(), &types.Verification{
+		ID:         "expired-email-otp",
+		Identifier: identifier,
+		Value:      "123456:0",
+		ExpiresAt:  now.Add(-time.Minute),
+		CreatedAt:  now.Add(-time.Hour),
+		UpdatedAt:  now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/check-verification-otp", map[string]any{
+		"email": "expired@example.com",
+		"otp":   "123456",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "OTP_EXPIRED" {
+		t.Fatalf("code %q", body.Code)
+	}
+	_, err = a.Store().FindVerificationByIdentifier(context.Background(), identifier)
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
 	}
 }

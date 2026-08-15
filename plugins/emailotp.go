@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -13,15 +15,22 @@ import (
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 // EmailOTPOptions configures email OTP flows.
 type EmailOTPOptions struct {
-	SendOTP       func(ctx context.Context, email, otp, typ string) error
-	ExpiresIn     time.Duration
-	OTPLength     int
-	DisableSignUp bool
+	SendOTP         func(ctx context.Context, email, otp, typ string) error
+	ExpiresIn       time.Duration
+	OTPLength       int
+	DisableSignUp   bool
+	AllowedAttempts int
 }
+
+const (
+	codeEmailOTPExpired         = "OTP_EXPIRED"
+	codeEmailOTPTooManyAttempts = "TOO_MANY_ATTEMPTS"
+)
 
 func (o EmailOTPOptions) length() int {
 	if o.OTPLength == 0 {
@@ -35,6 +44,13 @@ func (o EmailOTPOptions) expires() time.Duration {
 		return 5 * time.Minute
 	}
 	return o.ExpiresIn
+}
+
+func (o EmailOTPOptions) allowedAttempts() int {
+	if o.AllowedAttempts == 0 {
+		return 3
+	}
+	return o.AllowedAttempts
 }
 
 // EmailOTP adds email one-time password authentication.
@@ -105,7 +121,7 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 	}
 	raw, _ := id.Generate(opts.length())
 	otp := raw[:opts.length()]
-	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp, opts.expires())
+	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp+":0", opts.expires())
 	_ = opts.SendOTP(c.R.Context(), email, otp, typ)
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 }
@@ -157,8 +173,18 @@ func checkOTPHandler(opts EmailOTPOptions, typ string) func(*auth.Context) {
 			}
 			otpType = body.Type
 		}
-		ok := verifyStoredOTP(c, otpType, body.Email, body.OTP, false)
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": ok})
+		if !verifyStoredOTP(c, opts, otpType, body.Email, body.OTP, false) {
+			return
+		}
+		if _, err := c.Auth.Store().FindUserByEmail(c.R.Context(), auth.NormalizeEmail(body.Email)); err != nil {
+			if errors.Is(err, berrors.ErrNotFound) {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeUserNotFound))
+				return
+			}
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }
 
@@ -174,19 +200,103 @@ func validEmailOTPType(typ string) bool {
 	return false
 }
 
-func verifyStoredOTP(c *auth.Context, typ, email, otp string, consume bool) bool {
+func verifyStoredOTP(c *auth.Context, opts EmailOTPOptions, typ, email, otp string, consume bool) bool {
 	identifier := otpIdentifier(typ, email)
+	if consume {
+		return consumeStoredEmailOTP(c, opts, identifier, otp)
+	}
 	v, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
-	if err != nil || time.Now().After(v.ExpiresAt) || v.Value != otp {
+	if errors.Is(err, berrors.ErrNotFound) {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 		return false
 	}
-	if consume {
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	if time.Now().After(v.ExpiresAt) {
 		_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier)
+		c.WriteError(apierror.New(http.StatusBadRequest, codeEmailOTPExpired, "OTP expired"))
+		return false
+	}
+	storedOTP, attempts := splitEmailOTPValue(v.Value)
+	if attempts >= opts.allowedAttempts() {
+		_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier)
+		c.WriteError(apierror.New(http.StatusForbidden, codeEmailOTPTooManyAttempts, "Too many attempts"))
+		return false
+	}
+	if storedOTP != otp {
+		if !saveEmailOTPAttempts(c, v, attempts+1) {
+			return false
+		}
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		return false
 	}
 	return true
 }
 
-func verifyEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
+func consumeStoredEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string, otp string) bool {
+	existing, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
+	if err == nil && time.Now().After(existing.ExpiresAt) {
+		_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), identifier)
+		c.WriteError(apierror.New(http.StatusBadRequest, codeEmailOTPExpired, "OTP expired"))
+		return false
+	}
+	if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	v, err := c.Auth.ConsumeVerification(c.R.Context(), identifier)
+	if errors.Is(err, berrors.ErrNotFound) {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		return false
+	}
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	storedOTP, attempts := splitEmailOTPValue(v.Value)
+	if attempts >= opts.allowedAttempts() {
+		c.WriteError(apierror.New(http.StatusForbidden, codeEmailOTPTooManyAttempts, "Too many attempts"))
+		return false
+	}
+	if storedOTP != otp {
+		if !saveEmailOTPAttempts(c, v, attempts+1) {
+			return false
+		}
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		return false
+	}
+	return true
+}
+
+func splitEmailOTPValue(value string) (string, int) {
+	idx := strings.LastIndex(value, ":")
+	if idx < 0 {
+		return value, 0
+	}
+	attempts, err := strconv.Atoi(value[idx+1:])
+	if err != nil {
+		return value, 0
+	}
+	return value[:idx], attempts
+}
+
+func saveEmailOTPAttempts(c *auth.Context, verification *types.Verification, attempts int) bool {
+	otp, _ := splitEmailOTPValue(verification.Value)
+	now := time.Now()
+	err := c.Auth.Store().CreateVerification(c.R.Context(), &types.Verification{
+		ID: verification.ID, Identifier: verification.Identifier, Value: otp + ":" + strconv.Itoa(attempts),
+		ExpiresAt: verification.ExpiresAt, CreatedAt: verification.CreatedAt, UpdatedAt: now,
+	})
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	return true
+}
+
+func verifyEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		var body struct {
 			Email string `json:"email"`
@@ -196,8 +306,7 @@ func verifyEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		if !verifyStoredOTP(c, constants.EmailOTPTypeVerification, body.Email, body.OTP, true) {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeVerification, body.Email, body.OTP, true) {
 			return
 		}
 		user, err := c.Auth.Store().FindUserByEmail(c.R.Context(), auth.NormalizeEmail(body.Email))
@@ -224,8 +333,7 @@ func signInEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		if !verifyStoredOTP(c, constants.EmailOTPTypeSignIn, body.Email, body.OTP, true) {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeSignIn, body.Email, body.OTP, true) {
 			return
 		}
 		email := auth.NormalizeEmail(body.Email)
@@ -270,7 +378,7 @@ func signInEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	}
 }
 
-func resetPasswordOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
+func resetPasswordOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		var body struct {
 			Email       string `json:"email"`
@@ -281,8 +389,7 @@ func resetPasswordOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		if !verifyStoredOTP(c, constants.EmailOTPTypeForgetPassword, body.Email, body.OTP, true) {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeForgetPassword, body.Email, body.OTP, true) {
 			return
 		}
 		user, err := c.Auth.Store().FindUserByEmail(c.R.Context(), auth.NormalizeEmail(body.Email))
@@ -304,7 +411,7 @@ func resetPasswordOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 	}
 }
 
-func changeEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
+func changeEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		_, user, ok := c.RequireSession()
 		if !ok {
@@ -318,8 +425,7 @@ func changeEmailOTPHandler(_ EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
-		if !verifyStoredOTP(c, constants.EmailOTPTypeEmailChange, body.Email, body.OTP, true) {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeEmailChange, body.Email, body.OTP, true) {
 			return
 		}
 		email := auth.NormalizeEmail(body.Email)
