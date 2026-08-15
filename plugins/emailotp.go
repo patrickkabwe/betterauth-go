@@ -28,10 +28,14 @@ type EmailOTPOptions struct {
 	AllowedAttempts int
 	ChangeEmail     EmailOTPChangeEmailOptions
 	ResendStrategy  EmailOTPResendStrategy
+	StoreOTP        EmailOTPStoreOTP
 }
 
 // EmailOTPGenerateOTP generates an OTP for an email OTP flow.
 type EmailOTPGenerateOTP func(ctx context.Context, email, typ string) (string, error)
+
+// EmailOTPStoreOTP controls how OTP values are persisted.
+type EmailOTPStoreOTP string
 
 // EmailOTPChangeEmailOptions configures the change-email OTP flow.
 type EmailOTPChangeEmailOptions struct {
@@ -47,6 +51,8 @@ const (
 	codeEmailOTPTooManyAttempts = "TOO_MANY_ATTEMPTS"
 
 	EmailOTPResendStrategyReuse EmailOTPResendStrategy = "reuse"
+
+	EmailOTPStoreOTPHashed EmailOTPStoreOTP = "hashed"
 )
 
 func (o EmailOTPOptions) length() int {
@@ -194,11 +200,27 @@ func storeGeneratedEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, i
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return "", false
 	}
-	if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp+":0", opts.expires()); err != nil {
+	storedOTP, ok := storeEmailOTPValue(c, opts, otp)
+	if !ok {
+		return "", false
+	}
+	if err := c.Auth.CreateVerification(c.R.Context(), identifier, storedOTP+":0", opts.expires()); err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return "", false
 	}
 	return otp, true
+}
+
+func storeEmailOTPValue(c *auth.Context, opts EmailOTPOptions, otp string) (string, bool) {
+	if opts.StoreOTP != EmailOTPStoreOTPHashed {
+		return otp, true
+	}
+	hash, err := c.Auth.HashPassword(otp)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return "", false
+	}
+	return hash, true
 }
 
 func createVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
@@ -241,6 +263,10 @@ func getVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteJSON(http.StatusOK, map[string]*string{"otp": nil})
 			return
 		}
+		if opts.StoreOTP == EmailOTPStoreOTPHashed {
+			c.WriteError(apierror.New(http.StatusBadRequest, "BAD_REQUEST", "OTP is hashed, cannot return the plain text OTP"))
+			return
+		}
 		otp, _ := splitEmailOTPValue(verification.Value)
 		c.WriteJSON(http.StatusOK, map[string]*string{"otp": &otp})
 	}
@@ -260,6 +286,9 @@ func generateEmailOTP(ctx context.Context, opts EmailOTPOptions, email, typ stri
 }
 
 func reuseEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (string, bool, bool) {
+	if opts.StoreOTP == EmailOTPStoreOTPHashed {
+		return "", false, true
+	}
 	verification, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), identifier)
 	if errors.Is(err, berrors.ErrNotFound) {
 		return "", false, true
@@ -455,7 +484,11 @@ func verifyStoredOTP(c *auth.Context, opts EmailOTPOptions, typ, email, otp stri
 		c.WriteError(apierror.New(http.StatusForbidden, codeEmailOTPTooManyAttempts, "Too many attempts"))
 		return false
 	}
-	if storedOTP != otp {
+	matches, ok := verifyEmailOTPValue(c, opts, storedOTP, otp)
+	if !ok {
+		return false
+	}
+	if !matches {
 		if !saveEmailOTPAttempts(c, v, attempts+1) {
 			return false
 		}
@@ -490,7 +523,11 @@ func consumeStoredEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier str
 		c.WriteError(apierror.New(http.StatusForbidden, codeEmailOTPTooManyAttempts, "Too many attempts"))
 		return false
 	}
-	if storedOTP != otp {
+	matches, ok := verifyEmailOTPValue(c, opts, storedOTP, otp)
+	if !ok {
+		return false
+	}
+	if !matches {
 		if !saveEmailOTPAttempts(c, v, attempts+1) {
 			return false
 		}
@@ -498,6 +535,18 @@ func consumeStoredEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier str
 		return false
 	}
 	return true
+}
+
+func verifyEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP, otp string) (bool, bool) {
+	if opts.StoreOTP != EmailOTPStoreOTPHashed {
+		return storedOTP == otp, true
+	}
+	matches, err := c.Auth.VerifyPassword(storedOTP, otp)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false, false
+	}
+	return matches, true
 }
 
 func splitEmailOTPValue(value string) (string, int) {

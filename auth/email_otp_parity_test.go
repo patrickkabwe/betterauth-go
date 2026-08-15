@@ -364,6 +364,54 @@ func TestEmailOTPPluginServerOTPRoutesAreExcludedFromClientSchema(t *testing.T) 
 	t.Fatal("email otp plugin missing from client schema")
 }
 
+func TestEmailOTPPluginHashedStoreOTPVerifiesButCannotReturnCode(t *testing.T) {
+	var sentOTP string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Hasher = plainHasher{}
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			StoreOTP: plugins.EmailOTPStoreOTPHashed,
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentOTP = otp
+				return nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "hashed-sign-in@example.com",
+		"type":  "sign-in",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("send status=%d body=%s", resp.StatusCode, data)
+	}
+	if sentOTP == "" {
+		t.Fatal("otp was not sent")
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":hashed-sign-in@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value == sentOTP+":0" {
+		t.Fatalf("stored otp should be hashed: %q", verification.Value)
+	}
+	if verification.Value != "plain:"+sentOTP+":0" {
+		t.Fatalf("stored value=%q", verification.Value)
+	}
+
+	resp, data = doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=hashed-sign-in@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("get status=%d body=%s", resp.StatusCode, data)
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
+		"email": "hashed-sign-in@example.com",
+		"otp":   sentOTP,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
 	var sentCodes []string
 	a := newTestAuth(func(c *auth.Config) {
