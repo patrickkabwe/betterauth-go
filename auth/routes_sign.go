@@ -46,6 +46,10 @@ func handleSignUpEmail(c *Context) {
 		handleDuplicateSignUp(c, existing, body.Password)
 		return
 	}
+	if !errors.Is(err, berrors.ErrNotFound) {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 
 	user, account, err := createUserWithCredential(c, body.Name, email, body.Password, body.Image)
 	if err != nil {
@@ -90,9 +94,16 @@ func shouldSendSignUpVerification(cfg resolved) bool {
 }
 
 func handleDuplicateSignUp(c *Context, existing *types.User, password string) {
-	_, _ = c.Auth.cfg.hasher.Hash(password)
+	if _, err := c.Auth.cfg.hasher.Hash(password); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	if c.Auth.cfg.emailPassword.requireEmailVerification || !c.Auth.cfg.emailPassword.autoSignIn {
-		syntheticID, _ := id.Generate(32)
+		syntheticID, err := id.Generate(32)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		now := time.Now()
 		c.WriteJSON(http.StatusOK, types.SignUpResponse{
 			Token: nil,

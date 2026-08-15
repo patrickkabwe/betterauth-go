@@ -36,6 +36,34 @@ func TestSignUpCreateSessionFails(t *testing.T) {
 	}
 }
 
+func TestSignUpFindUserFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("FindUserByEmail") })
+	resp, _ := doRequest(a, http.MethodPost, "/sign-up/email", map[string]any{
+		"name": "Fail", "email": "signupfindfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestDuplicateSignUpHashFails(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	signUp(t, a1, "duphashfail@example.com")
+	autoSignIn := false
+	a2 := newTestAuth(func(c *auth.Config) {
+		c.Store = mem
+		c.Hasher = errorHasher{}
+		c.EmailAndPassword.AutoSignIn = &autoSignIn
+	})
+	resp, _ := doRequest(a2, http.MethodPost, "/sign-up/email", map[string]any{
+		"name": "Dup", "email": "duphashfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSignInFindUserFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("FindUserByEmail") })
 	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{
