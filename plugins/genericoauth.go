@@ -62,6 +62,7 @@ type GenericOAuthProviderConfig struct {
 	AccessTokenExpiresIn    int
 	DisableImplicitSignUp   bool
 	DisableSignUp           bool
+	OverrideUserInfo        bool
 	AuthorizationHeaders    map[string]string
 	AuthorizationURLParams  map[string]string
 	TokenURLParams          map[string]string
@@ -642,7 +643,14 @@ func genericOAuthSignInUser(c *auth.Context, p GenericOAuthProviderConfig, state
 			return nil, false, err
 		}
 		user, err := c.Auth.Store().FindUserByID(c.R.Context(), account.UserID)
-		return user, false, err
+		if err != nil {
+			return nil, false, err
+		}
+		if p.OverrideUserInfo {
+			updated, err := overrideGenericOAuthUserInfo(c, user, userInfo)
+			return updated, false, err
+		}
+		return user, false, nil
 	}
 	if !errors.Is(err, berrors.ErrNotFound) {
 		return nil, false, err
@@ -681,6 +689,23 @@ func createGenericOAuthUser(c *auth.Context, userInfo provider.OAuthUser) (*type
 		return nil, err
 	}
 	return user, nil
+}
+
+func overrideGenericOAuthUserInfo(c *auth.Context, user *types.User, userInfo provider.OAuthUser) (*types.User, error) {
+	email := auth.NormalizeEmail(userInfo.Email)
+	emailVerified := userInfo.EmailVerified
+	if strings.EqualFold(email, user.Email) {
+		emailVerified = user.EmailVerified || userInfo.EmailVerified
+	}
+	update := store.UserUpdate{
+		Name:          &userInfo.Name,
+		Email:         &email,
+		EmailVerified: &emailVerified,
+	}
+	if userInfo.Image != nil {
+		update.Image = &userInfo.Image
+	}
+	return c.Auth.Store().UpdateUser(c.R.Context(), user.ID, update)
 }
 
 func createGenericOAuthAccount(c *auth.Context, providerID string, userID string, accountID string, tokens *provider.OAuthTokens) error {

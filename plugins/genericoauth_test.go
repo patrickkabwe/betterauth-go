@@ -346,6 +346,95 @@ func TestGenericOAuthCallbackUsesIDTokenUserInfo(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthCallbackOverridesUserInfoOnSignIn(t *testing.T) {
+	profileName := "Initial Name"
+	profileEmailVerified := false
+	profileImage := "https://idp.example.com/initial.png"
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				OverrideUserInfo: true,
+				GetToken: func(_ context.Context, _ plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+					return &provider.OAuthTokens{AccessToken: "access-token"}, nil
+				},
+				GetUserInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+					return &provider.UserInfo{
+						User: provider.OAuthUser{
+							ID:            "override-account",
+							Name:          profileName,
+							Email:         "override-user@example.com",
+							Image:         &profileImage,
+							EmailVerified: profileEmailVerified,
+						},
+					}, nil
+				},
+			},
+		},
+	}))
+
+	first := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if first.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", first.Code, first.Body.String())
+	}
+	var firstBody struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstBody); err != nil {
+		t.Fatal(err)
+	}
+	firstURL, err := url.Parse(firstBody.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstState := firstURL.Query().Get("state")
+	if firstState == "" {
+		t.Fatalf("state missing: %s", firstBody.URL)
+	}
+	firstCallback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(firstState))
+	if firstCallback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", firstCallback.Code, firstCallback.Body.String())
+	}
+
+	profileName = "Updated Name"
+	profileEmailVerified = true
+	profileImage = "https://idp.example.com/updated.png"
+	second := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard"}`)
+	if second.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", second.Code, second.Body.String())
+	}
+	var secondBody struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondBody); err != nil {
+		t.Fatal(err)
+	}
+	secondURL, err := url.Parse(secondBody.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondState := secondURL.Query().Get("state")
+	if secondState == "" {
+		t.Fatalf("state missing: %s", secondBody.URL)
+	}
+	secondCallback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(secondState))
+	if secondCallback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", secondCallback.Code, secondCallback.Body.String())
+	}
+
+	user, err := a.Store().FindUserByEmail(context.Background(), "override-user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Name != "Updated Name" || !user.EmailVerified || user.Image == nil || *user.Image != "https://idp.example.com/updated.png" {
+		t.Fatalf("user=%+v", user)
+	}
+}
+
 func TestGenericOAuthCallbackLinksAccount(t *testing.T) {
 	oauthServer, tokenRequestSeen := newGenericOAuthCallbackServer(t, "link-account", "Link User", "generic-oauth-link-callback@example.com", `{"access_token":"access-token","refresh_token":"refresh-token","scope":"openid email","expires_in":3600}`)
 	defer oauthServer.Close()
