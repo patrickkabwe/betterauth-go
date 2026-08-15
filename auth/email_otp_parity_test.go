@@ -133,6 +133,36 @@ func TestEmailOTPPluginSendVerificationOTPGeneratesNumericCode(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginSendVerificationOTPReturnsProviderError(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				return errors.New("provider failed")
+			},
+		})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-provider-error",
+		Name:          "Provider Error",
+		Email:         "email-otp-provider-error@example.com",
+		EmailVerified: true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+		"email": "email-otp-provider-error@example.com",
+		"type":  "email-verification",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
 func TestEmailOTPPluginSendVerificationOTPRejectsChangeEmailType(t *testing.T) {
 	var sent bool
 	a := newTestAuth(func(c *auth.Config) {

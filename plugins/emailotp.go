@@ -141,13 +141,14 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeEmailOTPDisabled))
 		return
 	}
-	otp, err := numericOTP(opts.length())
-	if err != nil {
+	otp, ok := createEmailOTP(c, opts, otpIdentifier(typ, email))
+	if !ok {
+		return
+	}
+	if err := opts.SendOTP(c.R.Context(), email, otp, typ); err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return
 	}
-	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp+":0", opts.expires())
-	_ = opts.SendOTP(c.R.Context(), email, otp, typ)
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 }
 
@@ -218,7 +219,10 @@ func requestEmailChangeOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 		if !ok {
 			return
 		}
-		_ = opts.SendOTP(c.R.Context(), newEmail, otp, constants.EmailOTPTypeEmailChange)
+		if err := opts.SendOTP(c.R.Context(), newEmail, otp, constants.EmailOTPTypeEmailChange); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
 		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }
