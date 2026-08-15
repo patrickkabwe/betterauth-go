@@ -191,10 +191,19 @@ func cloneTokenData(data map[string]any) map[string]any {
 
 // BuildAuthURL constructs an OAuth2 authorization URL.
 func BuildAuthURL(endpoint string, params url.Values) string {
-	if strings.Contains(endpoint, "?") {
-		return endpoint + "&" + params.Encode()
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return endpoint
 	}
-	return endpoint + "?" + params.Encode()
+	query := parsed.Query()
+	for key, values := range params {
+		query.Del(key)
+		for _, value := range values {
+			query.Add(key, value)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 // RefreshAccessToken performs a refresh_token grant.

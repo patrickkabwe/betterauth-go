@@ -156,6 +156,25 @@ func TestTokensFromMapMapsArrayScopes(t *testing.T) {
 	}
 }
 
+func TestBuildAuthURLReplacesDuplicateQueryParams(t *testing.T) {
+	params := url.Values{}
+	params.Set("client_id", "new-client")
+	params.Set("state", "state-token")
+
+	authURL := BuildAuthURL("https://auth.example.com/oauth?client_id=old-client&tenant=workspace", params)
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("client_id") != "new-client" || query.Get("state") != "state-token" || query.Get("tenant") != "workspace" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if values := query["client_id"]; len(values) != 1 {
+		t.Fatalf("client_id values=%v", values)
+	}
+}
+
 func assertExpiryWithin(t *testing.T, expiry *time.Time, expected time.Duration) {
 	t.Helper()
 	if expiry == nil {
