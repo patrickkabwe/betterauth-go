@@ -23,8 +23,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
 | Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 26 | 0 | 0 |
-| Extended packages | 3 | 0 | 7 |
+| Plugins (core package) | 27 | 0 | 0 |
+| Extended packages | 4 | 0 | 6 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -223,7 +223,7 @@ Separate npm packages in the Better Auth monorepo.
 | `@better-auth/passkey` | ⬜ | WebAuthn / passkey registration & sign-in |
 | `@better-auth/stripe` | ⬜ | Subscriptions, billing portal, webhooks |
 | `@better-auth/sso` | ⬜ | SAML / enterprise SSO |
-| `@better-auth/scim` | ⬜ | SCIM user provisioning |
+| `@better-auth/scim` | ✅ | SCIM user provisioning |
 | `@better-auth/oauth-provider` | ⬜ | Full OAuth 2.0 authorization server |
 | `@better-auth/api-key` | ✅ | API key management plugin |
 | `@better-auth/expo` | ⬜ | React Native / Expo client helpers |
@@ -386,7 +386,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 - [x] Admin plugin
 - [ ] SSO (SAML)
 - [x] OIDC provider
-- [ ] SCIM provisioning
+- [x] SCIM provisioning
 
 ### Phase 6 — Ecosystem
 

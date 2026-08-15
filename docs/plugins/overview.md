@@ -27,7 +27,7 @@ Or enable everything at once:
 Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 ```
 
-## All 26 core plugins
+## All 27 core plugins
 
 | ID | Package | Description |
 |----|---------|-------------|
@@ -36,6 +36,7 @@ Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 | `anonymous` | `plugins.Anonymous` | Anonymous / guest users — [other](other-plugins.md) |
 | `api-key` | `plugins.APIKey` | API key management and optional API-key sessions — [other](other-plugins.md) |
 | `i18n` | `plugins.I18n` | Locale-aware API error messages — [other](other-plugins.md) |
+| `scim` | `plugins.SCIM` | SCIM 2.0 user provisioning — [other](other-plugins.md) |
 | `username` | `plugins.Username` | Username sign-in — [guide](username.md) |
 | `email-otp` | `plugins.EmailOTP` | Email OTP — [guide](email-otp.md) |
 | `one-time-token` | `plugins.OneTimeToken` | Short-lived single-use tokens |

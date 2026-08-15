@@ -30,6 +30,7 @@ type AllOptions struct {
 	MCP             MCPOptions
 	APIKey          APIKeyOptions
 	I18n            I18nOptions
+	SCIM            SCIMOptions
 }
 
 // All returns every core Better Auth plugin.
@@ -61,5 +62,6 @@ func All(opts AllOptions) []auth.Plugin {
 		MCP(opts.MCP),
 		APIKey(opts.APIKey),
 		I18n(opts.I18n),
+		SCIM(opts.SCIM),
 	}
 }
