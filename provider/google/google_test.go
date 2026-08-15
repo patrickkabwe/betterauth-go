@@ -2,11 +2,19 @@ package google_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"math/big"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/provider/google"
@@ -244,6 +252,75 @@ func TestGoogleGetUserInfoRequiresHostedDomainClaim(t *testing.T) {
 	}
 }
 
+func TestGoogleVerifyIDTokenAcceptsValidToken(t *testing.T) {
+	token, jwks := signedGoogleIDToken(t, map[string]any{
+		"aud":   "id",
+		"nonce": "nonce-value",
+		"hd":    "example.com",
+	})
+	restore := mockGoogleJWKS(t, jwks)
+	defer restore()
+
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	valid, err := p.VerifyIDToken(context.Background(), token, "nonce-value")
+	if err != nil || !valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
+func TestGoogleVerifyIDTokenRejectsNonceMismatch(t *testing.T) {
+	token, jwks := signedGoogleIDToken(t, map[string]any{
+		"aud":   "id",
+		"nonce": "nonce-value",
+	})
+	restore := mockGoogleJWKS(t, jwks)
+	defer restore()
+
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	valid, err := p.VerifyIDToken(context.Background(), token, "other-nonce")
+	if err != nil || valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
+func TestGoogleVerifyIDTokenRejectsAudienceMismatch(t *testing.T) {
+	token, jwks := signedGoogleIDToken(t, map[string]any{
+		"aud": "other-client",
+	})
+	restore := mockGoogleJWKS(t, jwks)
+	defer restore()
+
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	valid, err := p.VerifyIDToken(context.Background(), token, "")
+	if err != nil || valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
+func TestGoogleVerifyIDTokenRejectsHostedDomainMismatch(t *testing.T) {
+	token, jwks := signedGoogleIDToken(t, map[string]any{
+		"aud": "id",
+		"hd":  "other.com",
+	})
+	restore := mockGoogleJWKS(t, jwks)
+	defer restore()
+
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", HD: "example.com"})
+	valid, err := p.VerifyIDToken(context.Background(), token, "")
+	if err != nil || valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
+func TestGoogleVerifyIDTokenCanBeDisabled(t *testing.T) {
+	token, _ := signedGoogleIDToken(t, map[string]any{"aud": "id"})
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableIDTokenSignIn: true})
+	valid, err := p.VerifyIDToken(context.Background(), token, "")
+	if err != nil || valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
 func TestGoogleSignUpPolicy(t *testing.T) {
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
@@ -259,6 +336,80 @@ func googleTestIDToken(claims map[string]any) string {
 	return "hdr." + base64.RawURLEncoding.EncodeToString(raw) + ".sig"
 }
 
+func signedGoogleIDToken(t *testing.T, claims map[string]any) (string, string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	payload := map[string]any{
+		"iss":            "https://accounts.google.com",
+		"aud":            "id",
+		"sub":            "google-sub",
+		"email":          "g@example.com",
+		"email_verified": true,
+		"name":           "G User",
+		"iat":            now.Unix(),
+		"exp":            now.Add(time.Hour).Unix(),
+	}
+	for name, value := range claims {
+		payload[name] = value
+	}
+	header := map[string]any{"alg": "RS256", "kid": "test-google-key", "typ": "JWT"}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(payloadJSON)
+	digest := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+	exponent := big.NewInt(int64(key.PublicKey.E)).Bytes()
+	jwksBody, err := json.Marshal(map[string]any{
+		"keys": []map[string]any{
+			{
+				"kid": "test-google-key",
+				"alg": "RS256",
+				"kty": "RSA",
+				"use": "sig",
+				"n":   base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(exponent),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token, string(jwksBody)
+}
+
+func mockGoogleJWKS(t *testing.T, jwks string) func() {
+	t.Helper()
+	transport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://www.googleapis.com/oauth2/v3/certs" {
+			t.Fatalf("unexpected request URL: %s", req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(jwks)),
+			Request:    req,
+		}, nil
+	})
+	return func() {
+		http.DefaultTransport = transport
+	}
+}
+
 func googleAuthURLQuery(t *testing.T, authURL string) url.Values {
 	t.Helper()
 	parsed, err := url.Parse(authURL)
@@ -266,4 +417,10 @@ func googleAuthURLQuery(t *testing.T, authURL string) url.Values {
 		t.Fatal(err)
 	}
 	return parsed.Query()
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
