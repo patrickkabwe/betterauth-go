@@ -89,9 +89,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("response_type", "code")
 	params.Set("redirect_uri", p.redirectURI(opts.RedirectURI))
 	scopes := p.defaultScopes(opts.Scopes)
-	if len(scopes) > 0 {
-		params.Set("scope", strings.Join(scopes, " "))
-	}
+	params.Set("scope", strings.Join(scopes, " "))
 	params.Set("state", opts.State)
 	params.Set("code_challenge", oauth2pkg.CodeChallengeS256(opts.CodeVerifier))
 	params.Set("code_challenge_method", "S256")

@@ -130,7 +130,7 @@ func TestGoogleAuthURLCanDisableDefaultScopes(t *testing.T) {
 	}
 }
 
-func TestGoogleAuthURLOmitsScopeWhenDefaultScopesDisabled(t *testing.T) {
+func TestGoogleAuthURLUsesEmptyScopeWhenDefaultScopesDisabled(t *testing.T) {
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableDefaultScope: true})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
 		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
@@ -139,8 +139,9 @@ func TestGoogleAuthURLOmitsScopeWhenDefaultScopesDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := googleAuthURLQuery(t, authURL)
-	if _, ok := query["scope"]; ok {
-		t.Fatalf("query=%s", query.Encode())
+	scopes, ok := query["scope"]
+	if !ok || len(scopes) != 1 || scopes[0] != "" {
+		t.Fatalf("scope=%v query=%s", scopes, query.Encode())
 	}
 }
 

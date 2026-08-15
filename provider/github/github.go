@@ -87,9 +87,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params.Set("response_type", "code")
 	params.Set("redirect_uri", p.redirectURI(opts.RedirectURI))
 	scopes := p.defaultScopes(opts.Scopes)
-	if len(scopes) > 0 {
-		params.Set("scope", strings.Join(scopes, " "))
-	}
+	params.Set("scope", strings.Join(scopes, " "))
 	params.Set("state", opts.State)
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
