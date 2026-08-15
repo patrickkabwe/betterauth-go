@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -82,6 +83,40 @@ func TestListAccountsStoreFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("ListAccounts") })
 	cookies := signUp(t, a, "lafail@example.com")
 	resp, _ := doRequest(a, http.MethodGet, "/list-accounts", nil, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestRevokeSessionDeleteFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteSession") })
+	cookies := signUp(t, a, "revdel@example.com")
+	_, data := doRequest(a, http.MethodGet, "/get-session", nil, cookies)
+	var session types.SessionResponse
+	if err := json.Unmarshal(data, &session); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := doRequest(a, http.MethodPost, "/revoke-session", map[string]any{
+		"token": session.Session.Token,
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestRevokeSessionsDeleteFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteAllSessionsByUserID") })
+	cookies := signUp(t, a, "revallfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/revoke-sessions", nil, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestRevokeOtherSessionsDeleteFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("DeleteSessionsByUserID") })
+	cookies := signUp(t, a, "revotherfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/revoke-other-sessions", nil, cookies)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}

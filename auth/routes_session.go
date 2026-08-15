@@ -124,7 +124,10 @@ func handleRevokeSession(c *Context) {
 	}
 	target, user, err := c.Auth.cfg.store.FindSessionByToken(c.R.Context(), body.Token)
 	if err == nil && user.ID == sess.UserID {
-		_ = c.Auth.cfg.store.DeleteSession(c.R.Context(), target.Token)
+		if err := c.Auth.cfg.store.DeleteSession(c.R.Context(), target.Token); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 	}
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
@@ -134,7 +137,10 @@ func handleRevokeSessions(c *Context) {
 	if !ok {
 		return
 	}
-	_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), sess.UserID)
+	if err := c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), sess.UserID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	cookie.DeleteSessionCookies(c.W, c.Auth.cfg.cookie)
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
@@ -144,7 +150,10 @@ func handleRevokeOtherSessions(c *Context) {
 	if !ok {
 		return
 	}
-	_ = c.Auth.cfg.store.DeleteSessionsByUserID(c.R.Context(), sess.UserID, sess.Token)
+	if err := c.Auth.cfg.store.DeleteSessionsByUserID(c.R.Context(), sess.UserID, sess.Token); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
 

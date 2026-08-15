@@ -105,14 +105,23 @@ func (f *failStore) ListSessionsByUserID(ctx context.Context, userID string) ([]
 }
 
 func (f *failStore) DeleteSession(ctx context.Context, token string) error {
+	if f.failOn == "DeleteSession" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteSession(ctx, token)
 }
 
 func (f *failStore) DeleteSessionsByUserID(ctx context.Context, userID, exceptToken string) error {
+	if f.failOn == "DeleteSessionsByUserID" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteSessionsByUserID(ctx, userID, exceptToken)
 }
 
 func (f *failStore) DeleteAllSessionsByUserID(ctx context.Context, userID string) error {
+	if f.failOn == "DeleteAllSessionsByUserID" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteAllSessionsByUserID(ctx, userID)
 }
 
