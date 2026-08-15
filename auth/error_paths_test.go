@@ -93,6 +93,24 @@ func TestSignInVerifyFails(t *testing.T) {
 	}
 }
 
+func TestSignInVerificationSendFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.EmailAndPassword.RequireEmailVerification = true
+		c.EmailVerification.SendOnSignUp = boolPtr(false)
+		c.EmailVerification.SendOnSignIn = true
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return berrors.ErrSmtpDown
+		}
+	})
+	signUp(t, a, "signinsendfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "signinsendfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestUpdateUserStoreFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("UpdateUser") })
 	cookies := signUp(t, a, "upfail@example.com")

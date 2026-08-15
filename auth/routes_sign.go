@@ -166,7 +166,10 @@ func handleSignInEmail(c *Context) {
 
 	if c.Auth.cfg.emailPassword.requireEmailVerification && !user.EmailVerified {
 		if c.Auth.cfg.emailVerification.sendOnSignIn && c.Auth.cfg.emailVerification.sendVerificationEmail != nil {
-			_ = sendVerificationEmailToUser(c, user, body.CallbackURL)
+			if err := sendVerificationEmailToUser(c, user, body.CallbackURL); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+				return
+			}
 		}
 		c.WriteError(apierror.WithCode(http.StatusForbidden, apierror.CodeEmailNotVerified))
 		return
