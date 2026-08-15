@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
 	"github.com/patrickkabwe/betterauth-go/provider"
@@ -64,6 +65,33 @@ func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, 
 func genericOAuthTestIDToken(claims map[string]any) string {
 	raw, _ := json.Marshal(claims)
 	return "hdr." + base64.RawURLEncoding.EncodeToString(raw) + ".sig"
+}
+
+func completeGenericOAuthSignIn(t *testing.T, a *auth.Auth, providerID string) *httptest.ResponseRecorder {
+	t.Helper()
+	signIn := post(t, a, "/sign-in/oauth2", `{"providerId":"`+providerID+`","callbackURL":"https://app.example.com/dashboard"}`)
+	if signIn.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", signIn.Code, signIn.Body.String())
+	}
+	var signInBody struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(signIn.Body.Bytes(), &signInBody); err != nil {
+		t.Fatal(err)
+	}
+	signInURL, err := url.Parse(signInBody.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := signInURL.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", signInBody.URL)
+	}
+	callback := get(t, a, "/oauth2/callback/"+providerID+"?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	return callback
 }
 
 func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
@@ -551,6 +579,165 @@ func TestGenericOAuthCallbackAppliesAccessTokenExpiresInFallback(t *testing.T) {
 	maxExpiresAt := beforeCallback.Add(3610 * time.Second)
 	if account.AccessTokenExpiresAt.Before(minExpiresAt) || account.AccessTokenExpiresAt.After(maxExpiresAt) {
 		t.Fatalf("access token expiry=%s, want between %s and %s", account.AccessTokenExpiresAt.Format(time.RFC3339), minExpiresAt.Format(time.RFC3339), maxExpiresAt.Format(time.RFC3339))
+	}
+}
+
+func TestGenericOAuthGetAccessTokenRefreshesExpiredToken(t *testing.T) {
+	expiredAt := time.Now().Add(-time.Minute)
+	refreshSeen := false
+	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "form", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "refresh-token" {
+			http.Error(w, "refresh form", http.StatusBadRequest)
+			return
+		}
+		refreshSeen = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access-token","expires_in":3600,"scope":"openid profile","id_token":"new-id-token"}`))
+	}))
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+				GetToken: func(_ context.Context, _ plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+					return &provider.OAuthTokens{
+						AccessToken:          "old-access-token",
+						RefreshToken:         "refresh-token",
+						AccessTokenExpiresAt: &expiredAt,
+						Scopes:               []string{"openid", "email"},
+					}, nil
+				},
+				GetUserInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+					return &provider.UserInfo{
+						User: provider.OAuthUser{
+							ID:            "refresh-account",
+							Name:          "Refresh User",
+							Email:         "generic-oauth-refresh@example.com",
+							EmailVerified: true,
+						},
+					}, nil
+				},
+			},
+		},
+	}))
+
+	callback := completeGenericOAuthSignIn(t, a, "oidc")
+	token := postWithCookies(t, a, "/get-access-token", `{"providerId":"oidc"}`, callback.Result().Cookies())
+	if token.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", token.Code, token.Body.String())
+	}
+	var tokenBody struct {
+		AccessToken string   `json:"accessToken"`
+		IDToken     string   `json:"idToken"`
+		Scopes      []string `json:"scopes"`
+	}
+	if err := json.Unmarshal(token.Body.Bytes(), &tokenBody); err != nil {
+		t.Fatal(err)
+	}
+	if !refreshSeen {
+		t.Fatal("expected refresh token endpoint call")
+	}
+	if tokenBody.AccessToken != "new-access-token" || tokenBody.IDToken != "new-id-token" {
+		t.Fatalf("token=%+v", tokenBody)
+	}
+	if len(tokenBody.Scopes) != 2 || tokenBody.Scopes[0] != "openid" || tokenBody.Scopes[1] != "profile" {
+		t.Fatalf("scopes=%v", tokenBody.Scopes)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "refresh-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.AccessToken != "new-access-token" || account.RefreshToken != "refresh-token" || account.IDToken != "new-id-token" || account.Scope != "openid,profile" {
+		t.Fatalf("account=%+v", account)
+	}
+	if account.AccessTokenExpiresAt == nil || !account.AccessTokenExpiresAt.After(time.Now()) {
+		t.Fatalf("access token expiry=%v", account.AccessTokenExpiresAt)
+	}
+}
+
+func TestGenericOAuthRefreshTokenEndpoint(t *testing.T) {
+	expiredAt := time.Now().Add(-time.Minute)
+	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "form", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "refresh-token" {
+			http.Error(w, "refresh form", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"manual-access-token","expires_in":3600,"scope":"email"}`))
+	}))
+	defer oauthServer.Close()
+
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         oauthServer.URL + "/token",
+				GetToken: func(_ context.Context, _ plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+					return &provider.OAuthTokens{
+						AccessToken:          "old-access-token",
+						RefreshToken:         "refresh-token",
+						AccessTokenExpiresAt: &expiredAt,
+						Scopes:               []string{"openid"},
+					}, nil
+				},
+				GetUserInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+					return &provider.UserInfo{
+						User: provider.OAuthUser{
+							ID:            "manual-refresh-account",
+							Name:          "Manual Refresh User",
+							Email:         "generic-oauth-manual-refresh@example.com",
+							EmailVerified: true,
+						},
+					}, nil
+				},
+			},
+		},
+	}))
+
+	callback := completeGenericOAuthSignIn(t, a, "oidc")
+	refresh := postWithCookies(t, a, "/refresh-token", `{"providerId":"oidc"}`, callback.Result().Cookies())
+	if refresh.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", refresh.Code, refresh.Body.String())
+	}
+	var refreshBody struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+		Scope        string `json:"scope"`
+		ProviderID   string `json:"providerId"`
+		AccountID    string `json:"accountId"`
+	}
+	if err := json.Unmarshal(refresh.Body.Bytes(), &refreshBody); err != nil {
+		t.Fatal(err)
+	}
+	if refreshBody.AccessToken != "manual-access-token" || refreshBody.RefreshToken != "refresh-token" || refreshBody.Scope != "email" {
+		t.Fatalf("refresh=%+v", refreshBody)
+	}
+	if refreshBody.ProviderID != "oidc" || refreshBody.AccountID != "manual-refresh-account" {
+		t.Fatalf("refresh=%+v", refreshBody)
 	}
 }
 

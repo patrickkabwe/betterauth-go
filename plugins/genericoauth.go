@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -237,7 +238,229 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": true})
 			}),
 		},
+		hooks: &auth.PluginHooks{
+			Before: []func(*auth.Context) bool{
+				func(c *auth.Context) bool {
+					return handleGenericOAuthTokenRoutes(c, providers)
+				},
+			},
+		},
 	}
+}
+
+type genericOAuthTokenRequest struct {
+	ProviderID string `json:"providerId"`
+	AccountID  string `json:"accountId,omitempty"`
+}
+
+func handleGenericOAuthTokenRoutes(c *auth.Context, providers map[string]GenericOAuthProviderConfig) bool {
+	if c.R.Method != http.MethodPost {
+		return true
+	}
+	path := strings.TrimSuffix(c.R.URL.Path, "/")
+	if path == "" {
+		path = "/"
+	}
+	if path != "/get-access-token" && path != "/refresh-token" {
+		return true
+	}
+	body, err := parseGenericOAuthTokenRequest(c)
+	if err != nil {
+		c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeInvalidEmail, constants.MsgInvalidRequestBody))
+		return false
+	}
+	p, ok := providers[body.ProviderID]
+	if !ok {
+		return true
+	}
+	if path == "/get-access-token" {
+		handleGenericOAuthGetAccessToken(c, p, body)
+		return false
+	}
+	handleGenericOAuthRefreshToken(c, p, body)
+	return false
+}
+
+func parseGenericOAuthTokenRequest(c *auth.Context) (genericOAuthTokenRequest, error) {
+	originalBody := c.R.Body
+	raw, err := io.ReadAll(io.LimitReader(c.R.Body, 1<<20))
+	_ = originalBody.Close()
+	if err != nil {
+		return genericOAuthTokenRequest{}, err
+	}
+	c.R.Body = io.NopCloser(bytes.NewReader(raw))
+	if len(raw) == 0 {
+		return genericOAuthTokenRequest{}, nil
+	}
+	var body genericOAuthTokenRequest
+	if strings.HasPrefix(strings.ToLower(c.R.Header.Get(constants.HeaderContentType)), "application/x-www-form-urlencoded") {
+		values, err := url.ParseQuery(string(raw))
+		if err != nil {
+			return genericOAuthTokenRequest{}, err
+		}
+		body.ProviderID = values.Get("providerId")
+		body.AccountID = values.Get("accountId")
+		return body, nil
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return genericOAuthTokenRequest{}, err
+	}
+	return body, nil
+}
+
+func handleGenericOAuthGetAccessToken(c *auth.Context, p GenericOAuthProviderConfig, body genericOAuthTokenRequest) {
+	sess, _, ok := c.RequireSession()
+	if !ok {
+		return
+	}
+	account, ok := genericOAuthAccountForUser(c, sess.UserID, body.ProviderID, body.AccountID)
+	if !ok {
+		return
+	}
+	if shouldRefreshGenericOAuthAccessToken(account) {
+		tokens, err := refreshGenericOAuthAccessToken(c, p, account.RefreshToken)
+		if err != nil {
+			c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeFailedToGetAccessToken, constants.MsgFailedValidAccessToken))
+			return
+		}
+		if err := updateGenericOAuthAccount(c, account.ID, tokens); err != nil {
+			c.WriteError(apierror.New(http.StatusBadRequest, apierror.CodeFailedToGetAccessToken, constants.MsgFailedValidAccessToken))
+			return
+		}
+		applyGenericOAuthTokensToAccount(account, tokens)
+	}
+	c.WriteJSON(http.StatusOK, types.AccessTokenResponse{
+		AccessToken:          account.AccessToken,
+		AccessTokenExpiresAt: account.AccessTokenExpiresAt,
+		IDToken:              account.IDToken,
+		Scopes:               splitGenericOAuthScopes(account.Scope),
+	})
+}
+
+func handleGenericOAuthRefreshToken(c *auth.Context, p GenericOAuthProviderConfig, body genericOAuthTokenRequest) {
+	sess, _, ok := c.RequireSession()
+	if !ok {
+		return
+	}
+	account, ok := genericOAuthAccountForUser(c, sess.UserID, body.ProviderID, body.AccountID)
+	if !ok {
+		return
+	}
+	if account.RefreshToken == "" {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeRefreshTokenNotFound))
+		return
+	}
+	tokens, err := refreshGenericOAuthAccessToken(c, p, account.RefreshToken)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeFailedToRefreshAccessToken))
+		return
+	}
+	refreshToken := tokens.RefreshToken
+	if refreshToken == "" {
+		refreshToken = account.RefreshToken
+	}
+	refreshExpires := tokens.RefreshTokenExpiresAt
+	if refreshExpires == nil {
+		refreshExpires = account.RefreshTokenExpiresAt
+	}
+	scope := account.Scope
+	if len(tokens.Scopes) > 0 {
+		scope = strings.Join(tokens.Scopes, ",")
+	}
+	idToken := tokens.IDToken
+	if idToken == "" {
+		idToken = account.IDToken
+	}
+	update := store.AccountUpdate{
+		AccessToken:           &tokens.AccessToken,
+		RefreshToken:          &refreshToken,
+		AccessTokenExpiresAt:  tokens.AccessTokenExpiresAt,
+		RefreshTokenExpiresAt: refreshExpires,
+		IDToken:               &idToken,
+		Scope:                 &scope,
+	}
+	if _, err := c.Auth.Store().UpdateAccount(c.R.Context(), account.ID, update); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeFailedToRefreshAccessToken))
+		return
+	}
+	c.WriteJSON(http.StatusOK, types.RefreshTokenResponse{
+		AccessToken:           tokens.AccessToken,
+		RefreshToken:          refreshToken,
+		AccessTokenExpiresAt:  tokens.AccessTokenExpiresAt,
+		RefreshTokenExpiresAt: refreshExpires,
+		Scope:                 scope,
+		IDToken:               idToken,
+		ProviderID:            account.ProviderID,
+		AccountID:             account.AccountID,
+	})
+}
+
+func genericOAuthAccountForUser(c *auth.Context, userID string, providerID string, accountID string) (*types.Account, bool) {
+	accounts, err := c.Auth.Store().ListAccountsByUserID(c.R.Context(), userID)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return nil, false
+	}
+	for i := range accounts {
+		account := &accounts[i]
+		if account.ProviderID != providerID {
+			continue
+		}
+		if accountID == "" || account.AccountID == accountID {
+			return account, true
+		}
+	}
+	c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeAccountNotFound))
+	return nil, false
+}
+
+func shouldRefreshGenericOAuthAccessToken(account *types.Account) bool {
+	return account.RefreshToken != "" && account.AccessTokenExpiresAt != nil && account.AccessTokenExpiresAt.Sub(time.Now()) < 5*time.Second
+}
+
+func refreshGenericOAuthAccessToken(c *auth.Context, p GenericOAuthProviderConfig, refreshToken string) (*provider.OAuthTokens, error) {
+	tokenURL, err := genericOAuthTokenEndpoint(c, p)
+	if err != nil {
+		return nil, err
+	}
+	tokens, err := provider.RefreshAccessTokenWithOptions(c.R.Context(), provider.RefreshAccessTokenOpts{
+		TokenURL:       tokenURL,
+		ClientID:       p.ClientID,
+		ClientSecret:   p.ClientSecret,
+		RefreshToken:   refreshToken,
+		Authentication: p.Authentication,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if tokens == nil || tokens.AccessToken == "" {
+		return nil, errors.New("access token missing")
+	}
+	return genericOAuthApplyAccessTokenExpiresIn(p, tokens), nil
+}
+
+func applyGenericOAuthTokensToAccount(account *types.Account, tokens *provider.OAuthTokens) {
+	account.AccessToken = tokens.AccessToken
+	account.AccessTokenExpiresAt = tokens.AccessTokenExpiresAt
+	if tokens.RefreshToken != "" {
+		account.RefreshToken = tokens.RefreshToken
+	}
+	if tokens.RefreshTokenExpiresAt != nil {
+		account.RefreshTokenExpiresAt = tokens.RefreshTokenExpiresAt
+	}
+	if tokens.IDToken != "" {
+		account.IDToken = tokens.IDToken
+	}
+	if len(tokens.Scopes) > 0 {
+		account.Scope = strings.Join(tokens.Scopes, ",")
+	}
+}
+
+func splitGenericOAuthScopes(scope string) []string {
+	if scope == "" {
+		return []string{}
+	}
+	return strings.Split(scope, ",")
 }
 
 func genericOAuthSignInAuthorizationURL(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
