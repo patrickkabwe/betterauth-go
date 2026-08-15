@@ -2,12 +2,14 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -43,8 +45,8 @@ func EmailOTP(opts EmailOTPOptions) auth.Plugin {
 			rt(http.MethodPost, "/email-otp/check-verification-otp", checkOTPHandler(opts, constants.EmailOTPTypeVerification)),
 			rt(http.MethodPost, "/email-otp/verify-email", verifyEmailOTPHandler(opts)),
 			rt(http.MethodPost, "/sign-in/email-otp", signInEmailOTPHandler(opts)),
-			rt(http.MethodPost, "/email-otp/request-password-reset", sendOTPHandler(opts, constants.EmailOTPTypeForgetPassword)),
-			rt(http.MethodPost, "/forget-password/email-otp", sendOTPHandler(opts, constants.EmailOTPTypeForgetPassword)),
+			rt(http.MethodPost, "/email-otp/request-password-reset", requestPasswordResetEmailOTPHandler(opts)),
+			rt(http.MethodPost, "/forget-password/email-otp", requestPasswordResetEmailOTPHandler(opts)),
 			rt(http.MethodPost, "/email-otp/reset-password", resetPasswordOTPHandler(opts)),
 			rt(http.MethodPost, "/email-otp/request-email-change", sendOTPHandler(opts, constants.EmailOTPTypeEmailChange)),
 			rt(http.MethodPost, "/email-otp/change-email", changeEmailOTPHandler(opts)),
@@ -105,6 +107,34 @@ func sendOTP(c *auth.Context, opts EmailOTPOptions, email, typ string) {
 	_ = c.Auth.CreateVerification(c.R.Context(), otpIdentifier(typ, email), otp, opts.expires())
 	_ = opts.SendOTP(c.R.Context(), email, otp, typ)
 	c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+func requestPasswordResetEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
+	return func(c *auth.Context) {
+		var body struct {
+			Email string `json:"email"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.Email == "" {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidEmail))
+			return
+		}
+		email := auth.NormalizeEmail(body.Email)
+		_, err := c.Auth.Store().FindUserByEmail(c.R.Context(), email)
+		if errors.Is(err, berrors.ErrNotFound) {
+			err = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), otpIdentifier(constants.EmailOTPTypeForgetPassword, email))
+			if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+				return
+			}
+			c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+			return
+		}
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		sendOTP(c, opts, email, constants.EmailOTPTypeForgetPassword)
+	}
 }
 
 func checkOTPHandler(opts EmailOTPOptions, typ string) func(*auth.Context) {

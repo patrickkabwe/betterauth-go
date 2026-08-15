@@ -2,12 +2,14 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/plugins"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -109,5 +111,35 @@ func TestEmailOTPPluginSendVerificationOTPRejectsChangeEmailType(t *testing.T) {
 	}
 	if sent {
 		t.Fatal("change-email OTP should use the request-email-change endpoint")
+	}
+}
+
+func TestEmailOTPPluginPasswordResetDoesNotSendForUnknownEmail(t *testing.T) {
+	var sent bool
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			SendOTP: func(_ context.Context, _ string, _ string, _ string) error {
+				sent = true
+				return nil
+			},
+		})}
+	})
+	err := a.CreateVerification(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeForgetPassword+":missing@example.com", "123456", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/request-password-reset", map[string]any{
+		"email": "missing@example.com",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	if sent {
+		t.Fatal("password reset OTP should not be sent for unknown email")
+	}
+	_, err = a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeForgetPassword+":missing@example.com")
+	if !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("verification error=%v", err)
 	}
 }
