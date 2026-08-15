@@ -233,6 +233,40 @@ func TestGenericOAuthSignInStoresAdditionalStateData(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthSignInWithoutScopesUsesEmptyScope(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID:       "oidc",
+				ClientID:         "client",
+				ClientSecret:     "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+			},
+		},
+	}))
+
+	w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"/dashboard"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes, ok := parsed.Query()["scope"]
+	if !ok || len(scopes) != 1 || scopes[0] != "" {
+		t.Fatalf("scope=%v url=%s", scopes, body.URL)
+	}
+}
+
 func TestGenericOAuthSignInAuthorizationURLParamsFunc(t *testing.T) {
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
 		Providers: []plugins.GenericOAuthProviderConfig{

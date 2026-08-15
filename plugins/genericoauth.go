@@ -1240,7 +1240,7 @@ func genericOAuthLinkScopes(requestScopes []string, configuredScopes []string) [
 
 func joinScopes(scopes []string) string {
 	if len(scopes) == 0 {
-		return "openid email profile"
+		return ""
 	}
 	out := ""
 	for i, s := range scopes {
