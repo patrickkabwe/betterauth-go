@@ -180,6 +180,9 @@ func handleOAuthCallback(c *Context) {
 		redirectOAuthError(c, errorURL, "invalid_code")
 		return
 	}
+	if userData := parseOAuthCallbackUser(q.Get("user")); userData != nil {
+		tokens.User = userData
+	}
 
 	info, err := p.GetUserInfo(c.R.Context(), *tokens)
 	if err != nil || info == nil || info.User.ID == "" {
@@ -279,6 +282,17 @@ func redirectOAuthPostCallback(c *Context, providerID string) {
 		target += "?" + encoded
 	}
 	c.Redirect(target)
+}
+
+func parseOAuthCallbackUser(raw string) map[string]any {
+	if raw == "" {
+		return nil
+	}
+	var user map[string]any
+	if err := json.Unmarshal([]byte(raw), &user); err != nil {
+		return nil
+	}
+	return user
 }
 
 func stringFromOAuthCallbackValue(value any) string {

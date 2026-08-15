@@ -28,6 +28,7 @@ type OAuthTokens struct {
 	RefreshTokenExpiresAt *time.Time
 	IDToken               string
 	Scopes                []string
+	User                  map[string]any
 }
 
 // AuthorizationURLOpts configures an OAuth authorization redirect.

@@ -15,11 +15,12 @@ import (
 )
 
 type staticOAuthProvider struct {
-	id      string
-	user    provider.OAuthUser
-	tokens  provider.OAuthTokens
-	authURL string
-	opts    provider.AuthorizationURLOpts
+	id         string
+	user       provider.OAuthUser
+	tokens     provider.OAuthTokens
+	authURL    string
+	opts       provider.AuthorizationURLOpts
+	seenTokens provider.OAuthTokens
 }
 
 func (p *staticOAuthProvider) ID() string { return p.id }
@@ -42,7 +43,8 @@ func (p *staticOAuthProvider) ValidateAuthorizationCode(_ context.Context, _, _,
 	return &t, nil
 }
 
-func (p *staticOAuthProvider) GetUserInfo(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+func (p *staticOAuthProvider) GetUserInfo(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {
+	p.seenTokens = tokens
 	return &provider.UserInfo{User: p.user, Data: map[string]any{"provider": p.id}}, nil
 }
 
@@ -184,6 +186,44 @@ func TestOAuthCallbackProviderErrorUsesStateErrorCallbackURL(t *testing.T) {
 	location := resp.Header.Get("Location")
 	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=access_denied") || !strings.Contains(location, "error_description=User+denied+access") {
 		t.Fatalf("redirect=%s", location)
+	}
+}
+
+func TestOAuthCallbackPassesUserDataToProvider(t *testing.T) {
+	p := &staticOAuthProvider{
+		id: "mock",
+		user: provider.OAuthUser{
+			ID: "mock-user-data", Email: "oauth-user-data@example.com", EmailVerified: true, Name: "OAuth User Data",
+		},
+		tokens: provider.OAuthTokens{AccessToken: "at-user"},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+	userData := url.QueryEscape(`{"name":{"firstName":"Ada","lastName":"Lovelace"},"email":"ada@example.com"}`)
+
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?code=abc&state="+url.QueryEscape(state)+"&user="+userData, nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	name, ok := p.seenTokens.User["name"].(map[string]any)
+	if !ok || name["firstName"] != "Ada" || p.seenTokens.User["email"] != "ada@example.com" {
+		t.Fatalf("user data=%+v", p.seenTokens.User)
 	}
 }
 
