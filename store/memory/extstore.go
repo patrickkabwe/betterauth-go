@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
 
@@ -643,4 +644,114 @@ func (s *Store) ListWalletsByUser(_ context.Context, userID string) ([]types.Wal
 
 func walletKey(address string, chainID int) string {
 	return strings.ToLower(address) + ":" + strconv.Itoa(chainID)
+}
+
+func (s *Store) CreateAPIKey(_ context.Context, key *types.APIKey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.apiKeysByKey[key.Key]; ok {
+		return ErrAlreadyExists
+	}
+	cp := *key
+	s.apiKeys[key.ID] = &cp
+	s.apiKeysByKey[key.Key] = key.ID
+	return nil
+}
+
+func (s *Store) FindAPIKeyByID(_ context.Context, id string) (*types.APIKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key, ok := s.apiKeys[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *key
+	return &cp, nil
+}
+
+func (s *Store) FindAPIKeyByKey(_ context.Context, hashedKey string) (*types.APIKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.apiKeysByKey[hashedKey]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *s.apiKeys[id]
+	return &cp, nil
+}
+
+func (s *Store) ListAPIKeysByReference(_ context.Context, referenceID string) ([]types.APIKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.APIKey, 0)
+	for _, key := range s.apiKeys {
+		if key.ReferenceID == referenceID {
+			out = append(out, *key)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) UpdateAPIKey(_ context.Context, id string, update store.APIKeyUpdate) (*types.APIKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key, ok := s.apiKeys[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if update.Name != nil {
+		key.Name = *update.Name
+	}
+	if update.Enabled != nil {
+		key.Enabled = *update.Enabled
+	}
+	if update.ExpiresAt != nil {
+		key.ExpiresAt = update.ExpiresAt
+	}
+	if update.Permissions != nil {
+		key.Permissions = *update.Permissions
+	}
+	if update.Metadata != nil {
+		key.Metadata = *update.Metadata
+	}
+	if update.RequestCount != nil {
+		key.RequestCount = *update.RequestCount
+	}
+	if update.Remaining != nil {
+		key.Remaining = update.Remaining
+	}
+	if update.LastRequest != nil {
+		key.LastRequest = update.LastRequest
+	}
+	if update.UpdatedAt != nil {
+		key.UpdatedAt = *update.UpdatedAt
+	} else {
+		key.UpdatedAt = time.Now().UTC()
+	}
+	cp := *key
+	return &cp, nil
+}
+
+func (s *Store) DeleteAPIKey(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key, ok := s.apiKeys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(s.apiKeysByKey, key.Key)
+	delete(s.apiKeys, id)
+	return nil
+}
+
+func (s *Store) DeleteExpiredAPIKeys(_ context.Context, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, key := range s.apiKeys {
+		if key.ExpiresAt != nil && key.ExpiresAt.Before(now) {
+			delete(s.apiKeysByKey, key.Key)
+			delete(s.apiKeys, id)
+		}
+	}
+	return nil
 }

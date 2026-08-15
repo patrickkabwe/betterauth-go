@@ -27,13 +27,14 @@ Or enable everything at once:
 Plugins: plugins.All(plugins.AllOptions{ /* per-plugin options */ }),
 ```
 
-## All 24 core plugins
+## All 25 core plugins
 
 | ID | Package | Description |
 |----|---------|-------------|
 | `bearer` | `plugins.Bearer` | Bearer token auth — [guide](bearer.md) |
 | `magic-link` | `plugins.MagicLink` | Passwordless email links — [guide](magic-link.md) |
 | `anonymous` | `plugins.Anonymous` | Anonymous / guest users — [other](other-plugins.md) |
+| `api-key` | `plugins.APIKey` | API key management and optional API-key sessions — [other](other-plugins.md) |
 | `username` | `plugins.Username` | Username sign-in — [guide](username.md) |
 | `email-otp` | `plugins.EmailOTP` | Email OTP — [guide](email-otp.md) |
 | `one-time-token` | `plugins.OneTimeToken` | Short-lived single-use tokens |

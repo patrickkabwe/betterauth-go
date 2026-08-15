@@ -23,8 +23,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
 | Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 24 | 0 | 1 |
-| Extended packages | 1 | 0 | 9 |
+| Plugins (core package) | 25 | 0 | 0 |
+| Extended packages | 2 | 0 | 8 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -180,7 +180,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 |--------|-----|--------|-------------|
 | Admin | `admin` | ✅ | User management, roles, ban, impersonate |
 | Anonymous | `anonymous` | ✅ | Guest / anonymous sessions |
-| API Key | `api-key` | ⬜ | Separate `@better-auth/api-key` package |
+| API Key | `api-key` | ✅ | Database-backed keys, verification, optional session auth |
 | Bearer | `bearer` | ✅ | Session token via `Authorization` header |
 | Captcha | `captcha` | ✅ | Turnstile, reCAPTCHA, hCaptcha, CaptchaFox |
 | Custom Session | `custom-session` | ✅ | Transform session response |
@@ -225,7 +225,7 @@ Separate npm packages in the Better Auth monorepo.
 | `@better-auth/sso` | ⬜ | SAML / enterprise SSO |
 | `@better-auth/scim` | ⬜ | SCIM user provisioning |
 | `@better-auth/oauth-provider` | ⬜ | Full OAuth 2.0 authorization server |
-| `@better-auth/api-key` | ⬜ | API key management |
+| `@better-auth/api-key` | ✅ | API key management plugin |
 | `@better-auth/expo` | ⬜ | React Native / Expo client helpers |
 | `@better-auth/electron` | ⬜ | Electron desktop auth |
 | `@better-auth/i18n` | ⬜ | Translated error messages |
@@ -390,7 +390,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 
 ### Phase 6 — Ecosystem
 
-- [ ] API keys (separate `@better-auth/api-key` package)
+- [x] API keys (separate `@better-auth/api-key` package)
 - [ ] Stripe billing
 - [x] MCP auth
 - [ ] i18n error messages

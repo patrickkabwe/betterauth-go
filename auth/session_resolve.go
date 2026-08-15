@@ -117,6 +117,9 @@ func (a *Auth) refreshSession(c *Context, sess *types.Session) (*types.Session, 
 }
 
 func (a *Auth) resolveSession(c *Context, opts SessionOpts, isPost bool) (*resolvedSession, bool) {
+	if c.sessionOverride != nil && c.userOverride != nil {
+		return &resolvedSession{Session: c.sessionOverride, User: c.userOverride}, true
+	}
 	if cached, ok := a.sessionFromCache(c, opts); ok {
 		needsRefresh := a.shouldRefresh(c, cached.Session, opts)
 		if a.cfg.deferSessionRefresh && !isPost {

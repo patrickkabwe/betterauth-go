@@ -9,6 +9,7 @@ import (
 	"time"
 
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
+	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
 
@@ -878,4 +879,193 @@ func (s *Store) ListWalletsByUser(ctx context.Context, userID string) ([]types.W
 		out = append(out, *w)
 	}
 	return out, rows.Err()
+}
+
+// =========================================================================
+// APIKey
+// =========================================================================
+
+var apiKeyColNames = []string{
+	"id", "configId", "name", "start", "referenceId", "prefix", "key",
+	"refillInterval", "refillAmount", "lastRefillAt", "enabled",
+	"rateLimitEnabled", "rateLimitTimeWindow", "rateLimitMax", "requestCount",
+	"remaining", "lastRequest", "expiresAt", "createdAt", "updatedAt",
+	"permissions", "metadata",
+}
+
+func (s *Store) CreateAPIKey(ctx context.Context, key *types.APIKey) error {
+	_, err := s.db.ExecContext(ctx, s.q(`
+		INSERT INTO `+s.table("apikey")+` (`+s.cols(apiKeyColNames...)+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		key.ID, key.ConfigID, nullStr(key.Name), nullStr(key.Start), key.ReferenceID, nullStr(key.Prefix), key.Key,
+		nullZeroInt64(key.RefillInterval), nullZeroInt(key.RefillAmount), nullMillis(key.LastRefillAt), boolToInt(key.Enabled),
+		boolToInt(key.RateLimitEnabled), key.RateLimitTimeWindow, key.RateLimitMax, key.RequestCount,
+		nullInt(key.Remaining), nullMillis(key.LastRequest), nullMillis(key.ExpiresAt), toMillis(key.CreatedAt), toMillis(key.UpdatedAt),
+		nullStr(key.Permissions), nullStr(key.Metadata))
+	return err
+}
+
+func (s *Store) FindAPIKeyByID(ctx context.Context, id string) (*types.APIKey, error) {
+	return s.scanAPIKey(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(apiKeyColNames...)+` FROM `+s.table("apikey")+` WHERE id = ?`), id))
+}
+
+func (s *Store) FindAPIKeyByKey(ctx context.Context, hashedKey string) (*types.APIKey, error) {
+	return s.scanAPIKey(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(apiKeyColNames...)+` FROM `+s.table("apikey")+` WHERE key = ?`), hashedKey))
+}
+
+func (s *Store) ListAPIKeysByReference(ctx context.Context, referenceID string) ([]types.APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(apiKeyColNames...)+` FROM `+s.table("apikey")+` WHERE `+s.table("referenceId")+` = ?`), referenceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.APIKey, 0)
+	for rows.Next() {
+		key, err := s.scanAPIKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *key)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateAPIKey(ctx context.Context, id string, update store.APIKeyUpdate) (*types.APIKey, error) {
+	key, err := s.FindAPIKeyByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if update.Name != nil {
+		key.Name = *update.Name
+	}
+	if update.Enabled != nil {
+		key.Enabled = *update.Enabled
+	}
+	if update.ExpiresAt != nil {
+		key.ExpiresAt = update.ExpiresAt
+	}
+	if update.Permissions != nil {
+		key.Permissions = *update.Permissions
+	}
+	if update.Metadata != nil {
+		key.Metadata = *update.Metadata
+	}
+	if update.RequestCount != nil {
+		key.RequestCount = *update.RequestCount
+	}
+	if update.Remaining != nil {
+		key.Remaining = update.Remaining
+	}
+	if update.LastRequest != nil {
+		key.LastRequest = update.LastRequest
+	}
+	if update.UpdatedAt != nil {
+		key.UpdatedAt = *update.UpdatedAt
+	} else {
+		key.UpdatedAt = time.Now().UTC()
+	}
+	_, err = s.db.ExecContext(ctx, s.q(`
+		UPDATE `+s.table("apikey")+` SET name = ?, enabled = ?, `+s.table("expiresAt")+` = ?, permissions = ?, metadata = ?,
+		`+s.table("requestCount")+` = ?, remaining = ?, `+s.table("lastRequest")+` = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
+		nullStr(key.Name), boolToInt(key.Enabled), nullMillis(key.ExpiresAt), nullStr(key.Permissions), nullStr(key.Metadata),
+		key.RequestCount, nullInt(key.Remaining), nullMillis(key.LastRequest), toMillis(key.UpdatedAt), id)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func (s *Store) DeleteAPIKey(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("apikey")+` WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteExpiredAPIKeys(ctx context.Context, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("apikey")+` WHERE `+s.table("expiresAt")+` IS NOT NULL AND `+s.table("expiresAt")+` < ?`), toMillis(now))
+	return err
+}
+
+func (s *Store) scanAPIKey(row interface{ Scan(...any) error }) (*types.APIKey, error) {
+	var (
+		key              types.APIKey
+		name             sql.NullString
+		start            sql.NullString
+		prefix           sql.NullString
+		refillInterval   sql.NullInt64
+		refillAmount     sql.NullInt64
+		lastRefillAt     sql.NullInt64
+		enabled          int
+		rateLimitEnabled int
+		remaining        sql.NullInt64
+		lastRequest      sql.NullInt64
+		expiresAt        sql.NullInt64
+		createdAt        int64
+		updatedAt        int64
+		permissions      sql.NullString
+		metadata         sql.NullString
+	)
+	err := row.Scan(
+		&key.ID, &key.ConfigID, &name, &start, &key.ReferenceID, &prefix, &key.Key,
+		&refillInterval, &refillAmount, &lastRefillAt, &enabled,
+		&rateLimitEnabled, &key.RateLimitTimeWindow, &key.RateLimitMax, &key.RequestCount,
+		&remaining, &lastRequest, &expiresAt, &createdAt, &updatedAt,
+		&permissions, &metadata,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	key.Name = name.String
+	key.Start = start.String
+	key.Prefix = prefix.String
+	key.RefillInterval = refillInterval.Int64
+	key.RefillAmount = int(refillAmount.Int64)
+	key.LastRefillAt = scanNullMillis(lastRefillAt)
+	key.Enabled = enabled != 0
+	key.RateLimitEnabled = rateLimitEnabled != 0
+	key.Remaining = scanNullInt(remaining)
+	key.LastRequest = scanNullMillis(lastRequest)
+	key.ExpiresAt = scanNullMillis(expiresAt)
+	key.CreatedAt = fromMillis(createdAt)
+	key.UpdatedAt = fromMillis(updatedAt)
+	key.Permissions = permissions.String
+	key.Metadata = metadata.String
+	return &key, nil
+}
+
+func nullZeroInt(value int) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func nullZeroInt64(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func nullInt(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func scanNullInt(value sql.NullInt64) *int {
+	if !value.Valid {
+		return nil
+	}
+	out := int(value.Int64)
+	return &out
 }

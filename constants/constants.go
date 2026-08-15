@@ -148,6 +148,7 @@ const (
 	PluginOrganizationRoles = "organization-roles"
 	PluginOIDCProvider      = "oidc-provider"
 	PluginMCP               = "mcp"
+	PluginAPIKey            = "api-key"
 )
 
 // API error codes.
@@ -233,6 +234,10 @@ const (
 	CodeInvitationNotFound          = "INVITATION_NOT_FOUND"
 	CodeOAuthError                  = "OAUTH_ERROR"
 	CodeExpiredDeviceCode           = "EXPIRED_DEVICE_CODE"
+	CodeInvalidAPIKey               = "INVALID_API_KEY"
+	CodeAPIKeyNotFound              = "API_KEY_NOT_FOUND"
+	CodeAPIKeyDisabled              = "API_KEY_DISABLED"
+	CodeAPIKeyExpired               = "API_KEY_EXPIRED"
 	CodeAccessDenied                = "ACCESS_DENIED"
 	CodeAuthorizationPending        = "AUTHORIZATION_PENDING"
 	CodeClientNotFound              = "CLIENT_NOT_FOUND"
@@ -327,6 +332,10 @@ const (
 	MsgInvitationNotFound           = "Invitation not found"
 	MsgOAuthError                   = "Invalid OAuth callback"
 	MsgExpiredDeviceCode            = "Device code expired"
+	MsgInvalidAPIKey                = "Invalid API key"
+	MsgAPIKeyNotFound               = "API key not found"
+	MsgAPIKeyDisabled               = "API key is disabled"
+	MsgAPIKeyExpired                = "API key has expired"
 	MsgAccessDenied                 = "Access denied"
 	MsgAuthorizationPending         = "Authorization pending"
 	MsgClientNotFound               = "Client not found"
@@ -456,6 +465,10 @@ var apiMessages = map[string]string{
 	CodeInvitationNotFound:          MsgInvitationNotFound,
 	CodeOAuthError:                  MsgOAuthError,
 	CodeExpiredDeviceCode:           MsgExpiredDeviceCode,
+	CodeInvalidAPIKey:               MsgInvalidAPIKey,
+	CodeAPIKeyNotFound:              MsgAPIKeyNotFound,
+	CodeAPIKeyDisabled:              MsgAPIKeyDisabled,
+	CodeAPIKeyExpired:               MsgAPIKeyExpired,
 	CodeAccessDenied:                MsgAccessDenied,
 	CodeAuthorizationPending:        MsgAuthorizationPending,
 	CodeClientNotFound:              MsgClientNotFound,

@@ -6,6 +6,7 @@ Brief reference for plugins without dedicated guides. All are enabled via
 | Plugin | ID | Notes |
 |--------|-----|-------|
 | Anonymous | `anonymous` | Guest sessions without email |
+| API key | `api-key` | Create, verify, list, update, and delete hashed API keys; can resolve sessions from `x-api-key` |
 | JWT | `jwt` | JWT tokens + JWKS endpoint |
 | Multi-session | `multi-session` | Multiple concurrent sessions |
 | Custom session | `custom-session` | Transform session API response |
@@ -46,7 +47,7 @@ Plugins: []auth.Plugin{
 Include plugin tables in migrations:
 
 ```bash
-betterauth-go generate --plugins jwt,siwe,device-authorization --dialect sqlite
+betterauth-go generate --plugins jwt,siwe,device-authorization,api-key --dialect sqlite
 ```
 
 ## Client pairing

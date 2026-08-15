@@ -143,3 +143,29 @@ type WalletAddress struct {
 	IsPrimary bool      `json:"isPrimary"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+
+// APIKey stores a hashed API key credential.
+type APIKey struct {
+	ID                  string     `json:"id"`
+	ConfigID            string     `json:"configId"`
+	Name                string     `json:"name,omitempty"`
+	Start               string     `json:"start,omitempty"`
+	ReferenceID         string     `json:"referenceId"`
+	Prefix              string     `json:"prefix,omitempty"`
+	Key                 string     `json:"-"`
+	RefillInterval      int64      `json:"refillInterval,omitempty"`
+	RefillAmount        int        `json:"refillAmount,omitempty"`
+	LastRefillAt        *time.Time `json:"lastRefillAt,omitempty"`
+	Enabled             bool       `json:"enabled"`
+	RateLimitEnabled    bool       `json:"rateLimitEnabled"`
+	RateLimitTimeWindow int64      `json:"rateLimitTimeWindow"`
+	RateLimitMax        int        `json:"rateLimitMax"`
+	RequestCount        int        `json:"requestCount"`
+	Remaining           *int       `json:"remaining,omitempty"`
+	LastRequest         *time.Time `json:"lastRequest,omitempty"`
+	ExpiresAt           *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+	Permissions         string     `json:"permissions,omitempty"`
+	Metadata            string     `json:"metadata,omitempty"`
+}

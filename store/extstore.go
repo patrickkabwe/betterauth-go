@@ -82,4 +82,26 @@ type ExtStore interface {
 	CreateWallet(ctx context.Context, w *types.WalletAddress) error
 	FindWalletByAddress(ctx context.Context, address string, chainID int) (*types.WalletAddress, error)
 	ListWalletsByUser(ctx context.Context, userID string) ([]types.WalletAddress, error)
+
+	// APIKey
+	CreateAPIKey(ctx context.Context, key *types.APIKey) error
+	FindAPIKeyByID(ctx context.Context, id string) (*types.APIKey, error)
+	FindAPIKeyByKey(ctx context.Context, hashedKey string) (*types.APIKey, error)
+	ListAPIKeysByReference(ctx context.Context, referenceID string) ([]types.APIKey, error)
+	UpdateAPIKey(ctx context.Context, id string, update APIKeyUpdate) (*types.APIKey, error)
+	DeleteAPIKey(ctx context.Context, id string) error
+	DeleteExpiredAPIKeys(ctx context.Context, now time.Time) error
+}
+
+// APIKeyUpdate describes mutable API key fields.
+type APIKeyUpdate struct {
+	Name         *string
+	Enabled      *bool
+	ExpiresAt    *time.Time
+	Permissions  *string
+	Metadata     *string
+	RequestCount *int
+	Remaining    *int
+	LastRequest  *time.Time
+	UpdatedAt    *time.Time
 }

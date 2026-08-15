@@ -24,6 +24,8 @@ type Context struct {
 	Vars map[string]string
 
 	sessionTokenOverride string
+	sessionOverride      *types.Session
+	userOverride         *types.User
 	authTokenExposed     bool
 	pendingAuthToken     string
 }
@@ -163,6 +165,12 @@ func (c *Context) SessionToken() (string, bool) {
 // SetSessionTokenOverride injects a bearer token as the active session token.
 func (c *Context) SetSessionTokenOverride(token string) {
 	c.sessionTokenOverride = token
+}
+
+// SetSessionOverride injects an already-authenticated session and user.
+func (c *Context) SetSessionOverride(sess *types.Session, user *types.User) {
+	c.sessionOverride = sess
+	c.userOverride = user
 }
 
 // MarkAuthToken queues a session token for bearer clients and exposes the header

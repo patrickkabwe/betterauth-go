@@ -28,6 +28,7 @@ type AllOptions struct {
 	Organization      OrganizationOptions
 	OIDCProvider      OIDCProviderOptions
 	MCP               MCPOptions
+	APIKey            APIKeyOptions
 }
 
 // All returns every core Better Auth plugin.
@@ -57,5 +58,6 @@ func All(opts AllOptions) []auth.Plugin {
 		Organization(opts.Organization),
 		OIDCProvider(opts.OIDCProvider),
 		MCP(opts.MCP),
+		APIKey(opts.APIKey),
 	}
 }

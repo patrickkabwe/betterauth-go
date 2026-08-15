@@ -25,6 +25,7 @@ const (
 	pluginUsername          = "username"
 	pluginPhoneNumber       = "phone-number"
 	pluginLastLogin         = "last-login-method"
+	pluginAPIKey            = "api-key"
 )
 
 // coreStatements returns the always-present tables (user, account, session,
@@ -270,6 +271,35 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 			)`,
 			`CREATE INDEX IF NOT EXISTS walletAddress_userId_idx ON ` + d.quoteIdent("walletAddress") + ` (` + d.quoteIdent("userId") + `)`,
 			`CREATE INDEX IF NOT EXISTS walletAddress_address_idx ON ` + d.quoteIdent("walletAddress") + ` (address, ` + d.quoteIdent("chainId") + `)`,
+		},
+		pluginAPIKey: {
+			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("apikey") + ` (
+				id TEXT PRIMARY KEY,
+				` + d.quoteIdent("configId") + ` TEXT NOT NULL DEFAULT 'default',
+				name TEXT,
+				start TEXT,
+				` + d.quoteIdent("referenceId") + ` TEXT NOT NULL,
+				prefix TEXT,
+				key TEXT NOT NULL,
+				` + d.quoteIdent("refillInterval") + ` INTEGER,
+				` + d.quoteIdent("refillAmount") + ` INTEGER,
+				` + d.quoteIdent("lastRefillAt") + ` ` + d.timestampType() + `,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				` + d.quoteIdent("rateLimitEnabled") + ` INTEGER NOT NULL DEFAULT 1,
+				` + d.quoteIdent("rateLimitTimeWindow") + ` INTEGER NOT NULL DEFAULT 86400000,
+				` + d.quoteIdent("rateLimitMax") + ` INTEGER NOT NULL DEFAULT 10,
+				` + d.quoteIdent("requestCount") + ` INTEGER NOT NULL DEFAULT 0,
+				remaining INTEGER,
+				` + d.quoteIdent("lastRequest") + ` ` + d.timestampType() + `,
+				` + d.quoteIdent("expiresAt") + ` ` + d.timestampType() + `,
+				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
+				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL,
+				permissions TEXT,
+				metadata TEXT
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS apikey_key_idx ON ` + d.quoteIdent("apikey") + ` (key)`,
+			`CREATE INDEX IF NOT EXISTS apikey_referenceId_idx ON ` + d.quoteIdent("apikey") + ` (` + d.quoteIdent("referenceId") + `)`,
+			`CREATE INDEX IF NOT EXISTS apikey_configId_idx ON ` + d.quoteIdent("apikey") + ` (` + d.quoteIdent("configId") + `)`,
 		},
 	}
 }

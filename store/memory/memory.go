@@ -39,6 +39,8 @@ type Store struct {
 	jwks              map[string]*types.JWKSRecord
 	oauthApps         map[string]*types.OAuthApplication
 	wallets           map[string]*types.WalletAddress
+	apiKeys           map[string]*types.APIKey
+	apiKeysByKey      map[string]string
 }
 
 // New creates a new in-memory store.
@@ -62,6 +64,8 @@ func New() *Store {
 		jwks:              make(map[string]*types.JWKSRecord),
 		oauthApps:         make(map[string]*types.OAuthApplication),
 		wallets:           make(map[string]*types.WalletAddress),
+		apiKeys:           make(map[string]*types.APIKey),
+		apiKeysByKey:      make(map[string]string),
 	}
 }
 
