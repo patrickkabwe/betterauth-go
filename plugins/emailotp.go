@@ -101,6 +101,9 @@ func sendVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			return
 		}
 		email := auth.NormalizeEmail(body.Email)
+		if !validateEmailOTPAddress(c, email) {
+			return
+		}
 		_, err := c.Auth.Store().FindUserByEmail(c.R.Context(), email)
 		if errors.Is(err, berrors.ErrNotFound) {
 			if body.Type != constants.EmailOTPTypeSignIn || opts.DisableSignUp {
@@ -117,6 +120,14 @@ func sendVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 
 func otpIdentifier(typ, email string) string {
 	return fmt.Sprintf("%s%s:%s", constants.VerificationEmailOTP, typ, auth.NormalizeEmail(email))
+}
+
+func validateEmailOTPAddress(c *auth.Context, email string) bool {
+	if !internalcrypto.ValidateEmail(auth.NormalizeEmail(email)) {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidEmail))
+		return false
+	}
+	return true
 }
 
 func sendOTPHandler(opts EmailOTPOptions, typ string) func(*auth.Context) {
@@ -266,6 +277,9 @@ func checkOTPHandler(opts EmailOTPOptions, typ string) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 			return
 		}
+		if !validateEmailOTPAddress(c, body.Email) {
+			return
+		}
 		otpType := typ
 		if body.Type != "" {
 			if !validEmailOTPCheckType(body.Type) {
@@ -405,6 +419,9 @@ func verifyEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+			return
+		}
+		if !validateEmailOTPAddress(c, body.Email) {
 			return
 		}
 		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeVerification, body.Email, body.OTP, true) {
