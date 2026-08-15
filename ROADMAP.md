@@ -22,7 +22,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Core email/password auth | 9 | 0 | 0 |
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
-| Social / OAuth | 8 | 0 | 34 |
+| Social / OAuth | 16 | 0 | 26 |
 | Plugins (core package) | 24 | 0 | 1 |
 | Extended packages | 1 | 0 | 9 |
 | Infrastructure | 23 | 2 | 5 |
@@ -139,12 +139,12 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Apple | ⬜ |
 | Atlassian | ⬜ |
 | AWS Cognito | ⬜ |
-| Discord | ⬜ |
-| Dropbox | ⬜ |
+| Discord | ✅ |
+| Dropbox | ✅ |
 | Facebook | ⬜ |
-| Figma | ⬜ |
+| Figma | ✅ |
 | GitHub | ✅ |
-| GitLab | ⬜ |
+| GitLab | ✅ |
 | Google | ✅ |
 | Hugging Face | ⬜ |
 | Kakao | ⬜ |
@@ -154,7 +154,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | LinkedIn | ⬜ |
 | Microsoft Entra ID | ⬜ |
 | Naver | ⬜ |
-| Notion | ⬜ |
+| Notion | ✅ |
 | Paybin | ⬜ |
 | PayPal | ⬜ |
 | Polar | ⬜ |
@@ -162,12 +162,12 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Reddit | ⬜ |
 | Roblox | ⬜ |
 | Salesforce | ⬜ |
-| Slack | ⬜ |
-| Spotify | ⬜ |
+| Slack | ✅ |
+| Spotify | ✅ |
 | TikTok | ⬜ |
 | Twitch | ⬜ |
 | Twitter / X | ⬜ |
-| Vercel | ⬜ |
+| Vercel | ✅ |
 | VK | ⬜ |
 | WeChat | ⬜ |
 | Zoom | ⬜ |
@@ -326,7 +326,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 | `database` / `store` | ✅ | Go `Store` interface + `DatabaseConfig` |
 | `trustedOrigins` | ✅ |
 | `emailAndPassword` | ✅ | Full option surface |
-| `socialProviders` | ✅ | Map + Google/GitHub helpers |
+| `socialProviders` | ✅ | Map + Google/GitHub helpers + standard OAuth provider constructors |
 | `session` | ✅ | ExpiresIn, updateAge, freshAge, cookieCache, defer refresh |
 | `user` / `account` | ✅ | Additional fields, change/delete email, linking |
 | `advanced` | ✅ | Cookie prefix/names/attrs, secure cookies, cross-subdomain, IP headers, CSRF, trailing slashes |

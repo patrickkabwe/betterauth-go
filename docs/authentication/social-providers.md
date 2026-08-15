@@ -1,7 +1,8 @@
 # Social providers
 
-Social sign-in uses OAuth 2.0. Google and GitHub are built in; additional
-providers can be added via the **generic-oauth** plugin.
+Social sign-in uses OAuth 2.0. Google and GitHub have top-level config helpers.
+Additional built-in constructors are available for Discord, Dropbox, Figma,
+GitLab, Notion, Slack, Spotify, and Vercel.
 
 ## Google
 
@@ -31,6 +32,38 @@ GitHub: auth.GitHubProviderConfig{
     Scopes:       []string{"read:user", "user:email"},
 },
 ```
+
+## Additional built-in providers
+
+Use the `SocialProviders` map for the standard OAuth constructors:
+
+```go
+import (
+    "github.com/patrickkabwe/betterauth-go/auth"
+    "github.com/patrickkabwe/betterauth-go/provider"
+    "github.com/patrickkabwe/betterauth-go/provider/oauth2provider"
+)
+
+a, err := auth.New(auth.Config{
+    Secret:  "your-secret-at-least-32-chars-long",
+    BaseURL: "https://api.example.com",
+    Store:   myStore,
+    SocialProviders: map[string]provider.SocialProvider{
+        oauth2provider.ProviderDiscord: oauth2provider.Discord(oauth2provider.Options{
+            ClientID:     os.Getenv("DISCORD_CLIENT_ID"),
+            ClientSecret: os.Getenv("DISCORD_CLIENT_SECRET"),
+        }),
+        oauth2provider.ProviderSpotify: oauth2provider.Spotify(oauth2provider.Options{
+            ClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
+            ClientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
+        }),
+    },
+})
+```
+
+The constructors share Better Auth's provider IDs and profile mappings for:
+`discord`, `dropbox`, `figma`, `gitlab`, `notion`, `slack`, `spotify`, and
+`vercel`.
 
 ## Sign in with social
 

@@ -5,6 +5,14 @@ const (
 	ProviderCredential = "credential"
 	ProviderGoogle     = "google"
 	ProviderGitHub     = "github"
+	ProviderDiscord    = "discord"
+	ProviderDropbox    = "dropbox"
+	ProviderFigma      = "figma"
+	ProviderGitLab     = "gitlab"
+	ProviderNotion     = "notion"
+	ProviderSlack      = "slack"
+	ProviderSpotify    = "spotify"
+	ProviderVercel     = "vercel"
 )
 
 // User additional field keys.
