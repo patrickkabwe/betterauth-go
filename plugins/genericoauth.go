@@ -18,21 +18,23 @@ import (
 
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
 type GenericOAuthProviderConfig struct {
-	ProviderID             string
-	ClientID               string
-	ClientSecret           string
-	DiscoveryURL           string
-	DiscoveryHeaders       map[string]string
-	AuthorizationURL       string
-	TokenURL               string
-	UserInfoURL            string
-	RedirectURI            string
-	Scopes                 []string
-	ResponseType           string
-	ResponseMode           string
-	Prompt                 string
-	AccessType             string
-	AuthorizationURLParams map[string]string
+	ProviderID              string
+	ClientID                string
+	ClientSecret            string
+	DiscoveryURL            string
+	DiscoveryHeaders        map[string]string
+	Issuer                  string
+	RequireIssuerValidation bool
+	AuthorizationURL        string
+	TokenURL                string
+	UserInfoURL             string
+	RedirectURI             string
+	Scopes                  []string
+	ResponseType            string
+	ResponseMode            string
+	Prompt                  string
+	AccessType              string
+	AuthorizationURLParams  map[string]string
 }
 
 // GenericOAuthOptions configures the generic OAuth plugin.
@@ -84,6 +86,11 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
 					return
 				}
+				p, ok := providers[providerID]
+				if !ok {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeProviderNotFound))
+					return
+				}
 				v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationOAuth2State+state)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidState))
@@ -96,6 +103,10 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				}
 				if callbackURL == "" {
 					callbackURL = c.Auth.BaseURL()
+				}
+				if !genericOAuthIssuerAllowed(c, p) {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
+					return
 				}
 				c.Redirect(callbackURL)
 			}),
@@ -134,6 +145,8 @@ func genericOAuthSignInAuthorizationURL(c *auth.Context, p GenericOAuthProviderC
 type genericOAuthDiscoveryDocument struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	Issuer                string `json:"issuer"`
 }
 
 func genericOAuthDiscovery(c *auth.Context, p GenericOAuthProviderConfig) (*genericOAuthDiscoveryDocument, error) {
@@ -162,6 +175,32 @@ func genericOAuthDiscovery(c *auth.Context, p GenericOAuthProviderConfig) (*gene
 		return nil, err
 	}
 	return &discovery, nil
+}
+
+func genericOAuthIssuerAllowed(c *auth.Context, p GenericOAuthProviderConfig) bool {
+	expectedIssuer, err := genericOAuthExpectedIssuer(c, p)
+	if err != nil || expectedIssuer == "" {
+		return err == nil && !p.RequireIssuerValidation
+	}
+	issuer := c.R.URL.Query().Get("iss")
+	if issuer == "" {
+		return !p.RequireIssuerValidation
+	}
+	return issuer == expectedIssuer
+}
+
+func genericOAuthExpectedIssuer(c *auth.Context, p GenericOAuthProviderConfig) (string, error) {
+	if p.Issuer != "" {
+		return p.Issuer, nil
+	}
+	if p.DiscoveryURL == "" {
+		return "", nil
+	}
+	discovery, err := genericOAuthDiscovery(c, p)
+	if err != nil {
+		return "", err
+	}
+	return discovery.Issuer, nil
 }
 
 func parseGenericOAuthStateValue(value string) (string, string, bool) {

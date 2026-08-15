@@ -212,3 +212,72 @@ func TestGenericOAuthCallbackRejectsProviderMismatch(t *testing.T) {
 		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
 	}
 }
+
+func TestGenericOAuthCallbackRejectsIssuerMismatch(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID: "oidc", ClientID: "client", ClientSecret: "secret",
+				AuthorizationURL: "https://idp.example.com/oauth/authorize",
+				TokenURL:         "https://idp.example.com/oauth/token",
+				UserInfoURL:      "https://idp.example.com/oauth/userinfo",
+				Issuer:           "https://issuer.example.com",
+			},
+		},
+	}))
+	if err := a.CreateVerification(context.Background(), constants.VerificationOAuth2State+"state", "oidc|https://app.example.com/dashboard", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state=state&iss=https%3A%2F%2Fother.example.com")
+	if callback.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+}
+
+func TestGenericOAuthCallbackRequiresIssuerWhenConfigured(t *testing.T) {
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID: "oidc", ClientID: "client", ClientSecret: "secret",
+				AuthorizationURL:        "https://idp.example.com/oauth/authorize",
+				TokenURL:                "https://idp.example.com/oauth/token",
+				UserInfoURL:             "https://idp.example.com/oauth/userinfo",
+				Issuer:                  "https://issuer.example.com",
+				RequireIssuerValidation: true,
+			},
+		},
+	}))
+	if err := a.CreateVerification(context.Background(), constants.VerificationOAuth2State+"state", "oidc|https://app.example.com/dashboard", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state=state")
+	if callback.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+}
+
+func TestGenericOAuthCallbackUsesDiscoveryIssuer(t *testing.T) {
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"authorization_endpoint":"https://idp.example.com/oauth/authorize","token_endpoint":"https://idp.example.com/oauth/token","issuer":"https://issuer.example.com"}`))
+	}))
+	defer discoveryServer.Close()
+	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+		Providers: []plugins.GenericOAuthProviderConfig{
+			{
+				ProviderID: "oidc", ClientID: "client", ClientSecret: "secret",
+				DiscoveryURL: discoveryServer.URL,
+			},
+		},
+	}))
+	if err := a.CreateVerification(context.Background(), constants.VerificationOAuth2State+"state", "oidc|https://app.example.com/dashboard", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state=state&iss=https%3A%2F%2Fother.example.com")
+	if callback.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+}
