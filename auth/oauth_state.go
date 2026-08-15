@@ -82,13 +82,15 @@ func (a *Auth) parseOAuthState(c *Context, state string) (*oauthStatePayload, er
 	if err != nil {
 		return nil, err
 	}
-	if time.Now().After(v.ExpiresAt) {
-		return nil, errors.New("oauth state expired")
-	}
 	var payload oauthStatePayload
 	if err := json.Unmarshal([]byte(v.Value), &payload); err != nil {
 		return nil, err
 	}
-	_ = a.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), constants.VerificationOAuthState+state)
+	if err := a.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), constants.VerificationOAuthState+state); err != nil {
+		return nil, err
+	}
+	if time.Now().After(v.ExpiresAt) {
+		return nil, errors.New("oauth state expired")
+	}
 	return &payload, nil
 }
