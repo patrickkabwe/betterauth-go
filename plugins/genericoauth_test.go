@@ -27,6 +27,7 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 				Scopes:           []string{"openid", "email"},
 				ResponseType:     "id_token",
 				ResponseMode:     "form_post",
+				PKCE:             true,
 				Prompt:           "select_account",
 				AccessType:       "offline",
 				AuthorizationURLParams: map[string]string{
@@ -66,6 +67,9 @@ func TestGenericOAuthSignInAuthorizationURLConfig(t *testing.T) {
 		t.Fatalf("query=%s", query.Encode())
 	}
 	if query.Get("response_mode") != "form_post" || query.Get("access_type") != "offline" {
+		t.Fatalf("query=%s", query.Encode())
+	}
+	if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 	if query.Get("redirect_uri") != "https://app.example.com/oauth/callback" {

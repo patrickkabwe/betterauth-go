@@ -13,6 +13,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
+	oauth2pkg "github.com/patrickkabwe/betterauth-go/internal/oauth2"
 	"github.com/patrickkabwe/betterauth-go/provider"
 )
 
@@ -32,6 +33,7 @@ type GenericOAuthProviderConfig struct {
 	Scopes                  []string
 	ResponseType            string
 	ResponseMode            string
+	PKCE                    bool
 	Prompt                  string
 	AccessType              string
 	AuthorizationURLParams  map[string]string
@@ -72,9 +74,17 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeOAuthError))
 					return
 				}
+				codeVerifier := ""
+				if p.PKCE {
+					codeVerifier, err = oauth2pkg.GenerateCodeVerifier()
+					if err != nil {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+						return
+					}
+				}
 				state, _ := id.Generate(32)
 				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
-				q := genericOAuthAuthorizationValues(c, p, state, body.Scopes)
+				q := genericOAuthAuthorizationValues(c, p, state, body.Scopes, codeVerifier)
 				redirectURL := provider.BuildAuthURL(authorizationURL, q)
 				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
 			}),
@@ -211,7 +221,7 @@ func parseGenericOAuthStateValue(value string) (string, string, bool) {
 	return providerID, callbackURL, true
 }
 
-func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, requestScopes []string) url.Values {
+func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string, requestScopes []string, codeVerifier string) url.Values {
 	responseType := p.ResponseType
 	if responseType == "" {
 		responseType = "code"
@@ -232,6 +242,10 @@ func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConf
 	}
 	if p.ResponseMode != "" {
 		q.Set("response_mode", p.ResponseMode)
+	}
+	if codeVerifier != "" {
+		q.Set("code_challenge_method", "S256")
+		q.Set("code_challenge", oauth2pkg.CodeChallengeS256(codeVerifier))
 	}
 	for key, value := range p.AuthorizationURLParams {
 		q.Set(key, value)
