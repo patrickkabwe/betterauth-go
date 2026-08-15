@@ -23,9 +23,9 @@ func (a *Auth) linkingAllowed(providerID string, emailVerified bool) bool {
 	return emailVerified
 }
 
-func (a *Auth) applyUserInfoOnLink(c *Context, userID string, info provider.OAuthUser) {
+func (a *Auth) applyUserInfoOnLink(c *Context, userID string, info provider.OAuthUser) *types.User {
 	if !a.cfg.account.updateUserInfoOnLink {
-		return
+		return nil
 	}
 	update := store.UserUpdate{}
 	if info.Name != "" {
@@ -35,9 +35,13 @@ func (a *Auth) applyUserInfoOnLink(c *Context, userID string, info provider.OAut
 		update.Image = &info.Image
 	}
 	if update.Name == nil && update.Image == nil {
-		return
+		return nil
 	}
-	_, _ = a.cfg.store.UpdateUser(c.R.Context(), userID, update)
+	user, err := a.cfg.store.UpdateUser(c.R.Context(), userID, update)
+	if err != nil {
+		return nil
+	}
+	return user
 }
 
 func (a *Auth) createLinkedAccount(c *Context, userID string, p provider.SocialProvider, accountID string, tokens provider.OAuthTokens, idToken string) error {

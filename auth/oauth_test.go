@@ -322,6 +322,40 @@ func TestSignInSocialDisableImplicitLinkingBlocksTrustedProvider(t *testing.T) {
 	}
 }
 
+func TestSignInSocialImplicitLinkReturnsUpdatedUserInfo(t *testing.T) {
+	image := "https://example.com/implicit.png"
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-update-link", Email: "oauth-update-link@example.com", EmailVerified: true, Name: "Provider Name", Image: &image},
+	}
+	a := newTestAuth(func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+		c.Account.AccountLinking.UpdateUserInfoOnLink = true
+	})
+	cookies := signUp(t, a, "oauth-update-link@example.com")
+	userID := mustUserID(t, a, cookies)
+	verified := true
+	if _, err := a.Store().UpdateUser(context.Background(), userID, store.UserUpdate{EmailVerified: &verified}); err != nil {
+		t.Fatalf("verify user: %v", err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-update-link"},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var result types.SocialSignInResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.User.Name != "Provider Name" || result.User.Image == nil || *result.User.Image != image {
+		t.Fatalf("user=%+v", result.User)
+	}
+}
+
 func TestOAuthCallbackCreatesSession(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	p := &staticOAuthProvider{

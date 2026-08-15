@@ -79,7 +79,9 @@ func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo pr
 		if err := a.saveOAuthAccount(c, user.ID, account); err != nil {
 			return &oauthUserResult{Error: "unable to link account"}, nil
 		}
-		a.applyUserInfoOnLink(c, user.ID, userInfo)
+		if updated := a.applyUserInfoOnLink(c, user.ID, userInfo); updated != nil {
+			user = updated
+		}
 	} else {
 		_ = a.updateOAuthAccountTokens(c, linked.ID, account)
 	}
