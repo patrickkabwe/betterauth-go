@@ -130,6 +130,31 @@ jobs:
             echo
           }
 
+          format_description() {
+            local value="$1"
+            printf '%s' "$value" | perl -pe '
+              s/^(\s*)(.)/$1 . uc($2)/e;
+              s/\bapi\b/API/gi;
+              s/\boauth\b/OAuth/gi;
+              s/\boidc\b/OIDC/gi;
+              s/\bsaml\b/SAML/gi;
+              s/\bsso\b/SSO/gi;
+              s/\bscim\b/SCIM/gi;
+              s/\bwebauthn\b/WebAuthn/gi;
+              s/\bid token\b/ID token/gi;
+              s/\bcli\b/CLI/gi;
+              s/\bgithub\b/GitHub/gi;
+              s/\bgoogle\b/Google/gi;
+              s/\bstripe\b/Stripe/gi;
+              s/\bpasskey\b/Passkey/gi;
+              s/\bbetter auth\b/Better Auth/gi;
+              s/\bGoogle GitHub\b/Google\/GitHub/g;
+            '
+          }
+
+          SEEN_ENTRIES_FILE="${SECTIONS_DIR}/seen-entries.txt"
+          touch "$SEEN_ENTRIES_FILE"
+
           git log "${LOG_ARGS[@]}" --format='%H%x1f%h%x1f%s%x1e' |
             while IFS=$'\x1f' read -r -d $'\x1e' hash short_hash subject; do
               hash="${hash//$'\n'/}"
@@ -148,8 +173,15 @@ jobs:
                 continue
               fi
 
+              description="$(format_description "$description")"
               scope="${scope#(}"
               scope="${scope%)}"
+              entry_key="${type}|${scope}|${description}"
+              if grep -Fxq -- "$entry_key" "$SEEN_ENTRIES_FILE"; then
+                continue
+              fi
+              echo "$entry_key" >> "$SEEN_ENTRIES_FILE"
+
               if [ -n "$scope" ]; then
                 entry="* **${scope}:** ${description} ([${short_hash}](https://github.com/${REPOSITORY}/commit/${hash}))"
               else
@@ -202,23 +234,23 @@ jobs:
             fi
             echo
             if [ "${CONVENTIONAL_CHANGE_COUNT}" -gt 0 ]; then
-              append_section "Breaking Changes" "${SECTIONS_DIR}/breaking.md"
-              append_section "Features" "${SECTIONS_DIR}/features.md"
-              append_section "Bug Fixes" "${SECTIONS_DIR}/bug-fixes.md"
-              append_section "Performance Improvements" "${SECTIONS_DIR}/performance.md"
-              append_section "Code Refactoring" "${SECTIONS_DIR}/refactoring.md"
-              append_section "Documentation" "${SECTIONS_DIR}/documentation.md"
-              append_section "Build System" "${SECTIONS_DIR}/build.md"
-              append_section "Continuous Integration" "${SECTIONS_DIR}/ci.md"
-              append_section "Tests" "${SECTIONS_DIR}/tests.md"
-              append_section "Styles" "${SECTIONS_DIR}/styles.md"
-              append_section "Chores" "${SECTIONS_DIR}/chores.md"
-              append_section "Reverts" "${SECTIONS_DIR}/reverts.md"
+              append_section "💥 Breaking Changes" "${SECTIONS_DIR}/breaking.md"
+              append_section "✨ Features" "${SECTIONS_DIR}/features.md"
+              append_section "🐛 Bug Fixes" "${SECTIONS_DIR}/bug-fixes.md"
+              append_section "⚡ Performance Improvements" "${SECTIONS_DIR}/performance.md"
+              append_section "♻️ Code Refactoring" "${SECTIONS_DIR}/refactoring.md"
+              append_section "📚 Documentation" "${SECTIONS_DIR}/documentation.md"
+              append_section "🏗️ Build System" "${SECTIONS_DIR}/build.md"
+              append_section "👷 Continuous Integration" "${SECTIONS_DIR}/ci.md"
+              append_section "✅ Tests" "${SECTIONS_DIR}/tests.md"
+              append_section "💄 Styles" "${SECTIONS_DIR}/styles.md"
+              append_section "🔧 Chores" "${SECTIONS_DIR}/chores.md"
+              append_section "⏪ Reverts" "${SECTIONS_DIR}/reverts.md"
             else
               echo "_No conventional commits in this release._"
               echo
             fi
-            append_section "Contributors" "${SECTIONS_DIR}/contributors.md"
+            append_section "👥 Contributors" "${SECTIONS_DIR}/contributors.md"
           } > release-notes.md
 
           echo "path=release-notes.md" >> "$GITHUB_OUTPUT"
