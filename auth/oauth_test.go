@@ -227,6 +227,33 @@ func TestSignInSocialIDTokenHonorsDisableSignUp(t *testing.T) {
 	}
 }
 
+func TestSignInSocialIDTokenPassesUserDataToProvider(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-id-user", Email: "oauth-id-user@example.com", EmailVerified: true, Name: "OAuth ID User"},
+	}
+	a := oauthTestAuth(t, p)
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken": map[string]any{
+			"token":       "valid-id-token",
+			"accessToken": "at-id-user",
+			"user": map[string]any{
+				"name":  map[string]any{"firstName": "Ada", "lastName": "Lovelace"},
+				"email": "ada@example.com",
+			},
+		},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	name, ok := p.seenTokens.User["name"].(map[string]any)
+	if !ok || name["firstName"] != "Ada" || p.seenTokens.User["email"] != "ada@example.com" {
+		t.Fatalf("user data=%+v", p.seenTokens.User)
+	}
+}
+
 func TestOAuthCallbackCreatesSession(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	p := &staticOAuthProvider{

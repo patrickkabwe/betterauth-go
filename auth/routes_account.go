@@ -31,11 +31,12 @@ func handleListAccounts(c *Context) {
 }
 
 type linkSocialIDTokenBody struct {
-	Token        string   `json:"token"`
-	Nonce        string   `json:"nonce,omitempty"`
-	AccessToken  string   `json:"accessToken,omitempty"`
-	RefreshToken string   `json:"refreshToken,omitempty"`
-	Scopes       []string `json:"scopes,omitempty"`
+	Token        string         `json:"token"`
+	Nonce        string         `json:"nonce,omitempty"`
+	AccessToken  string         `json:"accessToken,omitempty"`
+	RefreshToken string         `json:"refreshToken,omitempty"`
+	Scopes       []string       `json:"scopes,omitempty"`
+	User         map[string]any `json:"user,omitempty"`
 }
 
 type linkSocialBody struct {

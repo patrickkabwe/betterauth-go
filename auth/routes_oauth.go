@@ -97,7 +97,7 @@ func handleSocialIDTokenSignIn(c *Context, p provider.SocialProvider, body signI
 	}
 	tokens := provider.OAuthTokens{
 		AccessToken: body.IDToken.AccessToken, RefreshToken: body.IDToken.RefreshToken,
-		IDToken: body.IDToken.Token, Scopes: body.IDToken.Scopes,
+		IDToken: body.IDToken.Token, Scopes: body.IDToken.Scopes, User: body.IDToken.User,
 	}
 	info, err := p.GetUserInfo(c.R.Context(), tokens)
 	if err != nil || info == nil || info.User.Email == "" {
