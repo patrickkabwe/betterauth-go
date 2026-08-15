@@ -9,17 +9,23 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
+	"github.com/patrickkabwe/betterauth-go/provider"
 )
 
 // GenericOAuthProviderConfig configures a custom OAuth2/OIDC provider.
 type GenericOAuthProviderConfig struct {
-	ProviderID       string
-	ClientID         string
-	ClientSecret     string
-	AuthorizationURL string
-	TokenURL         string
-	UserInfoURL      string
-	Scopes           []string
+	ProviderID             string
+	ClientID               string
+	ClientSecret           string
+	AuthorizationURL       string
+	TokenURL               string
+	UserInfoURL            string
+	Scopes                 []string
+	ResponseType           string
+	ResponseMode           string
+	Prompt                 string
+	AccessType             string
+	AuthorizationURLParams map[string]string
 }
 
 // GenericOAuthOptions configures the generic OAuth plugin.
@@ -38,8 +44,9 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/sign-in/oauth2", func(c *auth.Context) {
 				var body struct {
-					ProviderID  string `json:"providerId"`
-					CallbackURL string `json:"callbackURL"`
+					ProviderID      string `json:"providerId"`
+					CallbackURL     string `json:"callbackURL"`
+					DisableRedirect bool   `json:"disableRedirect"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
@@ -52,15 +59,9 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 				}
 				state, _ := id.Generate(32)
 				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOAuth2State+state, body.ProviderID+"|"+body.CallbackURL, 10*time.Minute)
-				q := url.Values{
-					"client_id":     {p.ClientID},
-					"response_type": {"code"},
-					"redirect_uri":  {c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID},
-					"scope":         {joinScopes(p.Scopes)},
-					"state":         {state},
-				}
-				redirectURL := p.AuthorizationURL + "?" + q.Encode()
-				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": true})
+				q := genericOAuthAuthorizationValues(c, p, state)
+				redirectURL := provider.BuildAuthURL(p.AuthorizationURL, q)
+				c.WriteJSON(http.StatusOK, map[string]any{"url": redirectURL, "redirect": !body.DisableRedirect})
 			}),
 			rt(http.MethodGet, "/oauth2/callback/{providerId}", func(c *auth.Context) {
 				providerID := c.Vars["providerId"]
@@ -87,6 +88,33 @@ func GenericOAuth(opts GenericOAuthOptions) auth.Plugin {
 			}),
 		},
 	}
+}
+
+func genericOAuthAuthorizationValues(c *auth.Context, p GenericOAuthProviderConfig, state string) url.Values {
+	responseType := p.ResponseType
+	if responseType == "" {
+		responseType = "code"
+	}
+	q := url.Values{
+		"client_id":     {p.ClientID},
+		"response_type": {responseType},
+		"redirect_uri":  {c.Auth.BaseURL() + c.Auth.BasePath() + "/oauth2/callback/" + p.ProviderID},
+		"scope":         {joinScopes(p.Scopes)},
+		"state":         {state},
+	}
+	if p.Prompt != "" {
+		q.Set("prompt", p.Prompt)
+	}
+	if p.AccessType != "" {
+		q.Set("access_type", p.AccessType)
+	}
+	if p.ResponseMode != "" {
+		q.Set("response_mode", p.ResponseMode)
+	}
+	for key, value := range p.AuthorizationURLParams {
+		q.Set(key, value)
+	}
+	return q
 }
 
 func joinScopes(scopes []string) string {
