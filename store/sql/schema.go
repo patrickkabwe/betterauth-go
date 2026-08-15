@@ -26,6 +26,7 @@ const (
 	pluginPhoneNumber       = "phone-number"
 	pluginLastLogin         = "last-login-method"
 	pluginAPIKey            = "api-key"
+	pluginSSO               = "sso"
 )
 
 // coreStatements returns the always-present tables (user, account, session,
@@ -300,6 +301,24 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 			`CREATE UNIQUE INDEX IF NOT EXISTS apikey_key_idx ON ` + d.quoteIdent("apikey") + ` (key)`,
 			`CREATE INDEX IF NOT EXISTS apikey_referenceId_idx ON ` + d.quoteIdent("apikey") + ` (` + d.quoteIdent("referenceId") + `)`,
 			`CREATE INDEX IF NOT EXISTS apikey_configId_idx ON ` + d.quoteIdent("apikey") + ` (` + d.quoteIdent("configId") + `)`,
+		},
+		pluginSSO: {
+			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("ssoProvider") + ` (
+				id TEXT PRIMARY KEY,
+				` + d.quoteIdent("providerId") + ` TEXT NOT NULL,
+				issuer TEXT NOT NULL,
+				domain TEXT NOT NULL,
+				` + d.quoteIdent("organizationId") + ` TEXT,
+				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
+				` + d.quoteIdent("oidcConfig") + ` TEXT,
+				` + d.quoteIdent("samlConfig") + ` TEXT,
+				` + d.quoteIdent("domainVerified") + ` INTEGER NOT NULL DEFAULT 0,
+				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
+				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_providerId_idx ON ` + d.quoteIdent("ssoProvider") + ` (` + d.quoteIdent("providerId") + `)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_domain_idx ON ` + d.quoteIdent("ssoProvider") + ` (domain)`,
+			`CREATE INDEX IF NOT EXISTS ssoProvider_userId_idx ON ` + d.quoteIdent("ssoProvider") + ` (` + d.quoteIdent("userId") + `)`,
 		},
 	}
 }

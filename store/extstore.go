@@ -91,6 +91,14 @@ type ExtStore interface {
 	UpdateAPIKey(ctx context.Context, id string, update APIKeyUpdate) (*types.APIKey, error)
 	DeleteAPIKey(ctx context.Context, id string) error
 	DeleteExpiredAPIKeys(ctx context.Context, now time.Time) error
+
+	// SSOProvider
+	CreateSSOProvider(ctx context.Context, provider *types.SSOProvider) error
+	FindSSOProviderByProviderID(ctx context.Context, providerID string) (*types.SSOProvider, error)
+	FindSSOProviderByDomain(ctx context.Context, domain string) (*types.SSOProvider, error)
+	ListSSOProvidersByUserID(ctx context.Context, userID string) ([]types.SSOProvider, error)
+	UpdateSSOProvider(ctx context.Context, providerID string, update SSOProviderUpdate) (*types.SSOProvider, error)
+	DeleteSSOProvider(ctx context.Context, providerID string) error
 }
 
 // APIKeyUpdate describes mutable API key fields.
@@ -104,4 +112,15 @@ type APIKeyUpdate struct {
 	Remaining    *int
 	LastRequest  *time.Time
 	UpdatedAt    *time.Time
+}
+
+// SSOProviderUpdate describes mutable SSO provider fields.
+type SSOProviderUpdate struct {
+	Issuer         *string
+	Domain         *string
+	OrganizationID *string
+	OIDCConfig     *string
+	SAMLConfig     *string
+	DomainVerified *bool
+	UpdatedAt      *time.Time
 }

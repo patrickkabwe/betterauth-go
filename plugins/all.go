@@ -32,6 +32,7 @@ type AllOptions struct {
 	I18n            I18nOptions
 	SCIM            SCIMOptions
 	Stripe          StripeOptions
+	SSO             SSOOptions
 }
 
 // All returns every core Better Auth plugin.
@@ -65,5 +66,6 @@ func All(opts AllOptions) []auth.Plugin {
 		I18n(opts.I18n),
 		SCIM(opts.SCIM),
 		Stripe(opts.Stripe),
+		SSO(opts.SSO),
 	}
 }

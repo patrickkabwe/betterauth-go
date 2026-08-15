@@ -1041,6 +1041,130 @@ func (s *Store) scanAPIKey(row interface{ Scan(...any) error }) (*types.APIKey, 
 	return &key, nil
 }
 
+// =========================================================================
+// SSOProvider
+// =========================================================================
+
+var ssoProviderColNames = []string{
+	"id", "providerId", "issuer", "domain", "organizationId", "userId",
+	"oidcConfig", "samlConfig", "domainVerified", "createdAt", "updatedAt",
+}
+
+func (s *Store) CreateSSOProvider(ctx context.Context, provider *types.SSOProvider) error {
+	_, err := s.db.ExecContext(ctx, s.q(`
+		INSERT INTO `+s.table("ssoProvider")+` (`+s.cols(ssoProviderColNames...)+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		provider.ID, provider.ProviderID, provider.Issuer, provider.Domain, nullStr(provider.OrganizationID), provider.UserID,
+		nullStr(provider.OIDCConfig), nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified),
+		toMillis(provider.CreatedAt), toMillis(provider.UpdatedAt))
+	return err
+}
+
+func (s *Store) FindSSOProviderByProviderID(ctx context.Context, providerID string) (*types.SSOProvider, error) {
+	return s.scanSSOProvider(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(ssoProviderColNames...)+` FROM `+s.table("ssoProvider")+` WHERE `+s.table("providerId")+` = ?`), providerID))
+}
+
+func (s *Store) FindSSOProviderByDomain(ctx context.Context, domain string) (*types.SSOProvider, error) {
+	return s.scanSSOProvider(s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(ssoProviderColNames...)+` FROM `+s.table("ssoProvider")+` WHERE LOWER(domain) = ?`), lowerLike(domain)))
+}
+
+func (s *Store) ListSSOProvidersByUserID(ctx context.Context, userID string) ([]types.SSOProvider, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(ssoProviderColNames...)+` FROM `+s.table("ssoProvider")+` WHERE `+s.table("userId")+` = ?`), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.SSOProvider, 0)
+	for rows.Next() {
+		provider, err := s.scanSSOProvider(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *provider)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateSSOProvider(ctx context.Context, providerID string, update store.SSOProviderUpdate) (*types.SSOProvider, error) {
+	provider, err := s.FindSSOProviderByProviderID(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	if update.Issuer != nil {
+		provider.Issuer = *update.Issuer
+	}
+	if update.Domain != nil {
+		provider.Domain = *update.Domain
+	}
+	if update.OrganizationID != nil {
+		provider.OrganizationID = *update.OrganizationID
+	}
+	if update.OIDCConfig != nil {
+		provider.OIDCConfig = *update.OIDCConfig
+	}
+	if update.SAMLConfig != nil {
+		provider.SAMLConfig = *update.SAMLConfig
+	}
+	if update.DomainVerified != nil {
+		provider.DomainVerified = *update.DomainVerified
+	}
+	if update.UpdatedAt != nil {
+		provider.UpdatedAt = *update.UpdatedAt
+	} else {
+		provider.UpdatedAt = time.Now().UTC()
+	}
+	_, err = s.db.ExecContext(ctx, s.q(`
+		UPDATE `+s.table("ssoProvider")+` SET issuer = ?, domain = ?, `+s.table("organizationId")+` = ?,
+		`+s.table("oidcConfig")+` = ?, `+s.table("samlConfig")+` = ?, `+s.table("domainVerified")+` = ?,
+		`+s.table("updatedAt")+` = ? WHERE `+s.table("providerId")+` = ?`),
+		provider.Issuer, provider.Domain, nullStr(provider.OrganizationID), nullStr(provider.OIDCConfig),
+		nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified), toMillis(provider.UpdatedAt), providerID)
+	if err != nil {
+		return nil, err
+	}
+	return provider, nil
+}
+
+func (s *Store) DeleteSSOProvider(ctx context.Context, providerID string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("ssoProvider")+` WHERE `+s.table("providerId")+` = ?`), providerID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) scanSSOProvider(row interface{ Scan(...any) error }) (*types.SSOProvider, error) {
+	var (
+		provider       types.SSOProvider
+		organizationID sql.NullString
+		oidcConfig     sql.NullString
+		samlConfig     sql.NullString
+		domainVerified int
+		createdAt      int64
+		updatedAt      int64
+	)
+	err := row.Scan(
+		&provider.ID, &provider.ProviderID, &provider.Issuer, &provider.Domain, &organizationID, &provider.UserID,
+		&oidcConfig, &samlConfig, &domainVerified, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	provider.OrganizationID = organizationID.String
+	provider.OIDCConfig = oidcConfig.String
+	provider.SAMLConfig = samlConfig.String
+	provider.DomainVerified = domainVerified != 0
+	provider.CreatedAt = fromMillis(createdAt)
+	provider.UpdatedAt = fromMillis(updatedAt)
+	return &provider, nil
+}
+
 func nullZeroInt(value int) any {
 	if value == 0 {
 		return nil

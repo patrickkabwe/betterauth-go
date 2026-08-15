@@ -755,3 +755,106 @@ func (s *Store) DeleteExpiredAPIKeys(_ context.Context, now time.Time) error {
 	}
 	return nil
 }
+
+func (s *Store) CreateSSOProvider(_ context.Context, provider *types.SSOProvider) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	domainKey := strings.ToLower(provider.Domain)
+	if _, ok := s.ssoProviders[provider.ProviderID]; ok {
+		return ErrAlreadyExists
+	}
+	if _, ok := s.ssoProviderDomain[domainKey]; ok {
+		return ErrAlreadyExists
+	}
+	cp := *provider
+	s.ssoProviders[provider.ProviderID] = &cp
+	s.ssoProviderDomain[domainKey] = provider.ProviderID
+	return nil
+}
+
+func (s *Store) FindSSOProviderByProviderID(_ context.Context, providerID string) (*types.SSOProvider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	provider, ok := s.ssoProviders[providerID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *provider
+	return &cp, nil
+}
+
+func (s *Store) FindSSOProviderByDomain(_ context.Context, domain string) (*types.SSOProvider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	providerID, ok := s.ssoProviderDomain[strings.ToLower(domain)]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *s.ssoProviders[providerID]
+	return &cp, nil
+}
+
+func (s *Store) ListSSOProvidersByUserID(_ context.Context, userID string) ([]types.SSOProvider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.SSOProvider, 0)
+	for _, provider := range s.ssoProviders {
+		if provider.UserID == userID {
+			out = append(out, *provider)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) UpdateSSOProvider(_ context.Context, providerID string, update store.SSOProviderUpdate) (*types.SSOProvider, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	provider, ok := s.ssoProviders[providerID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if update.Issuer != nil {
+		provider.Issuer = *update.Issuer
+	}
+	if update.Domain != nil && *update.Domain != provider.Domain {
+		oldDomainKey := strings.ToLower(provider.Domain)
+		newDomainKey := strings.ToLower(*update.Domain)
+		if existingProviderID, exists := s.ssoProviderDomain[newDomainKey]; exists && existingProviderID != providerID {
+			return nil, ErrAlreadyExists
+		}
+		delete(s.ssoProviderDomain, oldDomainKey)
+		s.ssoProviderDomain[newDomainKey] = providerID
+		provider.Domain = *update.Domain
+	}
+	if update.OrganizationID != nil {
+		provider.OrganizationID = *update.OrganizationID
+	}
+	if update.OIDCConfig != nil {
+		provider.OIDCConfig = *update.OIDCConfig
+	}
+	if update.SAMLConfig != nil {
+		provider.SAMLConfig = *update.SAMLConfig
+	}
+	if update.DomainVerified != nil {
+		provider.DomainVerified = *update.DomainVerified
+	}
+	if update.UpdatedAt != nil {
+		provider.UpdatedAt = *update.UpdatedAt
+	} else {
+		provider.UpdatedAt = time.Now().UTC()
+	}
+	cp := *provider
+	return &cp, nil
+}
+
+func (s *Store) DeleteSSOProvider(_ context.Context, providerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	provider, ok := s.ssoProviders[providerID]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(s.ssoProviderDomain, strings.ToLower(provider.Domain))
+	delete(s.ssoProviders, providerID)
+	return nil
+}

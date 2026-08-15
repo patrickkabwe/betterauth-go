@@ -23,8 +23,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
 | Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 28 | 0 | 0 |
-| Extended packages | 5 | 0 | 5 |
+| Plugins (core package) | 29 | 0 | 0 |
+| Extended packages | 6 | 0 | 4 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -222,7 +222,7 @@ Separate npm packages in the Better Auth monorepo.
 |---------|--------|-------------|
 | `@better-auth/passkey` | ⬜ | WebAuthn / passkey registration & sign-in |
 | `@better-auth/stripe` | ✅ | Checkout, billing portal, subscription routes, webhooks |
-| `@better-auth/sso` | ⬜ | SAML / enterprise SSO |
+| `@better-auth/sso` | ✅ | SAML provider registry, SP metadata, redirect sign-in, ACS session creation |
 | `@better-auth/scim` | ✅ | SCIM user provisioning |
 | `@better-auth/oauth-provider` | ⬜ | Full OAuth 2.0 authorization server |
 | `@better-auth/api-key` | ✅ | API key management plugin |
@@ -384,7 +384,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 
 - [x] Organization plugin (teams, invites, roles)
 - [x] Admin plugin
-- [ ] SSO (SAML)
+- [x] SSO (SAML)
 - [x] OIDC provider
 - [x] SCIM provisioning
 

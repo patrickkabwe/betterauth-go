@@ -41,6 +41,8 @@ type Store struct {
 	wallets           map[string]*types.WalletAddress
 	apiKeys           map[string]*types.APIKey
 	apiKeysByKey      map[string]string
+	ssoProviders      map[string]*types.SSOProvider
+	ssoProviderDomain map[string]string
 }
 
 // New creates a new in-memory store.
@@ -66,6 +68,8 @@ func New() *Store {
 		wallets:           make(map[string]*types.WalletAddress),
 		apiKeys:           make(map[string]*types.APIKey),
 		apiKeysByKey:      make(map[string]string),
+		ssoProviders:      make(map[string]*types.SSOProvider),
+		ssoProviderDomain: make(map[string]string),
 	}
 }
 
