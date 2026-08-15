@@ -30,6 +30,8 @@ type EmailOTPOptions struct {
 	ResendStrategy  EmailOTPResendStrategy
 	StoreOTP        EmailOTPStoreOTP
 	HashOTP         EmailOTPHashOTP
+	EncryptOTP      EmailOTPEncryptOTP
+	DecryptOTP      EmailOTPDecryptOTP
 }
 
 // EmailOTPGenerateOTP generates an OTP for an email OTP flow.
@@ -37,6 +39,12 @@ type EmailOTPGenerateOTP func(ctx context.Context, email, typ string) (string, e
 
 // EmailOTPHashOTP hashes an OTP for storage and verification.
 type EmailOTPHashOTP func(ctx context.Context, otp string) (string, error)
+
+// EmailOTPEncryptOTP encrypts a recoverable OTP before storage.
+type EmailOTPEncryptOTP func(ctx context.Context, otp string) (string, error)
+
+// EmailOTPDecryptOTP decrypts a recoverable stored OTP.
+type EmailOTPDecryptOTP func(ctx context.Context, storedOTP string) (string, error)
 
 // EmailOTPStoreOTP controls how OTP values are persisted.
 type EmailOTPStoreOTP string
@@ -224,6 +232,18 @@ func storeEmailOTPValue(c *auth.Context, opts EmailOTPOptions, otp string) (stri
 		}
 		return hash, true
 	}
+	if opts.EncryptOTP != nil || opts.DecryptOTP != nil {
+		if opts.EncryptOTP == nil || opts.DecryptOTP == nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		encryptedOTP, err := opts.EncryptOTP(c.R.Context(), otp)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		return encryptedOTP, true
+	}
 	if opts.StoreOTP != EmailOTPStoreOTPHashed {
 		return otp, true
 	}
@@ -279,7 +299,11 @@ func getVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.New(http.StatusBadRequest, "BAD_REQUEST", "OTP is hashed, cannot return the plain text OTP"))
 			return
 		}
-		otp, _ := splitEmailOTPValue(verification.Value)
+		storedOTP, _ := splitEmailOTPValue(verification.Value)
+		otp, ok := retrieveEmailOTPValue(c, opts, storedOTP)
+		if !ok {
+			return
+		}
 		c.WriteJSON(http.StatusOK, map[string]*string{"otp": &otp})
 	}
 }
@@ -312,9 +336,13 @@ func reuseEmailOTP(c *auth.Context, opts EmailOTPOptions, identifier string) (st
 	if time.Now().After(verification.ExpiresAt) {
 		return "", false, true
 	}
-	otp, attempts := splitEmailOTPValue(verification.Value)
+	storedOTP, attempts := splitEmailOTPValue(verification.Value)
 	if attempts >= opts.allowedAttempts() {
 		return "", false, true
+	}
+	otp, ok := retrieveEmailOTPValue(c, opts, storedOTP)
+	if !ok {
+		return "", false, false
 	}
 	now := time.Now()
 	err = c.Auth.Store().CreateVerification(c.R.Context(), &types.Verification{
@@ -558,15 +586,39 @@ func verifyEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP, otp s
 		}
 		return hash == storedOTP, true
 	}
-	if opts.StoreOTP != EmailOTPStoreOTPHashed {
-		return storedOTP == otp, true
+	if opts.StoreOTP == EmailOTPStoreOTPHashed {
+		matches, err := c.Auth.VerifyPassword(storedOTP, otp)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return false, false
+		}
+		return matches, true
 	}
-	matches, err := c.Auth.VerifyPassword(storedOTP, otp)
-	if err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+	plainOTP, ok := retrieveEmailOTPValue(c, opts, storedOTP)
+	if !ok {
 		return false, false
 	}
-	return matches, true
+	return plainOTP == otp, true
+}
+
+func retrieveEmailOTPValue(c *auth.Context, opts EmailOTPOptions, storedOTP string) (string, bool) {
+	if opts.EncryptOTP != nil || opts.DecryptOTP != nil {
+		if opts.EncryptOTP == nil || opts.DecryptOTP == nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		otp, err := opts.DecryptOTP(c.R.Context(), storedOTP)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return "", false
+		}
+		return otp, true
+	}
+	if opts.StoreOTP != EmailOTPStoreOTPHashed {
+		return storedOTP, true
+	}
+	c.WriteError(apierror.New(http.StatusBadRequest, "BAD_REQUEST", "OTP is hashed, cannot return the plain text OTP"))
+	return "", false
 }
 
 func emailOTPValueIsUnrecoverable(opts EmailOTPOptions) bool {

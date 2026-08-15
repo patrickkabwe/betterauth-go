@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,6 +453,70 @@ func TestEmailOTPPluginCustomHashOTPVerifiesButCannotReturnCode(t *testing.T) {
 	resp, data = doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
 		"email": "custom-hash@example.com",
 		"otp":   sentOTP,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in status=%d body=%s", resp.StatusCode, data)
+	}
+}
+
+func TestEmailOTPPluginCustomEncryptOTPCanReturnReuseAndVerifyCode(t *testing.T) {
+	var sentCodes []string
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			ResendStrategy: plugins.EmailOTPResendStrategyReuse,
+			EncryptOTP: func(_ context.Context, otp string) (string, error) {
+				return otp + "-encrypted", nil
+			},
+			DecryptOTP: func(_ context.Context, storedOTP string) (string, error) {
+				return strings.TrimSuffix(storedOTP, "-encrypted"), nil
+			},
+			SendOTP: func(_ context.Context, _ string, otp string, _ string) error {
+				sentCodes = append(sentCodes, otp)
+				return nil
+			},
+		})}
+	})
+
+	for i := 0; i < 2; i++ {
+		resp, data := doRequest(a, http.MethodPost, "/email-otp/send-verification-otp", map[string]any{
+			"email": "custom-encrypt@example.com",
+			"type":  "sign-in",
+		}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("send status=%d body=%s", resp.StatusCode, data)
+		}
+	}
+	if len(sentCodes) != 2 {
+		t.Fatalf("sent codes=%v", sentCodes)
+	}
+	if sentCodes[0] != sentCodes[1] {
+		t.Fatalf("expected reused OTP, got %q then %q", sentCodes[0], sentCodes[1])
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeSignIn+":custom-encrypt@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Value != sentCodes[0]+"-encrypted:0" {
+		t.Fatalf("stored value=%q", verification.Value)
+	}
+
+	resp, data := doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=custom-encrypt@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		OTP *string `json:"otp"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OTP == nil || *body.OTP != sentCodes[0] {
+		t.Fatalf("get otp=%v want %q", body.OTP, sentCodes[0])
+	}
+
+	resp, data = doRequest(a, http.MethodPost, "/sign-in/email-otp", map[string]any{
+		"email": "custom-encrypt@example.com",
+		"otp":   sentCodes[0],
 	}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("sign in status=%d body=%s", resp.StatusCode, data)
