@@ -19,6 +19,7 @@ const (
 	tokenEndpoint = "https://github.com/login/oauth/access_token"
 	userEndpoint  = "https://api.github.com/user"
 	emailEndpoint = "https://api.github.com/user/emails"
+	userAgent     = "better-auth"
 )
 
 // Config configures the GitHub OAuth provider.
@@ -215,7 +216,7 @@ func (p *Provider) fetchProfile(ctx context.Context, accessToken string) (*githu
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "betterauth-go")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -242,7 +243,7 @@ func (p *Provider) fetchEmails(ctx context.Context, accessToken string) ([]githu
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "betterauth-go")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

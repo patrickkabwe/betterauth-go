@@ -110,7 +110,9 @@ func TestGitHubGetUserInfoUsesOverride(t *testing.T) {
 
 func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 	transport := http.DefaultTransport
+	seenUserAgents := map[string]string{}
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seenUserAgents[req.URL.Path] = req.Header.Get("User-Agent")
 		var body string
 		switch req.URL.Path {
 		case "/user":
@@ -147,6 +149,9 @@ func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
 	}
 	if _, ok := info.Data["profile"]; ok {
 		t.Fatalf("unexpected wrapped profile data: %+v", info.Data)
+	}
+	if seenUserAgents["/user"] != "better-auth" || seenUserAgents["/user/emails"] != "better-auth" {
+		t.Fatalf("user agents=%v", seenUserAgents)
 	}
 }
 
