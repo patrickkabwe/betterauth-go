@@ -33,3 +33,10 @@ func TestGoogleGetUserInfoFromIDToken(t *testing.T) {
 		t.Fatalf("info=%+v err=%v", info, err)
 	}
 }
+
+func TestGoogleSignUpPolicy(t *testing.T) {
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true})
+	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
+		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
+	}
+}

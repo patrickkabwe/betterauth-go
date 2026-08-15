@@ -16,12 +16,14 @@ import (
 )
 
 type staticOAuthProvider struct {
-	id         string
-	user       provider.OAuthUser
-	tokens     provider.OAuthTokens
-	authURL    string
-	opts       provider.AuthorizationURLOpts
-	seenTokens provider.OAuthTokens
+	id                    string
+	user                  provider.OAuthUser
+	tokens                provider.OAuthTokens
+	authURL               string
+	opts                  provider.AuthorizationURLOpts
+	seenTokens            provider.OAuthTokens
+	disableImplicitSignUp bool
+	disableSignUp         bool
 }
 
 func (p *staticOAuthProvider) ID() string { return p.id }
@@ -53,6 +55,14 @@ func (p *staticOAuthProvider) RefreshAccessToken(_ context.Context, _ string) (*
 	exp := time.Now().Add(time.Hour)
 	return &provider.OAuthTokens{AccessToken: "refreshed", AccessTokenExpiresAt: &exp}, nil
 }
+
+func (p *staticOAuthProvider) VerifyIDToken(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func (p *staticOAuthProvider) DisableImplicitSignUp() bool { return p.disableImplicitSignUp }
+
+func (p *staticOAuthProvider) DisableSignUp() bool { return p.disableSignUp }
 
 func oauthTestAuth(t *testing.T, p provider.SocialProvider) *auth.Auth {
 	t.Helper()
@@ -124,6 +134,95 @@ func TestSignInSocialStateCreateFails(t *testing.T) {
 		"disableRedirect": disable,
 	}, nil)
 	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInSocialDisableImplicitSignUpRequiresRequestSignUp(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:                    "mock",
+		user:                  provider.OAuthUser{ID: "mock-implicit", Email: "oauth-implicit@example.com", EmailVerified: true, Name: "OAuth Implicit"},
+		tokens:                provider.OAuthTokens{AccessToken: "at-implicit"},
+		disableImplicitSignUp: true,
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.Contains(location, "error=signup_disabled") {
+		t.Fatalf("redirect=%s", location)
+	}
+}
+
+func TestSignInSocialRequestSignUpOverridesDisableImplicitSignUp(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:                    "mock",
+		user:                  provider.OAuthUser{ID: "mock-request", Email: "oauth-request@example.com", EmailVerified: true, Name: "OAuth Request"},
+		tokens:                provider.OAuthTokens{AccessToken: "at-request"},
+		disableImplicitSignUp: true,
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+		"requestSignUp":   true,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	if location := resp.Header.Get("Location"); !strings.HasPrefix(location, "http://localhost:3000/done") {
+		t.Fatalf("redirect=%s", location)
+	}
+}
+
+func TestSignInSocialIDTokenHonorsDisableSignUp(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:            "mock",
+		user:          provider.OAuthUser{ID: "mock-disabled", Email: "oauth-disabled@example.com", EmailVerified: true, Name: "OAuth Disabled"},
+		disableSignUp: true,
+	}
+	a := oauthTestAuth(t, p)
+
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-disabled"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }

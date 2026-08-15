@@ -47,6 +47,12 @@ type SocialProvider interface {
 	GetUserInfo(ctx context.Context, tokens OAuthTokens) (*UserInfo, error)
 }
 
+// SignUpPolicyProvider controls whether a social provider may create users.
+type SignUpPolicyProvider interface {
+	DisableImplicitSignUp() bool
+	DisableSignUp() bool
+}
+
 // IDTokenLinker links accounts using a provider ID token.
 type IDTokenLinker interface {
 	VerifyIDToken(ctx context.Context, token, nonce string) (bool, error)

@@ -47,6 +47,17 @@ func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, acco
 	return a.createOAuthUser(c, userInfo, account, email)
 }
 
+func (a *Auth) socialSignUpDisabled(p provider.SocialProvider, requestSignUp bool) bool {
+	policy, ok := p.(provider.SignUpPolicyProvider)
+	if !ok {
+		return false
+	}
+	if policy.DisableSignUp() {
+		return true
+	}
+	return policy.DisableImplicitSignUp() && !requestSignUp
+}
+
 func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo provider.OAuthUser, account oauthAccountInput) (*oauthUserResult, error) {
 	accounts, err := a.cfg.store.ListAccountsByUserID(c.R.Context(), user.ID)
 	if err != nil {

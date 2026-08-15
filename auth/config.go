@@ -70,18 +70,22 @@ type Config struct {
 
 // GoogleProviderConfig configures the built-in Google OAuth provider.
 type GoogleProviderConfig struct {
-	ClientID     string
-	ClientSecret string
-	Scopes       []string
-	Disabled     bool
+	ClientID              string
+	ClientSecret          string
+	Scopes                []string
+	Disabled              bool
+	DisableImplicitSignUp bool
+	DisableSignUp         bool
 }
 
 // GitHubProviderConfig configures the built-in GitHub OAuth provider.
 type GitHubProviderConfig struct {
-	ClientID     string
-	ClientSecret string
-	Scopes       []string
-	Disabled     bool
+	ClientID              string
+	ClientSecret          string
+	Scopes                []string
+	Disabled              bool
+	DisableImplicitSignUp bool
+	DisableSignUp         bool
 }
 
 // AccountConfig configures account linking and management.
@@ -522,11 +526,13 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.Google.ClientID != "" && opts.Google.ClientSecret != "" && !opts.Google.Disabled {
 		providers[constants.ProviderGoogle] = google.New(google.Config{
 			ClientID: opts.Google.ClientID, ClientSecret: opts.Google.ClientSecret, Scopes: opts.Google.Scopes,
+			DisableImplicitSignUp: opts.Google.DisableImplicitSignUp, DisableSignUp: opts.Google.DisableSignUp,
 		})
 	}
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
 		providers[constants.ProviderGitHub] = github.New(github.Config{
 			ClientID: opts.GitHub.ClientID, ClientSecret: opts.GitHub.ClientSecret, Scopes: opts.GitHub.Scopes,
+			DisableImplicitSignUp: opts.GitHub.DisableImplicitSignUp, DisableSignUp: opts.GitHub.DisableSignUp,
 		})
 	}
 	return providers

@@ -17,3 +17,10 @@ func TestGitHubAuthURL(t *testing.T) {
 		t.Fatalf("url=%s err=%v", url, err)
 	}
 }
+
+func TestGitHubSignUpPolicy(t *testing.T) {
+	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true})
+	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
+		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
+	}
+}
