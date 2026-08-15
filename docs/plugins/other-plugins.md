@@ -7,6 +7,7 @@ Brief reference for plugins without dedicated guides. All are enabled via
 |--------|-----|-------|
 | Anonymous | `anonymous` | Guest sessions without email |
 | API key | `api-key` | Create, verify, list, update, and delete hashed API keys; can resolve sessions from `x-api-key` |
+| i18n | `i18n` | Translates API error messages by code using header, cookie, session, or callback locale detection |
 | JWT | `jwt` | JWT tokens + JWKS endpoint |
 | Multi-session | `multi-session` | Multiple concurrent sessions |
 | Custom session | `custom-session` | Transform session API response |

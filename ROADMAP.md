@@ -23,8 +23,8 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
 | Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 25 | 0 | 0 |
-| Extended packages | 2 | 0 | 8 |
+| Plugins (core package) | 26 | 0 | 0 |
+| Extended packages | 3 | 0 | 7 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -228,7 +228,7 @@ Separate npm packages in the Better Auth monorepo.
 | `@better-auth/api-key` | ✅ | API key management plugin |
 | `@better-auth/expo` | ⬜ | React Native / Expo client helpers |
 | `@better-auth/electron` | ⬜ | Electron desktop auth |
-| `@better-auth/i18n` | ⬜ | Translated error messages |
+| `@better-auth/i18n` | ✅ | Translated error messages |
 | `@better-auth/cli` | ✅ | `betterauth-go` binary + `cli/core` package: `generate`, `migrate`, `secret`, `info`, `init`; schema is feature-scoped to enabled plugins |
 
 ---
@@ -393,7 +393,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 - [x] API keys (separate `@better-auth/api-key` package)
 - [ ] Stripe billing
 - [x] MCP auth
-- [ ] i18n error messages
+- [x] i18n error messages
 - [x] OpenAPI spec generation
 - [x] CLI (`generate` / `migrate` / `secret` / `info` / `init`)
 - [ ] Go server-side `api` object (typed handlers)

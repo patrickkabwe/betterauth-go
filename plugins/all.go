@@ -4,31 +4,32 @@ import "github.com/patrickkabwe/betterauth-go/auth"
 
 // AllOptions bundles optional configuration for every plugin.
 type AllOptions struct {
-	Bearer            BearerOptions
-	MagicLink         MagicLinkOptions
-	Anonymous         AnonymousOptions
-	Username          UsernameOptions
-	EmailOTP          EmailOTPOptions
-	OneTimeToken      OneTimeTokenOptions
-	JWT               JWTOptions
-	MultiSession      MultiSessionOptions
-	CustomSession     CustomSessionOptions
-	LastLoginMethod   LastLoginMethodOptions
-	HaveIBeenPwned    HaveIBeenPwnedOptions
-	Captcha           CaptchaOptions
-	OAuthProxy        OAuthProxyOptions
-	GenericOAuth      GenericOAuthOptions
-	OneTap            OneTapOptions
-	OpenAPI           OpenAPIOptions
-	DeviceAuth        DeviceAuthorizationOptions
-	PhoneNumber       PhoneNumberOptions
-	SIWE              SIWEOptions
-	TwoFactor         TwoFactorOptions
-	Admin             AdminOptions
-	Organization      OrganizationOptions
-	OIDCProvider      OIDCProviderOptions
-	MCP               MCPOptions
-	APIKey            APIKeyOptions
+	Bearer          BearerOptions
+	MagicLink       MagicLinkOptions
+	Anonymous       AnonymousOptions
+	Username        UsernameOptions
+	EmailOTP        EmailOTPOptions
+	OneTimeToken    OneTimeTokenOptions
+	JWT             JWTOptions
+	MultiSession    MultiSessionOptions
+	CustomSession   CustomSessionOptions
+	LastLoginMethod LastLoginMethodOptions
+	HaveIBeenPwned  HaveIBeenPwnedOptions
+	Captcha         CaptchaOptions
+	OAuthProxy      OAuthProxyOptions
+	GenericOAuth    GenericOAuthOptions
+	OneTap          OneTapOptions
+	OpenAPI         OpenAPIOptions
+	DeviceAuth      DeviceAuthorizationOptions
+	PhoneNumber     PhoneNumberOptions
+	SIWE            SIWEOptions
+	TwoFactor       TwoFactorOptions
+	Admin           AdminOptions
+	Organization    OrganizationOptions
+	OIDCProvider    OIDCProviderOptions
+	MCP             MCPOptions
+	APIKey          APIKeyOptions
+	I18n            I18nOptions
 }
 
 // All returns every core Better Auth plugin.
@@ -59,5 +60,6 @@ func All(opts AllOptions) []auth.Plugin {
 		OIDCProvider(opts.OIDCProvider),
 		MCP(opts.MCP),
 		APIKey(opts.APIKey),
+		I18n(opts.I18n),
 	}
 }

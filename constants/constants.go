@@ -149,6 +149,7 @@ const (
 	PluginOIDCProvider      = "oidc-provider"
 	PluginMCP               = "mcp"
 	PluginAPIKey            = "api-key"
+	PluginI18n              = "i18n"
 )
 
 // API error codes.

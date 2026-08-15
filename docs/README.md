@@ -40,7 +40,7 @@ the Go API.
 
 ## Plugins
 
-- [Plugin overview](plugins/overview.md) — all 25 core plugins
+- [Plugin overview](plugins/overview.md) — all 26 core plugins
 - [Bearer](plugins/bearer.md)
 - [Organization](plugins/organization.md)
 - [Two-factor](plugins/two-factor.md)

@@ -26,6 +26,7 @@ type Context struct {
 	sessionTokenOverride string
 	sessionOverride      *types.Session
 	userOverride         *types.User
+	errorTranslator      func(*apierror.Error) *apierror.Error
 	authTokenExposed     bool
 	pendingAuthToken     string
 }
@@ -43,6 +44,9 @@ func (c *Context) WriteNull() {
 }
 
 func (c *Context) WriteError(err *apierror.Error) {
+	if c.errorTranslator != nil {
+		err = c.errorTranslator(err)
+	}
 	if c.Auth != nil && c.Auth.cfg.onAPIError.OnError != nil {
 		c.Auth.cfg.onAPIError.OnError(err, c)
 	}
@@ -171,6 +175,11 @@ func (c *Context) SetSessionTokenOverride(token string) {
 func (c *Context) SetSessionOverride(sess *types.Session, user *types.User) {
 	c.sessionOverride = sess
 	c.userOverride = user
+}
+
+// SetErrorTranslator installs a request-local API error translator.
+func (c *Context) SetErrorTranslator(fn func(*apierror.Error) *apierror.Error) {
+	c.errorTranslator = fn
 }
 
 // MarkAuthToken queues a session token for bearer clients and exposes the header
