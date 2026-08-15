@@ -1292,6 +1292,102 @@ func TestGenericOAuthCallbackUsesStoredErrorCallbackURL(t *testing.T) {
 	}
 }
 
+func TestGenericOAuthCallbackRedirectsProfileValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		userInfo *provider.UserInfo
+		want     string
+	}{
+		{
+			name: "missing user info",
+			want: "user_info_is_missing",
+		},
+		{
+			name: "missing account id",
+			userInfo: &provider.UserInfo{
+				User: provider.OAuthUser{
+					Name:          "Missing ID",
+					Email:         "missing-id@example.com",
+					EmailVerified: true,
+				},
+			},
+			want: "id_is_missing",
+		},
+		{
+			name: "missing name",
+			userInfo: &provider.UserInfo{
+				User: provider.OAuthUser{
+					ID:            "missing-name",
+					Email:         "missing-name@example.com",
+					EmailVerified: true,
+				},
+			},
+			want: "name_is_missing",
+		},
+		{
+			name: "missing email",
+			userInfo: &provider.UserInfo{
+				User: provider.OAuthUser{
+					ID:            "missing-email",
+					Name:          "Missing Email",
+					EmailVerified: true,
+				},
+			},
+			want: "email_is_missing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{
+				Providers: []plugins.GenericOAuthProviderConfig{
+					{
+						ProviderID:       "oidc",
+						ClientID:         "client",
+						ClientSecret:     "secret",
+						AuthorizationURL: "https://idp.example.com/oauth/authorize",
+						TokenURL:         "https://idp.example.com/oauth/token",
+						GetToken: func(_ context.Context, _ plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+							return &provider.OAuthTokens{AccessToken: "access-token"}, nil
+						},
+						GetUserInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+							return tt.userInfo, nil
+						},
+					},
+				},
+			}))
+
+			w := post(t, a, "/sign-in/oauth2", `{"providerId":"oidc","callbackURL":"https://app.example.com/dashboard","errorCallbackURL":"https://app.example.com/oauth-error"}`)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status %d body %s", w.Code, w.Body.String())
+			}
+			var body struct {
+				URL string `json:"url"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.Parse(body.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := parsed.Query().Get("state")
+			if state == "" {
+				t.Fatalf("state missing: %s", body.URL)
+			}
+
+			callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+			if callback.Code != http.StatusFound {
+				t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+			}
+			location := callback.Header().Get("Location")
+			want := "https://app.example.com/oauth-error?error=" + tt.want
+			if location != want {
+				t.Fatalf("Location=%q want %q", location, want)
+			}
+		})
+	}
+}
+
 func TestGenericOAuthCallbackRequestSignUpOverridesDisableImplicitSignUp(t *testing.T) {
 	var accountID string
 	a := newTestAuth(t, plugins.GenericOAuth(plugins.GenericOAuthOptions{

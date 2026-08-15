@@ -73,6 +73,13 @@ type GenericOAuthProviderConfig struct {
 	MapProfileToUser        GenericOAuthMapProfileToUser
 }
 
+var (
+	errGenericOAuthUserInfoMissing  = errors.New("user_info_is_missing")
+	errGenericOAuthAccountIDMissing = errors.New("id_is_missing")
+	errGenericOAuthNameMissing      = errors.New("name_is_missing")
+	errGenericOAuthEmailMissing     = errors.New("email_is_missing")
+)
+
 // GenericOAuthOptions configures the generic OAuth plugin.
 type GenericOAuthOptions struct {
 	Providers []GenericOAuthProviderConfig
@@ -236,7 +243,7 @@ func handleGenericOAuthCallback(c *auth.Context, providers map[string]GenericOAu
 	}
 	userInfo, err := genericOAuthUserInfo(c, p, tokens)
 	if err != nil {
-		redirectGenericOAuthError(c, errorURL, "unable_to_get_user_info", "")
+		redirectGenericOAuthError(c, errorURL, genericOAuthUserInfoErrorCode(err), "")
 		return
 	}
 	if stateData.LinkUserID != "" {
@@ -256,6 +263,21 @@ func handleGenericOAuthCallback(c *auth.Context, providers map[string]GenericOAu
 		callbackURL = stateData.NewUserURL
 	}
 	c.Redirect(callbackURL)
+}
+
+func genericOAuthUserInfoErrorCode(err error) string {
+	switch {
+	case errors.Is(err, errGenericOAuthUserInfoMissing):
+		return "user_info_is_missing"
+	case errors.Is(err, errGenericOAuthAccountIDMissing):
+		return "id_is_missing"
+	case errors.Is(err, errGenericOAuthNameMissing):
+		return "name_is_missing"
+	case errors.Is(err, errGenericOAuthEmailMissing):
+		return "email_is_missing"
+	default:
+		return "unable_to_get_user_info"
+	}
 }
 
 func genericOAuthCallbackValues(c *auth.Context) (url.Values, error) {
@@ -755,7 +777,7 @@ func genericOAuthUserInfo(c *auth.Context, p GenericOAuthProviderConfig, tokens 
 			return provider.OAuthUser{}, err
 		}
 		if info == nil {
-			return provider.OAuthUser{}, errors.New("user info is missing")
+			return provider.OAuthUser{}, errGenericOAuthUserInfoMissing
 		}
 		return genericOAuthMappedUser(c, p, info.User, genericOAuthProfileFromUserInfo(info))
 	}
@@ -853,14 +875,14 @@ func cloneGenericOAuthProfile(profile map[string]any) map[string]any {
 
 func normalizeGenericOAuthUser(user provider.OAuthUser) (provider.OAuthUser, error) {
 	if user.ID == "" {
-		return provider.OAuthUser{}, errors.New("id is missing")
+		return provider.OAuthUser{}, errGenericOAuthAccountIDMissing
 	}
 	if user.Name == "" {
-		return provider.OAuthUser{}, errors.New("name is missing")
+		return provider.OAuthUser{}, errGenericOAuthNameMissing
 	}
 	user.Email = auth.NormalizeEmail(user.Email)
 	if user.Email == "" {
-		return provider.OAuthUser{}, errors.New("email is missing")
+		return provider.OAuthUser{}, errGenericOAuthEmailMissing
 	}
 	return user, nil
 }
