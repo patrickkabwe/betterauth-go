@@ -225,6 +225,72 @@ func TestPhoneNumberVerifyRejectsOTPShape(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberRequestPasswordResetSendsOTPForExistingUser(t *testing.T) {
+	sentPhone := ""
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendPasswordResetOTP: func(_ context.Context, phone string, otp string) error {
+			sentPhone = phone
+			sentCode = otp
+			return nil
+		},
+	}))
+	createPhoneCredentialUser(t, a, "phone-reset-user", "+1234567890", "password123")
+
+	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status bool `json:"status"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Status {
+		t.Fatal("expected reset request status")
+	}
+	if sentPhone != "+1234567890" {
+		t.Fatalf("sent phone %q", sentPhone)
+	}
+	if len(sentCode) != 6 {
+		t.Fatalf("sent code length %d", len(sentCode))
+	}
+}
+
+func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) {
+	var sent bool
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendPasswordResetOTP: func(_ context.Context, _ string, _ string) error {
+			sent = true
+			return nil
+		},
+	}))
+	w := post(t, a, "/phone-number/request-password-reset", `{"phoneNumber":"+1234567899"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status bool `json:"status"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Status {
+		t.Fatal("expected reset request status")
+	}
+	if sent {
+		t.Fatal("reset otp should not be sent for unknown phone numbers")
+	}
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), "+1234567899-request-password-reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(verification.Value) != 6 {
+		t.Fatalf("verification code length %d", len(verification.Value))
+	}
+}
+
 func TestPhoneNumberSignInUsesPassword(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
 	createPhoneCredentialUser(t, a, "phone-signin-user", "+1234567890", "password123")

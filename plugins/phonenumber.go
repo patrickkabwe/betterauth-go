@@ -2,11 +2,13 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/store"
@@ -14,8 +16,9 @@ import (
 
 // PhoneNumberOptions configures SMS OTP sign-in.
 type PhoneNumberOptions struct {
-	SendOTP   func(ctx context.Context, phone, otp string) error
-	ExpiresIn time.Duration
+	SendOTP              func(ctx context.Context, phone, otp string) error
+	SendPasswordResetOTP func(ctx context.Context, phone, otp string) error
+	ExpiresIn            time.Duration
 }
 
 // PhoneNumber adds phone number OTP authentication.
@@ -108,7 +111,40 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				c.WriteJSON(http.StatusOK, map[string]any{"token": sess.Token, "user": user})
 			}),
 			rt(http.MethodPost, "/phone-number/request-password-reset", func(c *auth.Context) {
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				var body struct {
+					PhoneNumber string `json:"phoneNumber"`
+				}
+				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" {
+					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
+					return
+				}
+				otp, err := id.Generate(6)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				otp = otp[:6]
+				identifier := body.PhoneNumber + "-request-password-reset"
+				if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp, expires); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				_, err = c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
+				if err != nil {
+					if errors.Is(err, berrors.ErrNotFound) {
+						c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
+						return
+					}
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				if opts.SendPasswordResetOTP != nil {
+					if err := opts.SendPasswordResetOTP(c.R.Context(), body.PhoneNumber, otp); err != nil {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+						return
+					}
+				}
+				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
 			}),
 			rt(http.MethodPost, "/phone-number/reset-password", func(c *auth.Context) {
 				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
