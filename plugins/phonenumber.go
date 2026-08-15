@@ -28,6 +28,7 @@ type PhoneNumberOptions struct {
 	ExpiresIn              time.Duration
 	AllowedAttempts        int
 	RequireVerification    bool
+	OTPLength              int
 }
 
 // PhoneNumberSignUpOnVerificationOptions configures user creation on phone verification.
@@ -52,6 +53,10 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 	if expires == 0 {
 		expires = 5 * time.Minute
 	}
+	otpLength := opts.OTPLength
+	if otpLength == 0 {
+		otpLength = 6
+	}
 	allowedAttempts := opts.AllowedAttempts
 	if allowedAttempts == 0 {
 		allowedAttempts = 3
@@ -74,7 +79,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				if !validatePhoneNumber(c, opts.PhoneNumberValidator, body.PhoneNumber) {
 					return
 				}
-				otp, err := numericOTP(6)
+				otp, err := numericOTP(otpLength)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
@@ -195,7 +200,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				}
 				if opts.RequireVerification && !auth.UserAdditionalBool(user, constants.FieldPhoneVerified) {
 					if opts.SendOTP != nil {
-						otp, err := numericOTP(6)
+						otp, err := numericOTP(otpLength)
 						if err != nil {
 							c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 							return
@@ -241,7 +246,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
 					return
 				}
-				otp, err := numericOTP(6)
+				otp, err := numericOTP(otpLength)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return

@@ -171,6 +171,24 @@ func TestPhoneNumberSendOTPResponseMatchesUpstream(t *testing.T) {
 	}
 }
 
+func TestPhoneNumberSendOTPUsesConfiguredLength(t *testing.T) {
+	sentCode := ""
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		OTPLength: 4,
+		SendOTP: func(_ context.Context, _ string, otp string) error {
+			sentCode = otp
+			return nil
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if len(sentCode) != 4 || !isDigitString(sentCode) {
+		t.Fatalf("sent code should be 4 numeric digits: %q", sentCode)
+	}
+}
+
 func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
 		SendOTP: func(_ context.Context, _ string, _ string) error {
@@ -586,6 +604,7 @@ func TestPhoneNumberSignInRequiresPhoneVerification(t *testing.T) {
 	sentCode := ""
 	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
 		RequireVerification: true,
+		OTPLength:           4,
 		SendOTP: func(_ context.Context, _ string, otp string) error {
 			sentCode = otp
 			return nil
@@ -606,7 +625,7 @@ func TestPhoneNumberSignInRequiresPhoneVerification(t *testing.T) {
 	if resp.Code != "PHONE_NUMBER_NOT_VERIFIED" {
 		t.Fatalf("code %q", resp.Code)
 	}
-	if len(sentCode) != 6 || !isDigitString(sentCode) {
+	if len(sentCode) != 4 || !isDigitString(sentCode) {
 		t.Fatalf("sent code should be numeric: %q", sentCode)
 	}
 	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationPhoneOTP+"+1234567890")
