@@ -1102,7 +1102,7 @@ func updateGenericOAuthAccount(c *auth.Context, accountID string, tokens *provid
 
 func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthStatePayload, userInfo provider.OAuthUser, tokens *provider.OAuthTokens) {
 	errorURL := genericOAuthCallbackErrorURL(c, stateData)
-	if !strings.EqualFold(stateData.LinkEmail, userInfo.Email) {
+	if !c.Auth.CanLinkAccountEmail(stateData.LinkEmail, userInfo.Email) {
 		redirectGenericOAuthError(c, errorURL, "email_doesn't_match", "")
 		return
 	}
@@ -1116,6 +1116,7 @@ func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthState
 			redirectGenericOAuthError(c, errorURL, "unable_to_link_account", "")
 			return
 		}
+		c.Auth.ApplyUserInfoOnLink(c, stateData.LinkUserID, userInfo)
 		c.Redirect(stateData.CallbackURL)
 		return
 	}
@@ -1127,6 +1128,7 @@ func handleGenericOAuthLinkCallback(c *auth.Context, stateData genericOAuthState
 		redirectGenericOAuthError(c, errorURL, "unable_to_link_account", "")
 		return
 	}
+	c.Auth.ApplyUserInfoOnLink(c, stateData.LinkUserID, userInfo)
 	c.Redirect(stateData.CallbackURL)
 }
 

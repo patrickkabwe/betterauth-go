@@ -9,6 +9,7 @@ import (
 
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
+	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -29,6 +30,16 @@ func ExtStore(s store.Store) (store.ExtStore, bool) {
 // NewSession creates a session and sets cookies (exported for plugins).
 func (a *Auth) NewSession(c *Context, userID string, rememberMe bool) (*types.Session, error) {
 	return a.createSession(c, userID, rememberMe)
+}
+
+// CanLinkAccountEmail reports whether account-linking policy permits the OAuth email.
+func (a *Auth) CanLinkAccountEmail(existingEmail string, oauthEmail string) bool {
+	return strings.EqualFold(existingEmail, oauthEmail) || a.cfg.account.allowDifferentEmails
+}
+
+// ApplyUserInfoOnLink applies configured user profile updates after account linking.
+func (a *Auth) ApplyUserInfoOnLink(c *Context, userID string, info provider.OAuthUser) *types.User {
+	return a.applyUserInfoOnLink(c, userID, info)
 }
 
 // VerifyPassword checks a password against a stored hash.

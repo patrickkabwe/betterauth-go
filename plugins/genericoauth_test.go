@@ -15,6 +15,7 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
 	"github.com/patrickkabwe/betterauth-go/provider"
+	"github.com/patrickkabwe/betterauth-go/store/memory"
 )
 
 func newGenericOAuthCallbackServer(t *testing.T, accountID string, name string, email string, tokenResponse string) (*httptest.Server, *bool) {
@@ -701,6 +702,100 @@ func TestGenericOAuthCallbackLinksAccount(t *testing.T) {
 	}
 	if account.UserID != user.ID || account.AccessToken != "access-token" {
 		t.Fatalf("account=%+v user=%+v", account, user)
+	}
+}
+
+func TestGenericOAuthCallbackLinksDifferentEmailWhenAllowedAndUpdatesUser(t *testing.T) {
+	image := "https://idp.example.com/linked.png"
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   memory.New(),
+		Account: auth.AccountConfig{
+			AccountLinking: auth.AccountLinkingConfig{
+				AllowDifferentEmails: true,
+				UpdateUserInfoOnLink: true,
+			},
+		},
+		Plugins: []auth.Plugin{
+			plugins.GenericOAuth(plugins.GenericOAuthOptions{
+				Providers: []plugins.GenericOAuthProviderConfig{
+					{
+						ProviderID:       "oidc",
+						ClientID:         "client",
+						ClientSecret:     "secret",
+						AuthorizationURL: "https://idp.example.com/oauth/authorize",
+						TokenURL:         "https://idp.example.com/oauth/token",
+						GetToken: func(_ context.Context, _ plugins.GenericOAuthGetTokenParams) (*provider.OAuthTokens, error) {
+							return &provider.OAuthTokens{AccessToken: "access-token"}, nil
+						},
+						GetUserInfo: func(_ context.Context, _ provider.OAuthTokens) (*provider.UserInfo, error) {
+							return &provider.UserInfo{
+								User: provider.OAuthUser{
+									ID:            "different-email-account",
+									Name:          "Linked Profile",
+									Email:         "linked-different@example.com",
+									EmailVerified: true,
+									Image:         &image,
+								},
+							}, nil
+						},
+					},
+				},
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signUp := post(t, a, "/sign-up/email", `{"name":"Original Name","email":"generic-oauth-different-link@example.com","password":"password123"}`)
+	if signUp.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", signUp.Code, signUp.Body.String())
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "generic-oauth-different-link@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := postWithCookies(t, a, "/oauth2/link", `{"providerId":"oidc","callbackURL":"https://app.example.com/settings"}`, signUp.Result().Cookies())
+	if link.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", link.Code, link.Body.String())
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(link.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatalf("state missing: %s", body.URL)
+	}
+
+	callback := get(t, a, "/oauth2/callback/oidc?code=code&state="+url.QueryEscape(state))
+	if callback.Code != http.StatusFound {
+		t.Fatalf("status %d body %s", callback.Code, callback.Body.String())
+	}
+	if location := callback.Header().Get("Location"); location != "https://app.example.com/settings" {
+		t.Fatalf("Location=%q", location)
+	}
+	account, err := a.Store().FindAccountByProviderAndAccountID(context.Background(), "oidc", "different-email-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.UserID != user.ID || account.AccessToken != "access-token" {
+		t.Fatalf("account=%+v user=%+v", account, user)
+	}
+	updated, err := a.Store().FindUserByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Linked Profile" || updated.Image == nil || *updated.Image != image || updated.Email != "generic-oauth-different-link@example.com" {
+		t.Fatalf("updated=%+v", updated)
 	}
 }
 
