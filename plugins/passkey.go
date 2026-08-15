@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -26,10 +27,11 @@ const defaultPasskeyChallengeCookie = "better-auth-passkey"
 
 // PasskeyOptions configures WebAuthn passkey support.
 type PasskeyOptions struct {
-	RPID                string
-	RPDisplayName       string
-	RPOrigins           []string
-	ChallengeCookieName string
+	RPID                   string
+	RPDisplayName          string
+	RPOrigins              []string
+	ChallengeCookieName    string
+	AuthenticatorSelection *protocol.AuthenticatorSelection
 }
 
 type passkeyUser struct {
@@ -60,7 +62,7 @@ func Passkey(opts PasskeyOptions) auth.Plugin {
 				if !ok {
 					return
 				}
-				options, session, err := webAuthn.BeginRegistration(passkeyUser)
+				options, session, err := webAuthn.BeginRegistration(passkeyUser, passkeyRegistrationOptions(c, opts)...)
 				if err != nil {
 					c.WriteError(apierror.New(http.StatusInternalServerError, constants.CodeInternalServerError, err.Error()))
 					return
@@ -391,6 +393,23 @@ func passkeyChallengeCookie(opts PasskeyOptions) string {
 		return opts.ChallengeCookieName
 	}
 	return defaultPasskeyChallengeCookie
+}
+
+func passkeyRegistrationOptions(c *auth.Context, opts PasskeyOptions) []gowebauthn.RegistrationOption {
+	selection := protocol.AuthenticatorSelection{
+		ResidentKey: protocol.ResidentKeyRequirementPreferred,
+	}
+	if opts.AuthenticatorSelection != nil {
+		selection = *opts.AuthenticatorSelection
+	}
+	attachment := c.R.URL.Query().Get("authenticatorAttachment")
+	switch attachment {
+	case "platform":
+		selection.AuthenticatorAttachment = protocol.Platform
+	case "cross-platform":
+		selection.AuthenticatorAttachment = protocol.CrossPlatform
+	}
+	return []gowebauthn.RegistrationOption{gowebauthn.WithAuthenticatorSelection(selection)}
 }
 
 func passkeyRecordFromCredential(userID string, name string, credential *gowebauthn.Credential) (*types.Passkey, error) {

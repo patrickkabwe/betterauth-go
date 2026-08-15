@@ -114,6 +114,44 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestSessionIndexesTrackOverwriteAndDelete(t *testing.T) {
+	s := memory.New()
+	ctx := context.Background()
+	now := time.Now()
+	_ = s.CreateUser(ctx, &types.User{ID: "u1", Name: "A", Email: "a@b.com", CreatedAt: now, UpdatedAt: now})
+	_ = s.CreateUser(ctx, &types.User{ID: "u2", Name: "B", Email: "b@b.com", CreatedAt: now, UpdatedAt: now})
+	exp := now.Add(time.Hour)
+
+	_ = s.CreateSession(ctx, &types.Session{
+		ID: "s1", Token: "t1", UserID: "u1", ExpiresAt: exp, CreatedAt: now, UpdatedAt: now,
+	})
+	_ = s.CreateSession(ctx, &types.Session{
+		ID: "s1", Token: "t1", UserID: "u2", ExpiresAt: exp, CreatedAt: now, UpdatedAt: now,
+	})
+
+	oldUserSessions, err := s.ListSessionsByUserID(ctx, "u1")
+	if err != nil || len(oldUserSessions) != 0 {
+		t.Fatal("old session index should be removed after overwrite")
+	}
+	newUserSessions, err := s.ListSessionsByUserID(ctx, "u2")
+	if err != nil || len(newUserSessions) != 1 {
+		t.Fatal("new session index should be added after overwrite")
+	}
+	if err := s.DeleteSessionsByUserID(ctx, "u1", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, user, err := s.FindSessionByToken(ctx, "t1")
+	if err != nil || user.ID != "u2" {
+		t.Fatal("deleting old user's sessions should not delete overwritten session")
+	}
+	if err := s.DeleteAllSessionsByUserID(ctx, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.FindSessionByToken(ctx, "t1"); err != memory.ErrNotFound {
+		t.Fatal("session should be removed from token index")
+	}
+}
+
 func TestUpdateUserEmail(t *testing.T) {
 	s := memory.New()
 	ctx := context.Background()
@@ -187,6 +225,40 @@ func TestAccounts(t *testing.T) {
 	})
 	if err != nil || updated.AccessToken != "at" || updated.RefreshToken != "rt" {
 		t.Fatalf("update account tokens failed: %+v err=%v", updated, err)
+	}
+}
+
+func TestAccountIndexesTrackOverwriteAndDelete(t *testing.T) {
+	s := memory.New()
+	ctx := context.Background()
+	now := time.Now()
+
+	_ = s.CreateAccount(ctx, &types.Account{
+		ID: "a1", AccountID: "old", ProviderID: "credential", UserID: "u1", CreatedAt: now, UpdatedAt: now,
+	})
+	_ = s.CreateAccount(ctx, &types.Account{
+		ID: "a1", AccountID: "new", ProviderID: "github", UserID: "u2", CreatedAt: now, UpdatedAt: now,
+	})
+
+	if _, err := s.FindAccountByProviderAndAccountID(ctx, "credential", "old"); err != memory.ErrNotFound {
+		t.Fatal("old provider/account index should be removed after overwrite")
+	}
+	if _, err := s.FindAccountByUserAndProvider(ctx, "u1", "credential"); err != memory.ErrNotFound {
+		t.Fatal("old user/provider index should be removed after overwrite")
+	}
+	oldUserAccounts, err := s.ListAccountsByUserID(ctx, "u1")
+	if err != nil || len(oldUserAccounts) != 0 {
+		t.Fatal("old user account index should be removed after overwrite")
+	}
+	newUserAccounts, err := s.ListAccountsByUserID(ctx, "u2")
+	if err != nil || len(newUserAccounts) != 1 {
+		t.Fatal("new user account index should be added after overwrite")
+	}
+	if err := s.DeleteAccount(ctx, "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FindAccountByProviderAndAccountID(ctx, "github", "new"); err != memory.ErrNotFound {
+		t.Fatal("provider/account index should be removed after delete")
 	}
 }
 

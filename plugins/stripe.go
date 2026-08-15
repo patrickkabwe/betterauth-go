@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
@@ -26,6 +28,7 @@ type StripePlan struct {
 	Name                  string
 	PriceID               string
 	AnnualDiscountPriceID string
+	SeatPriceID           string
 }
 
 // StripeOptions configures Stripe billing routes.
@@ -48,29 +51,45 @@ func Stripe(opts StripeOptions) auth.Plugin {
 					return
 				}
 				var body struct {
-					Plan       string `json:"plan"`
-					SuccessURL string `json:"successUrl"`
-					CancelURL  string `json:"cancelUrl"`
-					Annual     bool   `json:"annual"`
+					Plan         string         `json:"plan"`
+					SuccessURL   string         `json:"successUrl"`
+					CancelURL    string         `json:"cancelUrl"`
+					Annual       bool           `json:"annual"`
+					CustomerType string         `json:"customerType"`
+					ReferenceID  string         `json:"referenceId"`
+					Seats        int            `json:"seats"`
+					Metadata     map[string]any `json:"metadata"`
 				}
 				if err := c.ParseJSON(&body); err != nil {
 					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
 					return
 				}
-				priceID := stripePriceID(opts.Plans, body.Plan, body.Annual)
+				priceID := stripePriceID(opts.Plans, body.Plan, body.Annual, false)
 				if priceID == "" {
 					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "Unknown Stripe plan"))
 					return
+				}
+				referenceID := firstNonEmpty(body.ReferenceID, user.ID)
+				customerType := firstNonEmpty(body.CustomerType, "user")
+				quantity := body.Seats
+				if quantity < 1 {
+					quantity = 1
 				}
 				form := url.Values{}
 				form.Set("mode", "subscription")
 				form.Set("success_url", body.SuccessURL)
 				form.Set("cancel_url", body.CancelURL)
-				form.Set("client_reference_id", user.ID)
+				form.Set("client_reference_id", referenceID)
 				form.Set("line_items[0][price]", priceID)
 				form.Set("line_items[0][quantity]", "1")
-				form.Set("metadata[referenceId]", user.ID)
+				form.Set("metadata[referenceId]", referenceID)
+				form.Set("metadata[customerType]", customerType)
 				form.Set("metadata[plan]", body.Plan)
+				stripeSetMetadata(form, "metadata", body.Metadata)
+				if seatPriceID := stripePriceID(opts.Plans, body.Plan, false, true); seatPriceID != "" {
+					form.Set("line_items[1][price]", seatPriceID)
+					form.Set("line_items[1][quantity]", strconv.Itoa(quantity))
+				}
 				if customerID := auth.UserAdditionalString(user, stripeCustomerIDField); customerID != "" {
 					form.Set("customer", customerID)
 				} else {
@@ -242,10 +261,13 @@ func Stripe(opts StripeOptions) auth.Plugin {
 	}
 }
 
-func stripePriceID(plans []StripePlan, planName string, annual bool) string {
+func stripePriceID(plans []StripePlan, planName string, annual bool, seat bool) string {
 	for _, plan := range plans {
 		if !strings.EqualFold(plan.Name, planName) {
 			continue
+		}
+		if seat {
+			return plan.SeatPriceID
 		}
 		if annual && plan.AnnualDiscountPriceID != "" {
 			return plan.AnnualDiscountPriceID
@@ -253,6 +275,15 @@ func stripePriceID(plans []StripePlan, planName string, annual bool) string {
 		return plan.PriceID
 	}
 	return ""
+}
+
+func stripeSetMetadata(form url.Values, prefix string, metadata map[string]any) {
+	for key, value := range metadata {
+		if key == "" || value == nil {
+			continue
+		}
+		form.Set(prefix+"["+key+"]", fmt.Sprint(value))
+	}
 }
 
 func stripePost(c *auth.Context, opts StripeOptions, path string, form url.Values) (map[string]any, error) {

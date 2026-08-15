@@ -19,12 +19,16 @@ var ErrAlreadyExists = errors.ErrAlreadyExists
 
 // Store is an in-memory Store implementation.
 type Store struct {
-	mu            sync.RWMutex
-	users         map[string]*types.User
-	usersByEmail  map[string]string
-	accounts      map[string]*types.Account
-	sessions      map[string]*types.Session
-	verifications map[string]*types.Verification
+	mu                     sync.RWMutex
+	users                  map[string]*types.User
+	usersByEmail           map[string]string
+	accounts               map[string]*types.Account
+	accountsByProvider     map[accountProviderKey]string
+	accountsByUserProvider map[accountUserProviderKey]string
+	accountIDsByUser       map[string]map[string]struct{}
+	sessions               map[string]*types.Session
+	sessionTokensByUser    map[string]map[string]struct{}
+	verifications          map[string]*types.Verification
 
 	orgs              map[string]*types.Organization
 	orgsBySlug        map[string]string
@@ -47,33 +51,47 @@ type Store struct {
 	passkeysByCredID  map[string]string
 }
 
+type accountProviderKey struct {
+	providerID string
+	accountID  string
+}
+
+type accountUserProviderKey struct {
+	userID     string
+	providerID string
+}
+
 // New creates a new in-memory store.
 func New() *Store {
 	return &Store{
-		users:             make(map[string]*types.User),
-		usersByEmail:      make(map[string]string),
-		accounts:          make(map[string]*types.Account),
-		sessions:          make(map[string]*types.Session),
-		verifications:     make(map[string]*types.Verification),
-		orgs:              make(map[string]*types.Organization),
-		orgsBySlug:        make(map[string]string),
-		members:           make(map[string]*types.Member),
-		invitations:       make(map[string]*types.Invitation),
-		teams:             make(map[string]*types.Team),
-		teamMembers:       make(map[string]*types.TeamMember),
-		organizationRoles: make(map[string]*types.OrganizationRole),
-		twoFactor:         make(map[string]*types.TwoFactorRecord),
-		deviceCodes:       make(map[string]*types.DeviceCode),
-		deviceCodesByUser: make(map[string]string),
-		jwks:              make(map[string]*types.JWKSRecord),
-		oauthApps:         make(map[string]*types.OAuthApplication),
-		wallets:           make(map[string]*types.WalletAddress),
-		apiKeys:           make(map[string]*types.APIKey),
-		apiKeysByKey:      make(map[string]string),
-		ssoProviders:      make(map[string]*types.SSOProvider),
-		ssoProviderDomain: make(map[string]string),
-		passkeys:          make(map[string]*types.Passkey),
-		passkeysByCredID:  make(map[string]string),
+		users:                  make(map[string]*types.User),
+		usersByEmail:           make(map[string]string),
+		accounts:               make(map[string]*types.Account),
+		accountsByProvider:     make(map[accountProviderKey]string),
+		accountsByUserProvider: make(map[accountUserProviderKey]string),
+		accountIDsByUser:       make(map[string]map[string]struct{}),
+		sessions:               make(map[string]*types.Session),
+		sessionTokensByUser:    make(map[string]map[string]struct{}),
+		verifications:          make(map[string]*types.Verification),
+		orgs:                   make(map[string]*types.Organization),
+		orgsBySlug:             make(map[string]string),
+		members:                make(map[string]*types.Member),
+		invitations:            make(map[string]*types.Invitation),
+		teams:                  make(map[string]*types.Team),
+		teamMembers:            make(map[string]*types.TeamMember),
+		organizationRoles:      make(map[string]*types.OrganizationRole),
+		twoFactor:              make(map[string]*types.TwoFactorRecord),
+		deviceCodes:            make(map[string]*types.DeviceCode),
+		deviceCodesByUser:      make(map[string]string),
+		jwks:                   make(map[string]*types.JWKSRecord),
+		oauthApps:              make(map[string]*types.OAuthApplication),
+		wallets:                make(map[string]*types.WalletAddress),
+		apiKeys:                make(map[string]*types.APIKey),
+		apiKeysByKey:           make(map[string]string),
+		ssoProviders:           make(map[string]*types.SSOProvider),
+		ssoProviderDomain:      make(map[string]string),
+		passkeys:               make(map[string]*types.Passkey),
+		passkeysByCredID:       make(map[string]string),
 	}
 }
 
@@ -154,15 +172,11 @@ func (s *Store) DeleteUser(_ context.Context, id string) error {
 	}
 	delete(s.usersByEmail, u.Email)
 	delete(s.users, id)
-	for accID, a := range s.accounts {
-		if a.UserID == id {
-			delete(s.accounts, accID)
-		}
+	for accID := range s.accountIDsByUser[id] {
+		s.deleteAccountLocked(accID)
 	}
-	for token, sess := range s.sessions {
-		if sess.UserID == id {
-			delete(s.sessions, token)
-		}
+	for token := range s.sessionTokensByUser[id] {
+		s.deleteSessionLocked(token)
 	}
 	return nil
 }
@@ -171,7 +185,9 @@ func (s *Store) CreateAccount(_ context.Context, account *types.Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a := *account
+	s.deleteAccountLocked(account.ID)
 	s.accounts[account.ID] = &a
+	s.addAccountIndexesLocked(&a)
 	return nil
 }
 
@@ -208,48 +224,45 @@ func (s *Store) UpdateAccount(_ context.Context, id string, update store.Account
 func (s *Store) UpdateAccountPassword(_ context.Context, userID, providerID, password string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, a := range s.accounts {
-		if a.UserID == userID && a.ProviderID == providerID {
-			a.Password = password
-			a.UpdatedAt = time.Now()
-			return nil
-		}
+	id, ok := s.accountsByUserProvider[accountUserProviderKey{userID: userID, providerID: providerID}]
+	if !ok {
+		return ErrNotFound
 	}
-	return ErrNotFound
+	a := s.accounts[id]
+	a.Password = password
+	a.UpdatedAt = time.Now()
+	return nil
 }
 
 func (s *Store) FindAccountByProviderAndAccountID(_ context.Context, providerID, accountID string) (*types.Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, a := range s.accounts {
-		if a.ProviderID == providerID && a.AccountID == accountID {
-			copy := *a
-			return &copy, nil
-		}
+	id, ok := s.accountsByProvider[accountProviderKey{providerID: providerID, accountID: accountID}]
+	if !ok {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+	copy := *s.accounts[id]
+	return &copy, nil
 }
 
 func (s *Store) FindAccountByUserAndProvider(_ context.Context, userID, providerID string) (*types.Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, a := range s.accounts {
-		if a.UserID == userID && a.ProviderID == providerID {
-			copy := *a
-			return &copy, nil
-		}
+	id, ok := s.accountsByUserProvider[accountUserProviderKey{userID: userID, providerID: providerID}]
+	if !ok {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+	copy := *s.accounts[id]
+	return &copy, nil
 }
 
 func (s *Store) ListAccountsByUserID(_ context.Context, userID string) ([]types.Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var accounts []types.Account
-	for _, a := range s.accounts {
-		if a.UserID == userID {
-			accounts = append(accounts, *a)
-		}
+	ids := s.accountIDsByUser[userID]
+	accounts := make([]types.Account, 0, len(ids))
+	for id := range ids {
+		accounts = append(accounts, *s.accounts[id])
 	}
 	return accounts, nil
 }
@@ -260,7 +273,7 @@ func (s *Store) DeleteAccount(_ context.Context, id string) error {
 	if _, ok := s.accounts[id]; !ok {
 		return ErrNotFound
 	}
-	delete(s.accounts, id)
+	s.deleteAccountLocked(id)
 	return nil
 }
 
@@ -268,7 +281,9 @@ func (s *Store) CreateSession(_ context.Context, session *types.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess := *session
+	s.deleteSessionLocked(session.Token)
 	s.sessions[session.Token] = &sess
+	s.addSessionIndexLocked(&sess)
 	return nil
 }
 
@@ -351,11 +366,10 @@ func (s *Store) FindSessionByToken(_ context.Context, token string) (*types.Sess
 func (s *Store) ListSessionsByUserID(_ context.Context, userID string) ([]types.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var sessions []types.Session
-	for _, sess := range s.sessions {
-		if sess.UserID == userID {
-			sessions = append(sessions, *sess)
-		}
+	tokens := s.sessionTokensByUser[userID]
+	sessions := make([]types.Session, 0, len(tokens))
+	for token := range tokens {
+		sessions = append(sessions, *s.sessions[token])
 	}
 	return sessions, nil
 }
@@ -363,16 +377,16 @@ func (s *Store) ListSessionsByUserID(_ context.Context, userID string) ([]types.
 func (s *Store) DeleteSession(_ context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.sessions, token)
+	s.deleteSessionLocked(token)
 	return nil
 }
 
 func (s *Store) DeleteSessionsByUserID(_ context.Context, userID, exceptToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for token, sess := range s.sessions {
-		if sess.UserID == userID && token != exceptToken {
-			delete(s.sessions, token)
+	for token := range s.sessionTokensByUser[userID] {
+		if token != exceptToken {
+			s.deleteSessionLocked(token)
 		}
 	}
 	return nil
@@ -381,12 +395,72 @@ func (s *Store) DeleteSessionsByUserID(_ context.Context, userID, exceptToken st
 func (s *Store) DeleteAllSessionsByUserID(_ context.Context, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for token, sess := range s.sessions {
-		if sess.UserID == userID {
-			delete(s.sessions, token)
-		}
+	for token := range s.sessionTokensByUser[userID] {
+		s.deleteSessionLocked(token)
 	}
 	return nil
+}
+
+func (s *Store) addAccountIndexesLocked(account *types.Account) {
+	s.accountsByProvider[accountProviderKey{
+		providerID: account.ProviderID,
+		accountID:  account.AccountID,
+	}] = account.ID
+	s.accountsByUserProvider[accountUserProviderKey{
+		userID:     account.UserID,
+		providerID: account.ProviderID,
+	}] = account.ID
+	if s.accountIDsByUser[account.UserID] == nil {
+		s.accountIDsByUser[account.UserID] = make(map[string]struct{})
+	}
+	s.accountIDsByUser[account.UserID][account.ID] = struct{}{}
+}
+
+func (s *Store) deleteAccountLocked(id string) bool {
+	account, ok := s.accounts[id]
+	if !ok {
+		return false
+	}
+	providerKey := accountProviderKey{
+		providerID: account.ProviderID,
+		accountID:  account.AccountID,
+	}
+	if s.accountsByProvider[providerKey] == id {
+		delete(s.accountsByProvider, providerKey)
+	}
+	userProviderKey := accountUserProviderKey{
+		userID:     account.UserID,
+		providerID: account.ProviderID,
+	}
+	if s.accountsByUserProvider[userProviderKey] == id {
+		delete(s.accountsByUserProvider, userProviderKey)
+	}
+	delete(s.accountIDsByUser[account.UserID], id)
+	if len(s.accountIDsByUser[account.UserID]) == 0 {
+		delete(s.accountIDsByUser, account.UserID)
+	}
+	delete(s.accounts, id)
+	return true
+}
+
+func (s *Store) addSessionIndexLocked(session *types.Session) {
+	if s.sessionTokensByUser[session.UserID] == nil {
+		s.sessionTokensByUser[session.UserID] = make(map[string]struct{})
+	}
+	s.sessionTokensByUser[session.UserID][session.Token] = struct{}{}
+}
+
+func (s *Store) deleteSessionLocked(token string) bool {
+	session, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	delete(s.sessionTokensByUser[session.UserID], token)
+	if len(s.sessionTokensByUser[session.UserID]) == 0 {
+		delete(s.sessionTokensByUser, session.UserID)
+	}
+	delete(s.sessions, token)
+	return true
 }
 
 func (s *Store) CreateVerification(_ context.Context, v *types.Verification) error {

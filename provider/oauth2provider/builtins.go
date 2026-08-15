@@ -8,17 +8,22 @@ import (
 )
 
 const (
+	ProviderApple     = constants.ProviderApple
 	ProviderGoogle    = constants.ProviderGoogle
 	ProviderGitHub    = constants.ProviderGitHub
 	ProviderDiscord   = constants.ProviderDiscord
 	ProviderDropbox   = constants.ProviderDropbox
+	ProviderFacebook  = constants.ProviderFacebook
 	ProviderFigma     = constants.ProviderFigma
 	ProviderGitLab    = constants.ProviderGitLab
 	ProviderLinkedIn  = constants.ProviderLinkedIn
+	ProviderLinear    = constants.ProviderLinear
 	ProviderMicrosoft = constants.ProviderMicrosoft
 	ProviderNotion    = constants.ProviderNotion
+	ProviderReddit    = constants.ProviderReddit
 	ProviderSlack     = constants.ProviderSlack
 	ProviderSpotify   = constants.ProviderSpotify
+	ProviderTwitter   = constants.ProviderTwitter
 	ProviderTwitch    = constants.ProviderTwitch
 	ProviderVercel    = constants.ProviderVercel
 )
@@ -39,6 +44,8 @@ type Options struct {
 	AccessType               string
 	Display                  string
 	HD                       string
+	Duration                 string
+	ConfigID                 string
 	DisableImplicitSignUp    bool
 	DisableSignUp            bool
 	OverrideUserInfoOnSignIn bool

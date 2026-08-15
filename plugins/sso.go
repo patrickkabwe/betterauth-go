@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"compress/flate"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beevik/etree"
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
@@ -25,9 +27,12 @@ import (
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
+	dsig "github.com/russellhaering/goxmldsig"
 )
 
 const samlBindingRedirect = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+
+var errSSOOIDCProfileIncomplete = errors.New("oidc profile incomplete")
 
 // SSOOptions configures enterprise SSO providers.
 type SSOOptions struct {
@@ -295,7 +300,7 @@ func SSO(opts SSOOptions) auth.Plugin {
 					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
 					return
 				}
-				assertion, err := parseSAMLAssertion(c.R.PostForm.Get("SAMLResponse"), samlConfig.Mapping)
+				assertion, err := parseSAMLAssertion(c.R.PostForm.Get("SAMLResponse"), provider, samlConfig)
 				if err != nil {
 					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, err.Error()))
 					return
@@ -645,9 +650,15 @@ func ssoOIDCUserInfo(c *auth.Context, ssoProvider types.SSOProvider, cfg SSOOIDC
 		if err != nil {
 			return provider.OAuthUser{}, err
 		}
-		user, err := ssoOIDCUserFromClaims(ssoProvider, cfg, claims)
+		if err := validateSSOOIDCClaims(ssoProvider, cfg, claims); err != nil {
+			return provider.OAuthUser{}, err
+		}
+		user, err := ssoOIDCUserFromValidatedClaims(claims)
 		if err == nil {
 			return user, nil
+		}
+		if !errors.Is(err, errSSOOIDCProfileIncomplete) {
+			return provider.OAuthUser{}, err
 		}
 	}
 	if tokens.AccessToken == "" {
@@ -689,6 +700,10 @@ func ssoOIDCUserFromClaims(ssoProvider types.SSOProvider, cfg SSOOIDCConfig, cla
 	if err := validateSSOOIDCClaims(ssoProvider, cfg, claims); err != nil {
 		return provider.OAuthUser{}, err
 	}
+	return ssoOIDCUserFromValidatedClaims(claims)
+}
+
+func ssoOIDCUserFromValidatedClaims(claims map[string]any) (provider.OAuthUser, error) {
 	accountID := ssoOIDCString(claims, "sub", "id")
 	email := auth.NormalizeEmail(ssoOIDCString(claims, "email"))
 	name := ssoOIDCString(claims, "name", "preferred_username")
@@ -698,10 +713,10 @@ func ssoOIDCUserFromClaims(ssoProvider types.SSOProvider, cfg SSOOIDCConfig, cla
 	image := ssoOIDCString(claims, "picture", "avatar_url", "image")
 	emailVerified, _ := claims["email_verified"].(bool)
 	if accountID == "" {
-		return provider.OAuthUser{}, errors.New("oidc subject is required")
+		return provider.OAuthUser{}, fmt.Errorf("%w: subject is required", errSSOOIDCProfileIncomplete)
 	}
 	if email == "" {
-		return provider.OAuthUser{}, errors.New("oidc email is required")
+		return provider.OAuthUser{}, fmt.Errorf("%w: email is required", errSSOOIDCProfileIncomplete)
 	}
 	return provider.OAuthUser{
 		ID: accountID, Name: name, Email: email, Image: optionalSSOImage(image), EmailVerified: emailVerified,
@@ -1003,13 +1018,16 @@ func deflateAndBase64(input string) (string, error) {
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
-func parseSAMLAssertion(encoded string, mapping SSOSAMLMapping) (samlAssertionUser, error) {
+func parseSAMLAssertion(encoded string, provider types.SSOProvider, cfg SSOSAMLConfig) (samlAssertionUser, error) {
 	if encoded == "" {
 		return samlAssertionUser{}, errors.New("SAMLResponse is required")
 	}
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return samlAssertionUser{}, errors.New("invalid SAMLResponse")
+	}
+	if err := validateSAMLResponse(raw, provider, cfg); err != nil {
+		return samlAssertionUser{}, err
 	}
 	attrs := map[string]string{}
 	var nameID string
@@ -1043,40 +1061,171 @@ func parseSAMLAssertion(encoded string, mapping SSOSAMLMapping) (samlAssertionUs
 			}
 		}
 	}
-	email := mappedAttr(attrs, mapping.Email, "email", "Email", "mail")
+	email := mappedAttr(attrs, cfg.Mapping.Email, "email", "Email", "mail")
 	if email == "" && strings.Contains(nameID, "@") {
 		email = nameID
 	}
 	if email == "" {
 		return samlAssertionUser{}, errors.New("SAML assertion email is required")
 	}
-	name := mappedAttr(attrs, mapping.Name, "name", "displayName", "cn")
+	name := mappedAttr(attrs, cfg.Mapping.Name, "name", "displayName", "cn")
 	if name == "" {
-		firstName := mappedAttr(attrs, mapping.FirstName, "firstName", "givenName")
-		lastName := mappedAttr(attrs, mapping.LastName, "lastName", "sn", "surname")
+		firstName := mappedAttr(attrs, cfg.Mapping.FirstName, "firstName", "givenName")
+		lastName := mappedAttr(attrs, cfg.Mapping.LastName, "lastName", "sn", "surname")
 		name = strings.TrimSpace(firstName + " " + lastName)
 	}
 	if name == "" {
 		name = email
 	}
-	accountID := mappedAttr(attrs, mapping.ID, "id", "uid", "sub")
+	accountID := mappedAttr(attrs, cfg.Mapping.ID, "id", "uid", "sub")
 	if accountID == "" {
 		accountID = nameID
 	}
 	if accountID == "" {
 		accountID = email
 	}
-	extra := make(map[string]any, len(mapping.ExtraFields))
-	for key, attrName := range mapping.ExtraFields {
+	extra := make(map[string]any, len(cfg.Mapping.ExtraFields))
+	for key, attrName := range cfg.Mapping.ExtraFields {
 		if value := attrs[attrName]; value != "" {
 			extra[key] = value
 		}
 	}
 	emailVerified := true
-	if value := mappedAttr(attrs, mapping.EmailVerified, "emailVerified"); value != "" {
+	if value := mappedAttr(attrs, cfg.Mapping.EmailVerified, "emailVerified"); value != "" {
 		emailVerified = strings.EqualFold(value, "true")
 	}
 	return samlAssertionUser{ID: accountID, Email: strings.ToLower(email), Name: name, EmailVerified: emailVerified, Extra: extra}, nil
+}
+
+func validateSAMLResponse(raw []byte, provider types.SSOProvider, cfg SSOSAMLConfig) error {
+	if cfg.Cert != "" || cfg.WantAssertionsSigned {
+		if err := validateSAMLSignature(raw, cfg.Cert); err != nil {
+			return err
+		}
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(raw))
+	now := time.Now().UTC()
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		switch start.Name.Local {
+		case "Issuer":
+			if provider.Issuer == "" {
+				continue
+			}
+			issuer, err := readElementText(decoder, start.Name.Local)
+			if err == nil && issuer != "" && issuer != provider.Issuer {
+				return fmt.Errorf("SAML issuer mismatch: expected %q got %q", provider.Issuer, issuer)
+			}
+		case "Audience":
+			audience, err := readElementText(decoder, start.Name.Local)
+			if err == nil && cfg.Audience != "" && audience != "" && audience != cfg.Audience {
+				return fmt.Errorf("SAML audience mismatch: expected %q got %q", cfg.Audience, audience)
+			}
+		case "Conditions":
+			if err := validateSAMLConditions(start, now); err != nil {
+				return err
+			}
+		case "SubjectConfirmationData":
+			if err := validateSAMLSubjectConfirmation(start, cfg, now); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func validateSAMLSignature(raw []byte, certValue string) error {
+	if certValue == "" {
+		return errors.New("SAML certificate is required for signed assertions")
+	}
+	cert, err := parseSAMLCertificate(certValue)
+	if err != nil {
+		return err
+	}
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(raw); err != nil {
+		return err
+	}
+	certStore := &dsig.MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}}
+	ctx := dsig.NewDefaultValidationContext(certStore)
+	if _, err := ctx.Validate(doc.Root()); err == nil {
+		return nil
+	}
+	for _, assertion := range doc.FindElements(".//*[local-name()='Assertion']") {
+		if _, err := ctx.Validate(assertion); err == nil {
+			return nil
+		}
+	}
+	return errors.New("SAML signature validation failed")
+}
+
+func parseSAMLCertificate(value string) (*x509.Certificate, error) {
+	cleaned := strings.TrimSpace(value)
+	if strings.Contains(cleaned, "BEGIN CERTIFICATE") {
+		cleaned = strings.ReplaceAll(cleaned, "-----BEGIN CERTIFICATE-----", "")
+		cleaned = strings.ReplaceAll(cleaned, "-----END CERTIFICATE-----", "")
+	}
+	cleaned = strings.NewReplacer("\n", "", "\r", "", "\t", "", " ", "").Replace(cleaned)
+	raw, err := base64.StdEncoding.DecodeString(cleaned)
+	if err != nil {
+		return nil, errors.New("invalid SAML certificate")
+	}
+	cert, err := x509.ParseCertificate(raw)
+	if err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+func validateSAMLConditions(start xml.StartElement, now time.Time) error {
+	notBefore := xmlAttr(start, "NotBefore")
+	if notBefore != "" {
+		value, err := time.Parse(time.RFC3339, notBefore)
+		if err != nil {
+			return err
+		}
+		if now.Before(value.UTC()) {
+			return errors.New("SAML assertion is not active yet")
+		}
+	}
+	notOnOrAfter := xmlAttr(start, "NotOnOrAfter")
+	if notOnOrAfter != "" {
+		value, err := time.Parse(time.RFC3339, notOnOrAfter)
+		if err != nil {
+			return err
+		}
+		if !now.Before(value.UTC()) {
+			return errors.New("SAML assertion expired")
+		}
+	}
+	return nil
+}
+
+func validateSAMLSubjectConfirmation(start xml.StartElement, cfg SSOSAMLConfig, now time.Time) error {
+	notOnOrAfter := xmlAttr(start, "NotOnOrAfter")
+	if notOnOrAfter != "" {
+		value, err := time.Parse(time.RFC3339, notOnOrAfter)
+		if err != nil {
+			return err
+		}
+		if !now.Before(value.UTC()) {
+			return errors.New("SAML subject confirmation expired")
+		}
+	}
+	recipient := xmlAttr(start, "Recipient")
+	if cfg.CallbackURL != "" && recipient != "" && recipient != cfg.CallbackURL {
+		return fmt.Errorf("SAML recipient mismatch: expected %q got %q", cfg.CallbackURL, recipient)
+	}
+	return nil
 }
 
 func ssoSessionFromAssertion(c *auth.Context, provider types.SSOProvider, assertion samlAssertionUser) (*types.User, *types.Session, error) {

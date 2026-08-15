@@ -36,6 +36,8 @@ type Config struct {
 	AuthorizationEndpoint     string
 	TokenEndpoint             string
 	UserInfoEndpoint          string
+	ResponseType              string
+	ResponseMode              string
 	AlwaysSendScope           bool
 	UserInfoMethod            string
 	UserInfoBody              string
@@ -105,7 +107,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 
 	params := url.Values{}
 	params.Set("client_id", p.cfg.ClientID)
-	params.Set("response_type", "code")
+	params.Set("response_type", p.responseType())
 	params.Set("redirect_uri", p.redirectURI(opts.RedirectURI))
 	params.Set("state", opts.State)
 	scope := p.scopeString(opts.Scopes)
@@ -118,6 +120,9 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	}
 	if p.cfg.Prompt != "" {
 		params.Set("prompt", p.cfg.Prompt)
+	}
+	if p.cfg.ResponseMode != "" {
+		params.Set("response_mode", p.cfg.ResponseMode)
 	}
 	if opts.LoginHint != "" {
 		params.Set("login_hint", opts.LoginHint)
@@ -238,6 +243,13 @@ func (p *Provider) redirectURI(defaultRedirectURI string) string {
 		return p.cfg.RedirectURI
 	}
 	return defaultRedirectURI
+}
+
+func (p *Provider) responseType() string {
+	if p.cfg.ResponseType != "" {
+		return p.cfg.ResponseType
+	}
+	return "code"
 }
 
 func (p *Provider) tokenAuthentication() provider.OAuthClientAuthentication {
@@ -364,6 +376,21 @@ func boolField(profile map[string]any, key string) bool {
 	}
 	typed, ok := value.(bool)
 	return ok && typed
+}
+
+func boolLikeField(profile map[string]any, key string) bool {
+	value, ok := profile[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(typed, "true")
+	default:
+		return false
+	}
 }
 
 func mapField(profile map[string]any, key string) map[string]any {

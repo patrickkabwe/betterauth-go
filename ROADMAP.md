@@ -22,9 +22,9 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Core email/password auth | 9 | 0 | 0 |
 | Session management | 17 | 1 | 0 |
 | User & account management | 15 | 0 | 0 |
-| Social / OAuth | 16 | 0 | 26 |
-| Plugins (core package) | 30 | 0 | 0 |
-| Extended packages | 7 | 0 | 3 |
+| Social / OAuth | 21 | 0 | 21 |
+| Plugins (core package) | 31 | 0 | 0 |
+| Extended packages | 7 | 1 | 2 |
 | Infrastructure | 23 | 2 | 5 |
 | Client compatibility | 7 | 0 | 2 |
 
@@ -136,12 +136,12 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 
 | Provider | Status |
 |----------|--------|
-| Apple | ⬜ |
+| Apple | ✅ |
 | Atlassian | ⬜ |
 | AWS Cognito | ⬜ |
 | Discord | ✅ |
 | Dropbox | ✅ |
-| Facebook | ⬜ |
+| Facebook | ✅ |
 | Figma | ✅ |
 | GitHub | ✅ |
 | GitLab | ✅ |
@@ -150,7 +150,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Kakao | ⬜ |
 | Kick | ⬜ |
 | LINE | ⬜ |
-| Linear | ⬜ |
+| Linear | ✅ |
 | LinkedIn | ✅ |
 | Microsoft Entra ID | ✅ |
 | Naver | ⬜ |
@@ -159,14 +159,14 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | PayPal | ⬜ |
 | Polar | ⬜ |
 | Railway | ⬜ |
-| Reddit | ⬜ |
+| Reddit | ✅ |
 | Roblox | ⬜ |
 | Salesforce | ⬜ |
 | Slack | ✅ |
 | Spotify | ✅ |
 | TikTok | ⬜ |
 | Twitch | ✅ |
-| Twitter / X | ⬜ |
+| Twitter / X | ✅ |
 | Vercel | ✅ |
 | VK | ⬜ |
 | WeChat | ⬜ |
@@ -193,6 +193,7 @@ Reference: [Better Auth docs](https://better-auth.com/docs) · [GitHub](https://
 | Magic Link | `magic-link` | ✅ | Passwordless email link |
 | MCP | `mcp` | ✅ | Model Context Protocol auth |
 | Multi Session | `multi-session` | ✅ | Multiple concurrent sessions per device |
+| OAuth Provider | `oauth-provider` | ✅ | OAuth/OIDC provider metadata, authorization, token, userinfo, and registration routes |
 | OAuth Proxy | `oauth-proxy` | ✅ | Dev OAuth callback proxy |
 | OIDC Provider | `oidc-provider` | ✅ | Act as OIDC identity provider |
 | One Tap | `one-tap` | ✅ | Google One Tap sign-in |
@@ -224,7 +225,7 @@ Separate npm packages in the Better Auth monorepo.
 | `@better-auth/stripe` | ✅ | Checkout, billing portal, subscription routes, webhooks |
 | `@better-auth/sso` | ✅ | SAML provider registry, SP metadata, redirect sign-in, ACS session creation |
 | `@better-auth/scim` | ✅ | SCIM user provisioning |
-| `@better-auth/oauth-provider` | ⬜ | Full OAuth 2.0 authorization server |
+| `@better-auth/oauth-provider` | 🟡 | OAuth/OIDC metadata and core authorization-code routes; advanced consent/introspection/revocation pending |
 | `@better-auth/api-key` | ✅ | API key management plugin |
 | `@better-auth/expo` | ⬜ | React Native / Expo client helpers |
 | `@better-auth/electron` | ⬜ | Electron desktop auth |
