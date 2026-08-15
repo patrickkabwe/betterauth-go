@@ -72,6 +72,11 @@ type SessionResponse struct {
 	NeedsRefresh bool    `json:"needsRefresh,omitempty"`
 }
 
+// UpdateSessionResponse is returned by update-session.
+type UpdateSessionResponse struct {
+	Session Session `json:"session"`
+}
+
 // SignInResponse is returned by sign-in/email.
 type SignInResponse struct {
 	Redirect bool   `json:"redirect"`

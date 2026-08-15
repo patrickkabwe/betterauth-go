@@ -148,8 +148,17 @@ func TestUpdateSessionUserAgent(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("update failed: %s", data)
 	}
-	var result types.SessionResponse
-	_ = json.Unmarshal(data, &result)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["user"]; ok {
+		t.Fatalf("unexpected user field: %s", data)
+	}
+	var result types.UpdateSessionResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
 	if result.Session.UserAgent != "BetterAuthTest/1.0" {
 		t.Fatalf("ua=%q", result.Session.UserAgent)
 	}

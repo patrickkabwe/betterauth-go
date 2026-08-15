@@ -102,9 +102,8 @@ func handleUpdateSession(c *Context) {
 		return
 	}
 	c.Auth.setSessionCache(c, updated, user)
-	c.WriteJSON(http.StatusOK, types.SessionResponse{
+	c.WriteJSON(http.StatusOK, types.UpdateSessionResponse{
 		Session: toSessionResponse(updated),
-		User:    toUserResponse(user),
 	})
 }
 
