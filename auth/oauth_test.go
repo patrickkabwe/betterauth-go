@@ -918,7 +918,9 @@ func TestGoogleProviderWiring(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.Google = auth.GoogleProviderConfig{
 			ClientID: "gid", ClientSecret: "gsecret",
-			AccessType: "online", Display: "popup", Prompt: "select_account", HD: "example.com",
+			AuthorizationEndpoint: "https://accounts.example.com/oauth/auth",
+			RedirectURI:           "https://app.example.com/google/callback",
+			AccessType:            "online", Display: "popup", Prompt: "select_account", HD: "example.com",
 		}
 	})
 	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
@@ -935,8 +937,11 @@ func TestGoogleProviderWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if parsed.Scheme != "https" || parsed.Host != "accounts.example.com" || parsed.Path != "/oauth/auth" {
+		t.Fatalf("url=%s", result.URL)
+	}
 	query := parsed.Query()
-	if query.Get("access_type") != "online" || query.Get("display") != "popup" || query.Get("prompt") != "select_account" || query.Get("hd") != "example.com" {
+	if query.Get("redirect_uri") != "https://app.example.com/google/callback" || query.Get("access_type") != "online" || query.Get("display") != "popup" || query.Get("prompt") != "select_account" || query.Get("hd") != "example.com" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 }
@@ -944,7 +949,10 @@ func TestGoogleProviderWiring(t *testing.T) {
 func TestGitHubProviderWiring(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.GitHub = auth.GitHubProviderConfig{
-			ClientID: "gid", ClientSecret: "gsecret", Prompt: "select_account",
+			ClientID: "gid", ClientSecret: "gsecret",
+			AuthorizationEndpoint: "https://github.example.com/login/oauth/authorize",
+			RedirectURI:           "https://app.example.com/github/callback",
+			Prompt:                "select_account",
 		}
 	})
 	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
@@ -961,8 +969,11 @@ func TestGitHubProviderWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if parsed.Scheme != "https" || parsed.Host != "github.example.com" || parsed.Path != "/login/oauth/authorize" {
+		t.Fatalf("url=%s", result.URL)
+	}
 	query := parsed.Query()
-	if query.Get("prompt") != "select_account" || query.Get("login_hint") != "octocat" {
+	if query.Get("redirect_uri") != "https://app.example.com/github/callback" || query.Get("prompt") != "select_account" || query.Get("login_hint") != "octocat" {
 		t.Fatalf("query=%s", query.Encode())
 	}
 }

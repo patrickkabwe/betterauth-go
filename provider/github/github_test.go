@@ -33,6 +33,31 @@ func TestGitHubAuthURLCanDisableDefaultScopes(t *testing.T) {
 	}
 }
 
+func TestGitHubAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
+	p := github.New(github.Config{
+		ClientID:              "id",
+		ClientSecret:          "secret",
+		AuthorizationEndpoint: "https://github.example.com/login/oauth/authorize",
+		RedirectURI:           "https://app.example.com/github/callback",
+	})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "state-token", RedirectURI: "http://localhost:8080/api/auth/callback/github",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "github.example.com" || parsed.Path != "/login/oauth/authorize" {
+		t.Fatalf("url=%s", authURL)
+	}
+	if parsed.Query().Get("redirect_uri") != "https://app.example.com/github/callback" {
+		t.Fatalf("redirect_uri=%q", parsed.Query().Get("redirect_uri"))
+	}
+}
+
 func TestGitHubAuthURLIncludesPromptAndLoginHint(t *testing.T) {
 	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", Prompt: "select_account"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{

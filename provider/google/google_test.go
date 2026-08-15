@@ -35,6 +35,31 @@ func TestGoogleAuthURLIncludesHostedDomain(t *testing.T) {
 	}
 }
 
+func TestGoogleAuthURLUsesEndpointAndRedirectOverrides(t *testing.T) {
+	p := google.New(google.Config{
+		ClientID:              "id",
+		ClientSecret:          "secret",
+		AuthorizationEndpoint: "https://accounts.example.com/oauth/auth",
+		RedirectURI:           "https://app.example.com/google/callback",
+	})
+	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{
+		State: "s", RedirectURI: "http://localhost/cb", CodeVerifier: "verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "accounts.example.com" || parsed.Path != "/oauth/auth" {
+		t.Fatalf("url=%s", authURL)
+	}
+	if parsed.Query().Get("redirect_uri") != "https://app.example.com/google/callback" {
+		t.Fatalf("redirect_uri=%q", parsed.Query().Get("redirect_uri"))
+	}
+}
+
 func TestGoogleAuthURLIncludesDisplay(t *testing.T) {
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", Display: "popup"})
 	authURL, err := p.CreateAuthorizationURL(context.Background(), provider.AuthorizationURLOpts{

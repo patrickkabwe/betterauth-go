@@ -23,6 +23,8 @@ type Config struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	AuthorizationEndpoint    string
+	RedirectURI              string
 	AccessType               string
 	Display                  string
 	Prompt                   string
@@ -83,7 +85,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	params := url.Values{}
 	params.Set("client_id", p.cfg.ClientID)
 	params.Set("response_type", "code")
-	params.Set("redirect_uri", opts.RedirectURI)
+	params.Set("redirect_uri", p.redirectURI(opts.RedirectURI))
 	scopes := p.defaultScopes(opts.Scopes)
 	if len(scopes) > 0 {
 		params.Set("scope", strings.Join(scopes, " "))
@@ -113,7 +115,7 @@ func (p *Provider) CreateAuthorizationURL(_ context.Context, opts provider.Autho
 	if opts.LoginHint != "" {
 		params.Set("login_hint", opts.LoginHint)
 	}
-	return provider.BuildAuthURL(authEndpoint, params), nil
+	return provider.BuildAuthURL(p.authorizationEndpoint(), params), nil
 }
 
 func (p *Provider) ValidateAuthorizationCode(ctx context.Context, code, codeVerifier, redirectURI string) (*provider.OAuthTokens, error) {
@@ -122,13 +124,27 @@ func (p *Provider) ValidateAuthorizationCode(ctx context.Context, code, codeVeri
 		ClientID:     p.cfg.ClientID,
 		ClientSecret: p.cfg.ClientSecret,
 		Code:         code,
-		RedirectURI:  redirectURI,
+		RedirectURI:  p.redirectURI(redirectURI),
 		CodeVerifier: codeVerifier,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return provider.TokensFromMap(data), nil
+}
+
+func (p *Provider) authorizationEndpoint() string {
+	if p.cfg.AuthorizationEndpoint != "" {
+		return p.cfg.AuthorizationEndpoint
+	}
+	return authEndpoint
+}
+
+func (p *Provider) redirectURI(defaultRedirectURI string) string {
+	if p.cfg.RedirectURI != "" {
+		return p.cfg.RedirectURI
+	}
+	return defaultRedirectURI
 }
 
 func (p *Provider) GetUserInfo(_ context.Context, tokens provider.OAuthTokens) (*provider.UserInfo, error) {

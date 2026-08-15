@@ -73,6 +73,8 @@ type GoogleProviderConfig struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	AuthorizationEndpoint    string
+	RedirectURI              string
 	AccessType               string
 	Display                  string
 	Prompt                   string
@@ -89,6 +91,8 @@ type GitHubProviderConfig struct {
 	ClientID                 string
 	ClientSecret             string
 	Scopes                   []string
+	AuthorizationEndpoint    string
+	RedirectURI              string
 	Prompt                   string
 	DisableDefaultScope      bool
 	Disabled                 bool
@@ -552,6 +556,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.Google.ClientID != "" && opts.Google.ClientSecret != "" && !opts.Google.Disabled {
 		providers[constants.ProviderGoogle] = google.New(google.Config{
 			ClientID: opts.Google.ClientID, ClientSecret: opts.Google.ClientSecret, Scopes: opts.Google.Scopes,
+			AuthorizationEndpoint: opts.Google.AuthorizationEndpoint, RedirectURI: opts.Google.RedirectURI,
 			AccessType: opts.Google.AccessType, Display: opts.Google.Display, Prompt: opts.Google.Prompt, HD: opts.Google.HD,
 			DisableDefaultScope:   opts.Google.DisableDefaultScope,
 			DisableImplicitSignUp: opts.Google.DisableImplicitSignUp, DisableSignUp: opts.Google.DisableSignUp,
@@ -561,6 +566,7 @@ func buildSocialProviders(opts Config) map[string]provider.SocialProvider {
 	if opts.GitHub.ClientID != "" && opts.GitHub.ClientSecret != "" && !opts.GitHub.Disabled {
 		providers[constants.ProviderGitHub] = github.New(github.Config{
 			ClientID: opts.GitHub.ClientID, ClientSecret: opts.GitHub.ClientSecret, Scopes: opts.GitHub.Scopes,
+			AuthorizationEndpoint: opts.GitHub.AuthorizationEndpoint, RedirectURI: opts.GitHub.RedirectURI,
 			Prompt:                opts.GitHub.Prompt,
 			DisableDefaultScope:   opts.GitHub.DisableDefaultScope,
 			DisableImplicitSignUp: opts.GitHub.DisableImplicitSignUp, DisableSignUp: opts.GitHub.DisableSignUp,
