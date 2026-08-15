@@ -35,6 +35,16 @@ func TestTokensFromMapMapsOAuthTokenFields(t *testing.T) {
 	}
 }
 
+func TestTokensFromMapMapsArrayScopes(t *testing.T) {
+	tokens := TokensFromMap(map[string]any{
+		"scope": []any{"email", "profile"},
+	})
+
+	if len(tokens.Scopes) != 2 || tokens.Scopes[0] != "email" || tokens.Scopes[1] != "profile" {
+		t.Fatalf("scopes=%v", tokens.Scopes)
+	}
+}
+
 func assertExpiryWithin(t *testing.T, expiry *time.Time, expected time.Duration) {
 	t.Helper()
 	if expiry == nil {

@@ -101,9 +101,7 @@ func TokensFromMap(data map[string]any) *OAuthTokens {
 	if v, ok := data["id_token"].(string); ok {
 		tokens.IDToken = v
 	}
-	if v, ok := data["scope"].(string); ok && v != "" {
-		tokens.Scopes = strings.Split(v, " ")
-	}
+	tokens.Scopes = tokenScopes(data["scope"])
 	if exp, ok := data["expires_in"].(float64); ok {
 		t := time.Now().Add(time.Duration(exp) * time.Second)
 		tokens.AccessTokenExpiresAt = &t
@@ -113,6 +111,29 @@ func TokensFromMap(data map[string]any) *OAuthTokens {
 		tokens.RefreshTokenExpiresAt = &t
 	}
 	return tokens
+}
+
+func tokenScopes(value any) []string {
+	switch scopes := value.(type) {
+	case string:
+		if scopes == "" {
+			return nil
+		}
+		return strings.Split(scopes, " ")
+	case []string:
+		return append([]string(nil), scopes...)
+	case []any:
+		out := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			value, ok := scope.(string)
+			if ok {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func cloneTokenData(data map[string]any) map[string]any {
