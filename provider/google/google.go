@@ -378,6 +378,9 @@ func validGoogleTimeClaims(claims map[string]any, now time.Time) bool {
 	if !ok || now.Unix() >= exp {
 		return false
 	}
+	if nbf, ok := googleNumericClaim(claims["nbf"]); ok && now.Unix() < nbf {
+		return false
+	}
 	iat, ok := googleNumericClaim(claims["iat"])
 	if !ok {
 		return false

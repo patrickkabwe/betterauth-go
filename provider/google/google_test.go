@@ -312,6 +312,21 @@ func TestGoogleVerifyIDTokenRejectsHostedDomainMismatch(t *testing.T) {
 	}
 }
 
+func TestGoogleVerifyIDTokenRejectsFutureNotBefore(t *testing.T) {
+	token, jwks := signedGoogleIDToken(t, map[string]any{
+		"aud": "id",
+		"nbf": time.Now().Add(time.Hour).Unix(),
+	})
+	restore := mockGoogleJWKS(t, jwks)
+	defer restore()
+
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret"})
+	valid, err := p.VerifyIDToken(context.Background(), token, "")
+	if err != nil || valid {
+		t.Fatalf("valid=%v err=%v", valid, err)
+	}
+}
+
 func TestGoogleVerifyIDTokenCanBeDisabled(t *testing.T) {
 	token, _ := signedGoogleIDToken(t, map[string]any{"aud": "id"})
 	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableIDTokenSignIn: true})
