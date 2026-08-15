@@ -30,7 +30,7 @@ type oauthUserResult struct {
 	Error      string
 }
 
-func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, disableSignUp bool) (*oauthUserResult, error) {
+func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, disableSignUp bool, callbackURL string) (*oauthUserResult, error) {
 	email := strings.ToLower(strings.TrimSpace(userInfo.Email))
 	if email == "" {
 		return &oauthUserResult{Error: "email not found"}, nil
@@ -49,7 +49,7 @@ func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, acco
 	if disableSignUp {
 		return &oauthUserResult{Error: "signup disabled"}, nil
 	}
-	return a.createOAuthUser(c, userInfo, account, email)
+	return a.createOAuthUser(c, userInfo, account, email, callbackURL)
 }
 
 func (a *Auth) socialSignUpDisabled(p provider.SocialProvider, requestSignUp bool) bool {
@@ -125,7 +125,7 @@ func (a *Auth) canImplicitLink(providerID string, user *types.User, userInfo pro
 	return userInfo.EmailVerified
 }
 
-func (a *Auth) createOAuthUser(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, email string) (*oauthUserResult, error) {
+func (a *Auth) createOAuthUser(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, email string, callbackURL string) (*oauthUserResult, error) {
 	now := time.Now()
 	userID, err := id.Generate(32)
 	if err != nil {
@@ -143,11 +143,26 @@ func (a *Auth) createOAuthUser(c *Context, userInfo provider.OAuthUser, account 
 	if err := a.saveOAuthAccount(c, userID, account); err != nil {
 		return &oauthUserResult{Error: "unable to create user"}, nil
 	}
+	if shouldSendSocialSignUpVerification(a.cfg, userInfo) {
+		if err := sendVerificationEmailToUser(c, user, callbackURL); err != nil {
+			return &oauthUserResult{Error: "unable to create user"}, nil
+		}
+	}
 	sess, err := a.createSession(c, userID, true)
 	if err != nil {
 		return &oauthUserResult{Error: "unable to create session"}, nil
 	}
 	return &oauthUserResult{User: user, Session: sess, IsRegister: true}, nil
+}
+
+func shouldSendSocialSignUpVerification(cfg resolved, userInfo provider.OAuthUser) bool {
+	if userInfo.EmailVerified {
+		return false
+	}
+	if cfg.emailVerification.sendVerificationEmail == nil {
+		return false
+	}
+	return cfg.emailVerification.sendOnSignUp != nil && *cfg.emailVerification.sendOnSignUp
 }
 
 func (a *Auth) saveOAuthAccount(c *Context, userID string, account oauthAccountInput) error {

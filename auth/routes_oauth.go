@@ -110,7 +110,7 @@ func handleSocialIDTokenSignIn(c *Context, p provider.SocialProvider, body signI
 		AccessToken: tokens.AccessToken,
 	}
 	requestSignUp := body.RequestSignUp != nil && *body.RequestSignUp
-	result, err := c.Auth.handleOAuthUserInfo(c, info.User, account, c.Auth.socialSignUpDisabled(p, requestSignUp))
+	result, err := c.Auth.handleOAuthUserInfo(c, info.User, account, c.Auth.socialSignUpDisabled(p, requestSignUp), body.CallbackURL)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 		return
@@ -202,7 +202,7 @@ func handleOAuthCallback(c *Context) {
 		return
 	}
 
-	result, err := c.Auth.handleOAuthUserInfo(c, info.User, accountInput, c.Auth.socialSignUpDisabled(p, stateData.RequestSignUp))
+	result, err := c.Auth.handleOAuthUserInfo(c, info.User, accountInput, c.Auth.socialSignUpDisabled(p, stateData.RequestSignUp), stateData.CallbackURL)
 	if err != nil {
 		redirectOAuthError(c, errorURL, "internal_server_error")
 		return

@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -252,6 +253,69 @@ func TestSignInSocialIDTokenPassesUserDataToProvider(t *testing.T) {
 	name, ok := p.seenTokens.User["name"].(map[string]any)
 	if !ok || name["firstName"] != "Ada" || p.seenTokens.User["email"] != "ada@example.com" {
 		t.Fatalf("user data=%+v", p.seenTokens.User)
+	}
+}
+
+func TestSignInSocialSendsVerificationForUnverifiedNewUser(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-unverified-signup", Email: "oauth-unverified-signup@example.com", EmailVerified: false, Name: "OAuth Unverified Signup"},
+	}
+	sendOnSignUp := true
+	var sent types.VerificationEmailData
+	a := newTestAuth(func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+		c.EmailVerification.SendOnSignUp = &sendOnSignUp
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, data types.VerificationEmailData) error {
+			sent = data
+			return nil
+		}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":    "mock",
+		"callbackURL": "http://localhost:3000/social-done",
+		"idToken":     map[string]any{"token": "valid-id-token", "accessToken": "at-unverified-signup"},
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	if sent.User.Email != "oauth-unverified-signup@example.com" {
+		t.Fatalf("sent user=%+v", sent.User)
+	}
+	if sent.Token == "" {
+		t.Fatal("missing verification token")
+	}
+	if !strings.Contains(sent.URL, "/verify-email?") || !strings.Contains(sent.URL, "callbackURL=http%3A%2F%2Flocalhost%3A3000%2Fsocial-done") {
+		t.Fatalf("verification url=%s", sent.URL)
+	}
+}
+
+func TestSignInSocialVerificationSendFails(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-verification-send-fail", Email: "oauth-verification-send-fail@example.com", EmailVerified: false, Name: "OAuth Verification Send Fail"},
+	}
+	sendOnSignUp := true
+	a := newTestAuth(func(c *auth.Config) {
+		c.SocialProviders = map[string]provider.SocialProvider{p.ID(): p}
+		c.Account.AccountLinking.TrustedProviders = []string{p.ID()}
+		c.EmailVerification.SendOnSignUp = &sendOnSignUp
+		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
+			return errors.New("smtp unavailable")
+		}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider": "mock",
+		"idToken":  map[string]any{"token": "valid-id-token", "accessToken": "at-verification-send-fail"},
+	}, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	if !strings.Contains(string(data), "unable to create user") {
+		t.Fatalf("body=%s", data)
 	}
 }
 
