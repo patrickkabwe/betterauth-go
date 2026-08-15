@@ -20,13 +20,14 @@ const (
 
 // Config configures the Google OAuth provider.
 type Config struct {
-	ClientID              string
-	ClientSecret          string
-	Scopes                []string
-	AccessType            string
-	Prompt                string
-	DisableImplicitSignUp bool
-	DisableSignUp         bool
+	ClientID                 string
+	ClientSecret             string
+	Scopes                   []string
+	AccessType               string
+	Prompt                   string
+	DisableImplicitSignUp    bool
+	DisableSignUp            bool
+	OverrideUserInfoOnSignIn bool
 }
 
 // Provider implements Google OAuth.
@@ -44,6 +45,8 @@ func (p *Provider) ID() string { return providerID }
 func (p *Provider) DisableImplicitSignUp() bool { return p.cfg.DisableImplicitSignUp }
 
 func (p *Provider) DisableSignUp() bool { return p.cfg.DisableSignUp }
+
+func (p *Provider) OverrideUserInfoOnSignIn() bool { return p.cfg.OverrideUserInfoOnSignIn }
 
 func (p *Provider) defaultScopes(extra []string) []string {
 	base := []string{"email", "profile", "openid"}

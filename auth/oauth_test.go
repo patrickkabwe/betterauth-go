@@ -26,6 +26,7 @@ type staticOAuthProvider struct {
 	seenTokens            provider.OAuthTokens
 	disableImplicitSignUp bool
 	disableSignUp         bool
+	overrideUserInfo      bool
 }
 
 func (p *staticOAuthProvider) ID() string { return p.id }
@@ -65,6 +66,8 @@ func (p *staticOAuthProvider) VerifyIDToken(_ context.Context, _, _ string) (boo
 func (p *staticOAuthProvider) DisableImplicitSignUp() bool { return p.disableImplicitSignUp }
 
 func (p *staticOAuthProvider) DisableSignUp() bool { return p.disableSignUp }
+
+func (p *staticOAuthProvider) OverrideUserInfoOnSignIn() bool { return p.overrideUserInfo }
 
 func oauthTestAuth(t *testing.T, p provider.SocialProvider) *auth.Auth {
 	t.Helper()
@@ -486,6 +489,57 @@ func TestOAuthCallbackCreatesSession(t *testing.T) {
 	_ = json.Unmarshal(data, &sess)
 	if sess.User.Email != "oauth-cb-unique@example.com" {
 		t.Fatalf("session=%+v", sess)
+	}
+}
+
+func TestOAuthCallbackOverridesUserInfoOnSignIn(t *testing.T) {
+	image := "https://example.com/updated.png"
+	p := &staticOAuthProvider{
+		id:               "mock",
+		user:             provider.OAuthUser{ID: "mock-override", Email: "oauth-override@example.com", EmailVerified: true, Name: "Updated OAuth", Image: &image},
+		overrideUserInfo: true,
+	}
+	a := oauthTestAuth(t, p)
+	cookies := signUp(t, a, "oauth-override@example.com")
+	userID := mustUserID(t, a, cookies)
+	initialName := "Initial OAuth"
+	verified := true
+	if _, err := a.Store().UpdateUser(context.Background(), userID, store.UserUpdate{Name: &initialName, EmailVerified: &verified}); err != nil {
+		t.Fatalf("update user: %v", err)
+	}
+
+	disable := true
+	resp, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d %s", resp.StatusCode, data)
+	}
+	var signIn types.SocialSignInResponse
+	if err := json.Unmarshal(data, &signIn); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+
+	resp, _ = doRequest(a, http.MethodGet, "/callback/mock?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "oauth-override@example.com")
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+	if user.Name != "Updated OAuth" || user.Image == nil || *user.Image != image {
+		t.Fatalf("user=%+v", user)
 	}
 }
 

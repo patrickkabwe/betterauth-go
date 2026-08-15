@@ -19,8 +19,11 @@ func TestGitHubAuthURL(t *testing.T) {
 }
 
 func TestGitHubSignUpPolicy(t *testing.T) {
-	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true})
+	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
 		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
+	}
+	if !p.OverrideUserInfoOnSignIn() {
+		t.Fatal("expected user info override")
 	}
 }

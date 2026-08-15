@@ -23,11 +23,12 @@ const (
 
 // Config configures the GitHub OAuth provider.
 type Config struct {
-	ClientID              string
-	ClientSecret          string
-	Scopes                []string
-	DisableImplicitSignUp bool
-	DisableSignUp         bool
+	ClientID                 string
+	ClientSecret             string
+	Scopes                   []string
+	DisableImplicitSignUp    bool
+	DisableSignUp            bool
+	OverrideUserInfoOnSignIn bool
 }
 
 // Provider implements GitHub OAuth.
@@ -45,6 +46,8 @@ func (p *Provider) ID() string { return providerID }
 func (p *Provider) DisableImplicitSignUp() bool { return p.cfg.DisableImplicitSignUp }
 
 func (p *Provider) DisableSignUp() bool { return p.cfg.DisableSignUp }
+
+func (p *Provider) OverrideUserInfoOnSignIn() bool { return p.cfg.OverrideUserInfoOnSignIn }
 
 func (p *Provider) defaultScopes(extra []string) []string {
 	base := []string{"read:user", "user:email"}

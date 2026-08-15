@@ -53,6 +53,11 @@ type SignUpPolicyProvider interface {
 	DisableSignUp() bool
 }
 
+// UserInfoOverrideProvider controls whether social sign-in refreshes user profile fields.
+type UserInfoOverrideProvider interface {
+	OverrideUserInfoOnSignIn() bool
+}
+
 // IDTokenLinker links accounts using a provider ID token.
 type IDTokenLinker interface {
 	VerifyIDToken(ctx context.Context, token, nonce string) (bool, error)

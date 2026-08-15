@@ -30,7 +30,13 @@ type oauthUserResult struct {
 	Error      string
 }
 
-func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, disableSignUp bool, callbackURL string) (*oauthUserResult, error) {
+type oauthUserOptions struct {
+	DisableSignUp    bool
+	CallbackURL      string
+	OverrideUserInfo bool
+}
+
+func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, account oauthAccountInput, opts oauthUserOptions) (*oauthUserResult, error) {
 	email := strings.ToLower(strings.TrimSpace(userInfo.Email))
 	if email == "" {
 		return &oauthUserResult{Error: "email not found"}, nil
@@ -43,13 +49,13 @@ func (a *Auth) handleOAuthUserInfo(c *Context, userInfo provider.OAuthUser, acco
 	isRegister := err != nil
 
 	if !isRegister {
-		return a.linkOAuthToExistingUser(c, existing, userInfo, account)
+		return a.linkOAuthToExistingUser(c, existing, userInfo, account, opts.OverrideUserInfo)
 	}
 
-	if disableSignUp {
+	if opts.DisableSignUp {
 		return &oauthUserResult{Error: "signup disabled"}, nil
 	}
-	return a.createOAuthUser(c, userInfo, account, email, callbackURL)
+	return a.createOAuthUser(c, userInfo, account, email, opts.CallbackURL)
 }
 
 func (a *Auth) socialSignUpDisabled(p provider.SocialProvider, requestSignUp bool) bool {
@@ -63,7 +69,12 @@ func (a *Auth) socialSignUpDisabled(p provider.SocialProvider, requestSignUp boo
 	return policy.DisableImplicitSignUp() && !requestSignUp
 }
 
-func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo provider.OAuthUser, account oauthAccountInput) (*oauthUserResult, error) {
+func (a *Auth) shouldOverrideUserInfoOnSignIn(p provider.SocialProvider) bool {
+	override, ok := p.(provider.UserInfoOverrideProvider)
+	return ok && override.OverrideUserInfoOnSignIn()
+}
+
+func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo provider.OAuthUser, account oauthAccountInput, overrideUserInfo bool) (*oauthUserResult, error) {
 	accounts, err := a.cfg.store.ListAccountsByUserID(c.R.Context(), user.ID)
 	if err != nil {
 		return nil, err
@@ -96,6 +107,14 @@ func (a *Auth) linkOAuthToExistingUser(c *Context, user *types.User, userInfo pr
 	if userInfo.EmailVerified && !user.EmailVerified && strings.EqualFold(userInfo.Email, user.Email) {
 		verified := true
 		updated, err := a.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified})
+		if err != nil {
+			return nil, err
+		}
+		user = updated
+	}
+
+	if overrideUserInfo {
+		updated, err := a.overrideUserInfoOnSignIn(c, user, userInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -163,6 +182,23 @@ func shouldSendSocialSignUpVerification(cfg resolved, userInfo provider.OAuthUse
 		return false
 	}
 	return cfg.emailVerification.sendOnSignUp != nil && *cfg.emailVerification.sendOnSignUp
+}
+
+func (a *Auth) overrideUserInfoOnSignIn(c *Context, user *types.User, userInfo provider.OAuthUser) (*types.User, error) {
+	email := strings.ToLower(strings.TrimSpace(userInfo.Email))
+	emailVerified := userInfo.EmailVerified
+	if strings.EqualFold(email, user.Email) {
+		emailVerified = user.EmailVerified || userInfo.EmailVerified
+	}
+	update := store.UserUpdate{
+		Name:          &userInfo.Name,
+		Email:         &email,
+		EmailVerified: &emailVerified,
+	}
+	if userInfo.Image != nil {
+		update.Image = &userInfo.Image
+	}
+	return a.cfg.store.UpdateUser(c.R.Context(), user.ID, update)
 }
 
 func (a *Auth) saveOAuthAccount(c *Context, userID string, account oauthAccountInput) error {

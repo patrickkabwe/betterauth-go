@@ -35,8 +35,11 @@ func TestGoogleGetUserInfoFromIDToken(t *testing.T) {
 }
 
 func TestGoogleSignUpPolicy(t *testing.T) {
-	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true})
+	p := google.New(google.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
 		t.Fatalf("policy implicit=%v signup=%v", p.DisableImplicitSignUp(), p.DisableSignUp())
+	}
+	if !p.OverrideUserInfoOnSignIn() {
+		t.Fatal("expected user info override")
 	}
 }
