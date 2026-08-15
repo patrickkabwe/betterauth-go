@@ -209,6 +209,12 @@ func TestResetPasswordHashFails(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
+	resp, _ = doRequest(a1, http.MethodPost, "/reset-password", map[string]any{
+		"token": resetData.Token, "newPassword": "newpassword1",
+	}, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("reused token status=%d", resp.StatusCode)
+	}
 }
 
 func TestResetPasswordTooLong(t *testing.T) {

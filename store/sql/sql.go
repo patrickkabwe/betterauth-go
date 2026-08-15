@@ -547,8 +547,18 @@ func (s *Store) FindVerificationByIdentifier(ctx context.Context, identifier str
 }
 
 func (s *Store) DeleteVerificationByIdentifier(ctx context.Context, identifier string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_verification WHERE identifier = ?`), identifier)
-	return err
+	result, err := s.db.ExecContext(ctx, s.q(`DELETE FROM ba_verification WHERE identifier = ?`), identifier)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
 }
 
 // compile-time interface checks

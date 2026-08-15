@@ -128,6 +128,10 @@ func handleResetPassword(c *Context) {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidToken))
 		return
 	}
+	if err := c.Auth.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, apierror.CodeInvalidToken))
+		return
+	}
 
 	hash, err := c.Auth.cfg.hasher.Hash(body.NewPassword)
 	if err != nil {
@@ -147,7 +151,6 @@ func handleResetPassword(c *Context) {
 		_ = c.Auth.cfg.store.UpdateAccountPassword(c.R.Context(), v.Value, constants.ProviderCredential, hash)
 	}
 
-	_ = c.Auth.cfg.store.DeleteVerificationByIdentifier(c.R.Context(), identifier)
 	if c.Auth.cfg.emailPassword.revokeSessionsOnPasswordReset {
 		_ = c.Auth.cfg.store.DeleteAllSessionsByUserID(c.R.Context(), v.Value)
 	}

@@ -397,6 +397,9 @@ func (s *Store) FindVerificationByIdentifier(_ context.Context, identifier strin
 func (s *Store) DeleteVerificationByIdentifier(_ context.Context, identifier string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.verifications[identifier]; !ok {
+		return ErrNotFound
+	}
 	delete(s.verifications, identifier)
 	return nil
 }
