@@ -308,3 +308,52 @@ func TestEmailOTPPluginCheckDeletesExpiredOTP(t *testing.T) {
 		t.Fatalf("verification error=%v", err)
 	}
 }
+
+func TestEmailOTPPluginResetPasswordCreatesCredentialAndVerifiesEmail(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
+	})
+	now := time.Now()
+	err := a.Store().CreateUser(context.Background(), &types.User{
+		ID:            "email-otp-reset-create",
+		Name:          "Reset Create",
+		Email:         "reset-create@example.com",
+		EmailVerified: false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = a.CreateVerification(context.Background(), constants.VerificationEmailOTP+constants.EmailOTPTypeForgetPassword+":reset-create@example.com", "123456:0", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/reset-password", map[string]any{
+		"email":    "reset-create@example.com",
+		"otp":      "123456",
+		"password": "updatedpassword123",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	account, err := a.Store().FindAccountByUserAndProvider(context.Background(), "email-otp-reset-create", constants.ProviderCredential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := a.VerifyPassword(account.Password, "updatedpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !valid {
+		t.Fatal("expected updated password to verify")
+	}
+	user, err := a.Store().FindUserByEmail(context.Background(), "reset-create@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.EmailVerified {
+		t.Fatal("expected reset password to mark email verified")
+	}
+}

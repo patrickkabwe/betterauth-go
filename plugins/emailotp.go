@@ -381,12 +381,25 @@ func signInEmailOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 func resetPasswordOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		var body struct {
-			Email       string `json:"email"`
-			OTP         string `json:"otp"`
-			NewPassword string `json:"newPassword"`
+			Email    string `json:"email"`
+			OTP      string `json:"otp"`
+			Password string `json:"password"`
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+			return
+		}
+		minPassword, maxPassword := c.Auth.PasswordLengthLimits()
+		if len(body.Password) < minPassword {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodePasswordTooShort))
+			return
+		}
+		if len(body.Password) > maxPassword {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodePasswordTooLong))
+			return
+		}
+		if err := c.Auth.ValidatePasswords(body.Password); err != nil {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidPassword, err.Error()))
 			return
 		}
 		if !verifyStoredOTP(c, opts, constants.EmailOTPTypeForgetPassword, body.Email, body.OTP, true) {
@@ -397,16 +410,26 @@ func resetPasswordOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeUserNotFound))
 			return
 		}
-		if err := c.Auth.ValidatePasswords(body.NewPassword); err != nil {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidPassword, err.Error()))
-			return
-		}
-		hash, err := c.Auth.HashPassword(body.NewPassword)
+		hash, err := c.Auth.HashPassword(body.Password)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 			return
 		}
-		_ = c.Auth.Store().UpdateAccountPassword(c.R.Context(), user.ID, constants.ProviderCredential, hash)
+		if err := c.Auth.SetCredentialPassword(c.R.Context(), user.ID, hash); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		if !user.EmailVerified {
+			verified := true
+			if _, err := c.Auth.Store().UpdateUser(c.R.Context(), user.ID, store.UserUpdate{EmailVerified: &verified}); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+				return
+			}
+		}
+		if err := c.Auth.RevokeSessionsOnPasswordReset(c.R.Context(), user.ID); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
 		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }
