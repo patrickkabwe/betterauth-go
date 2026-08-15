@@ -76,6 +76,9 @@ func (f *failStore) ListAccountsByUserID(ctx context.Context, userID string) ([]
 }
 
 func (f *failStore) DeleteAccount(ctx context.Context, id string) error {
+	if f.failOn == "DeleteAccount" {
+		return berrors.ErrInjected
+	}
 	return f.inner.DeleteAccount(ctx, id)
 }
 

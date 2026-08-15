@@ -154,7 +154,10 @@ func handleUnlinkAccount(c *Context) {
 		return
 	}
 
-	_ = c.Auth.cfg.store.DeleteAccount(c.R.Context(), target.ID)
+	if err := c.Auth.cfg.store.DeleteAccount(c.R.Context(), target.ID); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
 	c.WriteJSON(http.StatusOK, types.StatusResponse{Status: true})
 }
 

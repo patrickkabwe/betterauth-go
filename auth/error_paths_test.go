@@ -151,6 +151,21 @@ func TestUnlinkAccountInvalidBody(t *testing.T) {
 	}
 }
 
+func TestUnlinkAccountDeleteFails(t *testing.T) {
+	allowUnlinkingAll := true
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = wrapStore("DeleteAccount")
+		c.Account.AccountLinking.AllowUnlinkingAll = allowUnlinkingAll
+	})
+	cookies := signUp(t, a, "unlink-delete@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/unlink-account", map[string]any{
+		"providerId": "credential",
+	}, cookies)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSendVerificationInvalidBody(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.EmailVerification.SendVerificationEmail = func(_ context.Context, _ types.VerificationEmailData) error {
