@@ -68,6 +68,7 @@ func (a *Auth) buildClientSchema() ClientSchema {
 	pluginRoutes := make(map[string][]ClientEndpoint)
 	pluginIDs := make([]string, 0, len(a.cfg.plugins))
 	pluginInfo := make(map[string]*ClientPluginInfo)
+	serverOnlyRoutes := make(map[string]bool)
 	hasBearer := false
 
 	for _, p := range a.cfg.plugins {
@@ -82,6 +83,11 @@ func (a *Auth) buildClientSchema() ClientSchema {
 			}
 		}
 		for _, r := range p.Routes() {
+			key := r.Method + " " + r.Pattern
+			if r.ServerOnly {
+				serverOnlyRoutes[key] = true
+				continue
+			}
 			pluginRoutes[id] = append(pluginRoutes[id], ClientEndpoint{
 				Method: r.Method,
 				Path:   r.Pattern,
@@ -93,7 +99,8 @@ func (a *Auth) buildClientSchema() ClientSchema {
 
 	coreRoutes := make([]ClientEndpoint, 0, len(a.routes))
 	for _, rt := range a.routes {
-		if rt.pattern == "/client-schema" {
+		key := rt.method + " " + rt.pattern
+		if rt.pattern == "/client-schema" || serverOnlyRoutes[key] {
 			continue
 		}
 		ep := ClientEndpoint{Method: rt.method, Path: rt.pattern}

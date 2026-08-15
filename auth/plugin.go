@@ -17,9 +17,10 @@ type PasswordValidatorPlugin interface {
 
 // PluginRoute is an HTTP route registered by a plugin.
 type PluginRoute struct {
-	Method  string
-	Pattern string
-	Handler func(*Context)
+	Method     string
+	Pattern    string
+	Handler    func(*Context)
+	ServerOnly bool
 }
 
 // PluginHooks configures request/response middleware for a plugin.

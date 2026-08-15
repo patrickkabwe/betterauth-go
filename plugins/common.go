@@ -6,6 +6,10 @@ func rt(method, pattern string, fn func(*auth.Context)) auth.PluginRoute {
 	return auth.PluginRoute{Method: method, Pattern: pattern, Handler: fn}
 }
 
+func srt(method, pattern string, fn func(*auth.Context)) auth.PluginRoute {
+	return auth.PluginRoute{Method: method, Pattern: pattern, Handler: fn, ServerOnly: true}
+}
+
 type basePlugin struct {
 	id     string
 	routes []auth.PluginRoute

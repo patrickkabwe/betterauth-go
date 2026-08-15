@@ -76,6 +76,8 @@ func EmailOTP(opts EmailOTPOptions) auth.Plugin {
 		id: constants.PluginEmailOTP,
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/email-otp/send-verification-otp", sendVerificationOTPHandler(opts)),
+			srt(http.MethodPost, "/email-otp/create-verification-otp", createVerificationOTPHandler(opts)),
+			srt(http.MethodGet, "/email-otp/get-verification-otp", getVerificationOTPHandler(opts)),
 			rt(http.MethodPost, "/email-otp/check-verification-otp", checkOTPHandler(opts, constants.EmailOTPTypeVerification)),
 			rt(http.MethodPost, "/email-otp/verify-email", verifyEmailOTPHandler(opts)),
 			rt(http.MethodPost, "/sign-in/email-otp", signInEmailOTPHandler(opts)),
@@ -183,6 +185,10 @@ func createEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, identifie
 			return otp, true
 		}
 	}
+	return storeGeneratedEmailOTP(c, opts, email, typ, identifier)
+}
+
+func storeGeneratedEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, identifier string) (string, bool) {
 	otp, err := generateEmailOTP(c.R.Context(), opts, email, typ)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -193,6 +199,51 @@ func createEmailOTP(c *auth.Context, opts EmailOTPOptions, email, typ, identifie
 		return "", false
 	}
 	return otp, true
+}
+
+func createVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
+	return func(c *auth.Context) {
+		var body struct {
+			Email string `json:"email"`
+			Type  string `json:"type"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.Email == "" || !validEmailOTPType(body.Type) {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+			return
+		}
+		email := auth.NormalizeEmail(body.Email)
+		otp, ok := storeGeneratedEmailOTP(c, opts, email, body.Type, otpIdentifier(body.Type, email))
+		if !ok {
+			return
+		}
+		c.WriteJSON(http.StatusOK, otp)
+	}
+}
+
+func getVerificationOTPHandler(opts EmailOTPOptions) func(*auth.Context) {
+	return func(c *auth.Context) {
+		email := auth.NormalizeEmail(c.R.URL.Query().Get("email"))
+		typ := c.R.URL.Query().Get("type")
+		if email == "" || !validEmailOTPType(typ) {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+			return
+		}
+		verification, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), otpIdentifier(typ, email))
+		if errors.Is(err, berrors.ErrNotFound) {
+			c.WriteJSON(http.StatusOK, map[string]*string{"otp": nil})
+			return
+		}
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		if time.Now().After(verification.ExpiresAt) {
+			c.WriteJSON(http.StatusOK, map[string]*string{"otp": nil})
+			return
+		}
+		otp, _ := splitEmailOTPValue(verification.Value)
+		c.WriteJSON(http.StatusOK, map[string]*string{"otp": &otp})
+	}
 }
 
 func generateEmailOTP(ctx context.Context, opts EmailOTPOptions, email, typ string) (string, error) {

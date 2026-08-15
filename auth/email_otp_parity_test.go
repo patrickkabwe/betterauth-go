@@ -253,6 +253,117 @@ func TestEmailOTPPluginSendVerificationOTPReturnsGeneratorError(t *testing.T) {
 	}
 }
 
+func TestEmailOTPPluginCreateAndGetVerificationOTPServerRoutes(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{
+			GenerateOTP: func(_ context.Context, email string, typ string) (string, error) {
+				return email + ":" + typ + ":otp", nil
+			},
+		})}
+	})
+
+	resp, data := doRequest(a, http.MethodPost, "/email-otp/create-verification-otp", map[string]any{
+		"email": "SERVER-OTP@example.com",
+		"type":  "sign-in",
+	}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", resp.StatusCode, data)
+	}
+	var otp string
+	if err := json.Unmarshal(data, &otp); err != nil {
+		t.Fatal(err)
+	}
+	if otp != "server-otp@example.com:sign-in:otp" {
+		t.Fatalf("created otp=%q", otp)
+	}
+
+	resp, data = doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=server-otp@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", resp.StatusCode, data)
+	}
+	var body struct {
+		OTP *string `json:"otp"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OTP == nil || *body.OTP != otp {
+		t.Fatalf("get otp=%v want %q", body.OTP, otp)
+	}
+}
+
+func TestEmailOTPPluginGetVerificationOTPReturnsNullForMissingOrExpired(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
+	})
+	resp, data := doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=missing@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("missing status=%d body=%s", resp.StatusCode, data)
+	}
+	var missing struct {
+		OTP *string `json:"otp"`
+	}
+	if err := json.Unmarshal(data, &missing); err != nil {
+		t.Fatal(err)
+	}
+	if missing.OTP != nil {
+		t.Fatalf("missing otp=%q", *missing.OTP)
+	}
+
+	now := time.Now()
+	err := a.Store().CreateVerification(context.Background(), &types.Verification{
+		ID:         "expired-server-otp",
+		Identifier: constants.VerificationEmailOTP + "sign-in:expired-server@example.com",
+		Value:      "123456:0",
+		ExpiresAt:  now.Add(-time.Minute),
+		CreatedAt:  now.Add(-time.Hour),
+		UpdatedAt:  now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, data = doRequest(a, http.MethodGet, "/email-otp/get-verification-otp?email=expired-server@example.com&type=sign-in", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expired status=%d body=%s", resp.StatusCode, data)
+	}
+	var expired struct {
+		OTP *string `json:"otp"`
+	}
+	if err := json.Unmarshal(data, &expired); err != nil {
+		t.Fatal(err)
+	}
+	if expired.OTP != nil {
+		t.Fatalf("expired otp=%q", *expired.OTP)
+	}
+}
+
+func TestEmailOTPPluginServerOTPRoutesAreExcludedFromClientSchema(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) {
+		c.Plugins = []auth.Plugin{plugins.EmailOTP(plugins.EmailOTPOptions{})}
+	})
+	resp, data := doRequest(a, http.MethodGet, "/client-schema", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+	}
+	var schema auth.ClientSchema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, plugin := range schema.Plugins {
+		if plugin.ID != constants.PluginEmailOTP {
+			continue
+		}
+		for _, endpoint := range plugin.Endpoints {
+			switch endpoint.Path {
+			case "/email-otp/create-verification-otp", "/email-otp/get-verification-otp":
+				t.Fatalf("server route leaked into client schema: %s", endpoint.Path)
+			}
+		}
+		return
+	}
+	t.Fatal("email otp plugin missing from client schema")
+}
+
 func TestEmailOTPPluginSendVerificationOTPReusesExistingCode(t *testing.T) {
 	var sentCodes []string
 	a := newTestAuth(func(c *auth.Config) {
