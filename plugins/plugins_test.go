@@ -13,9 +13,18 @@ import (
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/plugins"
+	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/store/memory"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
+
+type listUsersFailStore struct {
+	*memory.Store
+}
+
+func (s listUsersFailStore) ListUsers(_ context.Context, _ store.ListUsersOpts) ([]types.User, error) {
+	return nil, errors.New("list users failed")
+}
 
 func newTestAuth(t *testing.T, p ...auth.Plugin) *auth.Auth {
 	t.Helper()
@@ -135,6 +144,25 @@ func TestUsernameAvailabilityReportsLengthCodes(t *testing.T) {
 	}
 }
 
+func TestUsernameAvailabilityReportsStoreLookupErrors(t *testing.T) {
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   listUsersFailStore{Store: memory.New()},
+		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := post(t, a, "/is-username-available", `{"username":"newuser"}`)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeInternalServerError {
+		t.Fatalf("code %q", code)
+	}
+}
+
 func TestUsernameAvailabilityRejectsWhitespaceUsername(t *testing.T) {
 	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
 	w := post(t, a, "/is-username-available", `{"username":" newuser"}`)
@@ -180,6 +208,25 @@ func TestUsernameSignInRequiresEmailVerification(t *testing.T) {
 	}
 	if !sent {
 		t.Fatal("expected verification email on username sign-in")
+	}
+}
+
+func TestUsernameSignInReportsStoreLookupErrors(t *testing.T) {
+	a, err := auth.New(auth.Config{
+		Secret:  "test-secret-key-32-chars-minimum!!",
+		BaseURL: "http://localhost:8080",
+		Store:   listUsersFailStore{Store: memory.New()},
+		Plugins: []auth.Plugin{plugins.Username(plugins.UsernameOptions{})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := post(t, a, "/sign-in/username", `{"username":"newuser","password":"password123"}`)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeInternalServerError {
+		t.Fatalf("code %q", code)
 	}
 }
 

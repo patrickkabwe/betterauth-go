@@ -248,7 +248,15 @@ func usernameAvailabilityHandler(resolved usernameOptionsResolved) func(*auth.Co
 			return
 		}
 		_, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldUsername, resolved.normalizer(body.Username))
-		c.WriteJSON(http.StatusOK, map[string]bool{"available": err != nil})
+		if err == nil {
+			c.WriteJSON(http.StatusOK, map[string]bool{"available": false})
+			return
+		}
+		if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"available": true})
 	}
 }
 
@@ -274,8 +282,12 @@ func usernameSignInHandler(resolved usernameOptionsResolved) func(*auth.Context)
 		}
 		username := resolved.normalizer(body.Username)
 		user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldUsername, username)
-		if err != nil {
+		if errors.Is(err, berrors.ErrNotFound) {
 			c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidEmailOrPassword, constants.MsgInvalidCredentials))
+			return
+		}
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 			return
 		}
 		account, err := c.Auth.Store().FindAccountByUserAndProvider(c.R.Context(), user.ID, constants.ProviderCredential)
