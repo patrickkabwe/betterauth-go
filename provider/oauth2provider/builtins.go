@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
@@ -69,15 +70,14 @@ func Google(opts Options) *Provider {
 		RedirectURI:           opts.RedirectURI,
 		Prompt:                opts.Prompt,
 		AuthorizationParams:   params,
-		AuthorizationParamsFunc: func(urlOpts provider.AuthorizationURLOpts) map[string]string {
+		AuthorizationParamsAppend: func(values *url.Values, urlOpts provider.AuthorizationURLOpts) {
 			display := opts.Display
 			if urlOpts.Display != "" {
 				display = urlOpts.Display
 			}
-			if display == "" {
-				return nil
+			if display != "" {
+				values.Set("display", display)
 			}
-			return map[string]string{"display": display}
 		},
 		UsePKCE:               true,
 		AlwaysSendScope:       true,
@@ -176,23 +176,19 @@ func githubUserInfo(opts Options) func(context.Context, provider.OAuthTokens) (*
 		emails, _ := githubFetchEmails(ctx, emailEndpoint, tokens.AccessToken)
 		email := githubSelectedEmail(stringField(profile, "email"), emails)
 		verified := githubEmailVerified(email, emails)
-		data := make(map[string]any, len(profile)+1)
-		for key, value := range profile {
-			data[key] = value
-		}
-		data["email"] = email
+		profile["email"] = email
 		user := provider.OAuthUser{
 			ID: stringField(profile, "id"), Name: firstString(stringField(profile, "name"), stringField(profile, "login")),
 			Email: email, Image: optionalImage(stringField(profile, "avatar_url")), EmailVerified: verified,
 		}
 		if opts.MapProfileToUser != nil {
-			mapping, err := opts.MapProfileToUser(ctx, data)
+			mapping, err := opts.MapProfileToUser(ctx, profile)
 			if err != nil {
 				return nil, err
 			}
 			user = provider.ApplyOAuthUserMapping(user, mapping)
 		}
-		return &provider.UserInfo{User: user, Data: data}, nil
+		return &provider.UserInfo{User: user, Data: profile}, nil
 	}
 }
 
