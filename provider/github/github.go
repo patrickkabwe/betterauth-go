@@ -152,17 +152,8 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 		return nil, err
 	}
 	emails, _ := p.fetchEmails(ctx, tokens.AccessToken)
-	email := profile.Email
-	verified := false
-	for _, e := range emails {
-		if e.Primary || email == "" {
-			email = e.Email
-			verified = e.Verified
-		}
-		if e.Email == profile.Email {
-			verified = e.Verified
-		}
-	}
+	email := githubSelectedEmail(profile.Email, emails)
+	verified := githubEmailVerified(email, emails)
 	name := profile.Name
 	if name == "" {
 		name = profile.Login
@@ -182,6 +173,30 @@ func (p *Provider) GetUserInfo(ctx context.Context, tokens provider.OAuthTokens)
 		},
 		Data: raw,
 	}, nil
+}
+
+func githubSelectedEmail(profileEmail string, emails []githubEmail) string {
+	if profileEmail != "" {
+		return profileEmail
+	}
+	if len(emails) == 0 {
+		return ""
+	}
+	for _, email := range emails {
+		if email.Primary {
+			return email.Email
+		}
+	}
+	return emails[0].Email
+}
+
+func githubEmailVerified(selectedEmail string, emails []githubEmail) bool {
+	for _, email := range emails {
+		if email.Email == selectedEmail {
+			return email.Verified
+		}
+	}
+	return false
 }
 
 func (p *Provider) fetchProfile(ctx context.Context, accessToken string) (*githubProfile, error) {

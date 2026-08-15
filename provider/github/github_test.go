@@ -2,7 +2,10 @@ package github_test
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/patrickkabwe/betterauth-go/provider"
@@ -105,6 +108,42 @@ func TestGitHubGetUserInfoUsesOverride(t *testing.T) {
 	}
 }
 
+func TestGitHubGetUserInfoKeepsProfileEmail(t *testing.T) {
+	transport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body string
+		switch req.URL.Path {
+		case "/user":
+			body = `{"id":42,"login":"octo","name":"Octo","email":"public@example.com","avatar_url":"https://img.example.com/octo.png"}`
+		case "/user/emails":
+			body = `[
+				{"email":"primary@example.com","primary":true,"verified":true},
+				{"email":"public@example.com","primary":false,"verified":false}
+			]`
+		default:
+			body = `{}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+	defer func() {
+		http.DefaultTransport = transport
+	}()
+
+	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret"})
+	info, err := p.GetUserInfo(context.Background(), provider.OAuthTokens{AccessToken: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.User.Email != "public@example.com" || info.User.EmailVerified {
+		t.Fatalf("user=%+v", info.User)
+	}
+}
+
 func TestGitHubSignUpPolicy(t *testing.T) {
 	p := github.New(github.Config{ClientID: "id", ClientSecret: "secret", DisableImplicitSignUp: true, DisableSignUp: true, OverrideUserInfoOnSignIn: true})
 	if !p.DisableImplicitSignUp() || !p.DisableSignUp() {
@@ -122,4 +161,10 @@ func githubAuthURLQuery(t *testing.T, authURL string) url.Values {
 		t.Fatal(err)
 	}
 	return parsed.Query()
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
