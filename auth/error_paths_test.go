@@ -804,6 +804,61 @@ func TestVerifyEmailChangeLegacySendFails(t *testing.T) {
 	}
 }
 
+func TestVerifyEmailChangeVerificationCreatesSession(t *testing.T) {
+	a := newTestAuth()
+	signUp(t, a, "verify-change-session@example.com")
+	token, err := jwt.SignHS256(testSecret, map[string]any{
+		"email":       "verify-change-session@example.com",
+		"updateTo":    "verify-change-session-new@example.com",
+		"requestType": "change-email-verification",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	resp, _ := doRequest(a, http.MethodGet, "/verify-email?token="+token, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	resp, data := doRequest(a, http.MethodGet, "/get-session?disableCookieCache=true", nil, resp.Cookies())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d %s", resp.StatusCode, data)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.User.Email != "verify-change-session-new@example.com" || !sess.User.EmailVerified {
+		t.Fatalf("user=%+v", sess.User)
+	}
+}
+
+func TestVerifyEmailChangeLegacyCreatesSession(t *testing.T) {
+	a := newTestAuth()
+	signUp(t, a, "verify-change-legacy-session@example.com")
+	token, err := jwt.SignHS256(testSecret, map[string]any{
+		"email":    "verify-change-legacy-session@example.com",
+		"updateTo": "verify-change-legacy-session-new@example.com",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	resp, _ := doRequest(a, http.MethodGet, "/verify-email?token="+token, nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	resp, data := doRequest(a, http.MethodGet, "/get-session?disableCookieCache=true", nil, resp.Cookies())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("session status=%d %s", resp.StatusCode, data)
+	}
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.User.Email != "verify-change-legacy-session-new@example.com" || sess.User.EmailVerified {
+		t.Fatalf("user=%+v", sess.User)
+	}
+}
+
 func TestSetPasswordTooShort(t *testing.T) {
 	a := newTestAuth()
 	cookies := oauthOnlySession(t, a)

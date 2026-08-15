@@ -67,6 +67,13 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 		return true
 
 	case "change-email-verification":
+		if sess == nil {
+			sess, err = c.Auth.createSession(c, user.ID, true)
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeFailedToCreateSession))
+				return true
+			}
+		}
 		verified := true
 		newEmail := updateTo
 		updated, err := c.Auth.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{
@@ -76,9 +83,7 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
 			return true
 		}
-		if sess != nil {
-			c.Auth.syncUserSession(c, sess, updated)
-		}
+		c.Auth.syncUserSession(c, sess, updated)
 		if callbackURL != "" {
 			c.Redirect(callbackURL)
 			return true
@@ -87,6 +92,13 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 		return true
 
 	default:
+		if sess == nil {
+			sess, err = c.Auth.createSession(c, user.ID, true)
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeFailedToCreateSession))
+				return true
+			}
+		}
 		newEmail := updateTo
 		verified := false
 		updated, err := c.Auth.cfg.store.UpdateUser(c.R.Context(), user.ID, store.UserUpdate{
@@ -102,9 +114,7 @@ func handleVerifyEmailChange(c *Context, payload map[string]any, callbackURL str
 				return true
 			}
 		}
-		if sess != nil {
-			c.Auth.syncUserSession(c, sess, updated)
-		}
+		c.Auth.syncUserSession(c, sess, updated)
 		if callbackURL != "" {
 			c.Redirect(callbackURL)
 			return true
