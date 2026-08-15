@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/constants"
+	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/provider"
@@ -32,6 +33,12 @@ func ExtStore(s store.Store) (store.ExtStore, bool) {
 // NewSession creates a session and sets cookies (exported for plugins).
 func (a *Auth) NewSession(c *Context, userID string, rememberMe bool) (*types.Session, error) {
 	return a.createSession(c, userID, rememberMe)
+}
+
+// SyncUserSession refreshes cached session user data after a plugin updates the
+// current user.
+func (a *Auth) SyncUserSession(c *Context, sess *types.Session, user *types.User) {
+	a.setSessionCache(c, sess, user)
 }
 
 // CanLinkAccountEmail reports whether account-linking policy permits the OAuth email.
@@ -95,6 +102,29 @@ func (a *Auth) RevokeSessionsOnPasswordReset(ctx context.Context, userID string)
 		return nil
 	}
 	return a.cfg.store.DeleteAllSessionsByUserID(ctx, userID)
+}
+
+// ParseAdditionalUserCreateInput parses configured user fields for plugin user creation.
+func (a *Auth) ParseAdditionalUserCreateInput(raw map[string]json.RawMessage) (map[string]any, *apierror.Error) {
+	return parseAdditionalUserInput(a.cfg.user.additionalFields, raw, "create")
+}
+
+// CreateUser creates a user using configured additional field defaults.
+func (a *Auth) CreateUser(ctx context.Context, name string, email string, image *string, additional map[string]any) (*types.User, error) {
+	now := time.Now()
+	userID, err := id.Generate(32)
+	if err != nil {
+		return nil, err
+	}
+	user := &types.User{
+		ID: userID, Name: name, Email: email, EmailVerified: false,
+		Image: image, CreatedAt: now, UpdatedAt: now,
+		Additional: applyDefaultAdditionalFields(additional, a.cfg.user.additionalFields),
+	}
+	if err := a.cfg.store.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // CreateVerification stores a verification token.

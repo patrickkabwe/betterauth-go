@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -11,15 +12,29 @@ import (
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
-	"github.com/patrickkabwe/betterauth-go/store"
+	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 // PhoneNumberOptions configures SMS OTP sign-in.
 type PhoneNumberOptions struct {
-	SendOTP              func(ctx context.Context, phone, otp string) error
-	SendPasswordResetOTP func(ctx context.Context, phone, otp string) error
-	ExpiresIn            time.Duration
+	SendOTP                func(ctx context.Context, phone, otp string) error
+	SendPasswordResetOTP   func(ctx context.Context, phone, otp string) error
+	VerifyOTP              func(ctx context.Context, phone, otp string) (bool, error)
+	CallbackOnVerification func(ctx context.Context, phone string, user *types.User) error
+	SignUpOnVerification   *PhoneNumberSignUpOnVerificationOptions
+	ExpiresIn              time.Duration
 }
+
+// PhoneNumberSignUpOnVerificationOptions configures user creation on phone verification.
+type PhoneNumberSignUpOnVerificationOptions struct {
+	GetTempEmail func(phone string) string
+	GetTempName  func(phone string) string
+}
+
+const (
+	codePhoneNumberExists = "PHONE_NUMBER_EXIST"
+	codeFailedUpdateUser  = "FAILED_TO_UPDATE_USER"
+)
 
 // PhoneNumber adds phone number OTP authentication.
 func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
@@ -59,20 +74,90 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 				c.WriteJSON(http.StatusOK, map[string]string{"message": "code sent"})
 			}),
 			rt(http.MethodPost, "/phone-number/verify", func(c *auth.Context) {
-				var body struct {
-					PhoneNumber string `json:"phoneNumber"`
-					Code        string `json:"code"`
-				}
-				if err := c.ParseJSON(&body); err != nil || body.PhoneNumber == "" || body.Code == "" {
+				var raw map[string]json.RawMessage
+				if err := c.ParseJSON(&raw); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 					return
 				}
-				v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber)
-				if err != nil || v.Value != body.Code {
+				body, err := phoneVerifyBodyFromRaw(raw)
+				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
 					return
 				}
-				c.WriteJSON(http.StatusOK, map[string]bool{"status": true})
+				if !verifyPhoneOTP(c, opts.VerifyOTP, body.PhoneNumber, body.Code) {
+					return
+				}
+				if body.UpdatePhoneNumber {
+					sess, user, ok := c.RequireSession()
+					if !ok {
+						return
+					}
+					_, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
+					if err == nil {
+						c.WriteError(apierror.New(http.StatusBadRequest, codePhoneNumberExists, "Phone number already exists"))
+						return
+					}
+					if !errors.Is(err, berrors.ErrNotFound) {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+						return
+					}
+					updated, err := c.Auth.SetUserAdditional(c.R.Context(), user.ID, map[string]any{
+						constants.FieldPhoneNumber:   body.PhoneNumber,
+						constants.FieldPhoneVerified: true,
+					})
+					if err != nil {
+						c.WriteError(apierror.New(http.StatusInternalServerError, codeFailedUpdateUser, "Failed to update user"))
+						return
+					}
+					c.Auth.SyncUserSession(c, sess, updated)
+					if !notifyPhoneVerification(c, opts.CallbackOnVerification, body.PhoneNumber, updated) {
+						return
+					}
+					c.WriteJSON(http.StatusOK, map[string]any{"status": true, "token": sess.Token, "user": updated})
+					return
+				}
+				user, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldPhoneNumber, body.PhoneNumber)
+				if err != nil {
+					if !errors.Is(err, berrors.ErrNotFound) {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+						return
+					}
+					var fieldErr *apierror.Error
+					user, fieldErr, err = createPhoneVerificationUser(c, opts.SignUpOnVerification, body.PhoneNumber, raw)
+					if fieldErr != nil {
+						c.WriteError(fieldErr)
+						return
+					}
+					if err != nil {
+						c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeFailedToCreateUser))
+						return
+					}
+				} else if !auth.UserAdditionalBool(user, constants.FieldPhoneVerified) {
+					user, err = c.Auth.SetUserAdditional(c.R.Context(), user.ID, map[string]any{
+						constants.FieldPhoneVerified: true,
+					})
+					if err != nil {
+						c.WriteError(apierror.New(http.StatusInternalServerError, codeFailedUpdateUser, "Failed to update user"))
+						return
+					}
+				}
+				if user == nil {
+					c.WriteError(apierror.New(http.StatusInternalServerError, codeFailedUpdateUser, "Failed to update user"))
+					return
+				}
+				if !notifyPhoneVerification(c, opts.CallbackOnVerification, body.PhoneNumber, user) {
+					return
+				}
+				if body.DisableSession {
+					c.WriteJSON(http.StatusOK, map[string]any{"status": true, "token": nil, "user": user})
+					return
+				}
+				sess, err := c.Auth.NewSession(c, user.ID, true)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeFailedToCreateSession))
+					return
+				}
+				c.WriteJSON(http.StatusOK, map[string]any{"status": true, "token": sess.Token, "user": user})
 			}),
 			rt(http.MethodPost, "/sign-in/phone-number", func(c *auth.Context) {
 				var body struct {
@@ -203,4 +288,125 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 	}
 }
 
-var _ = store.UserUpdate{}
+type phoneVerifyBody struct {
+	PhoneNumber       string
+	Code              string
+	DisableSession    bool
+	UpdatePhoneNumber bool
+}
+
+func phoneVerifyBodyFromRaw(raw map[string]json.RawMessage) (phoneVerifyBody, error) {
+	var body phoneVerifyBody
+	if err := decodePhoneString(raw, "phoneNumber", &body.PhoneNumber); err != nil {
+		return phoneVerifyBody{}, err
+	}
+	if err := decodePhoneString(raw, "code", &body.Code); err != nil {
+		return phoneVerifyBody{}, err
+	}
+	if err := decodePhoneBool(raw, "disableSession", &body.DisableSession); err != nil {
+		return phoneVerifyBody{}, err
+	}
+	if err := decodePhoneBool(raw, "updatePhoneNumber", &body.UpdatePhoneNumber); err != nil {
+		return phoneVerifyBody{}, err
+	}
+	if body.PhoneNumber == "" || body.Code == "" {
+		return phoneVerifyBody{}, errors.New("phone number and code are required")
+	}
+	return body, nil
+}
+
+func decodePhoneString(raw map[string]json.RawMessage, key string, dst *string) error {
+	value, ok := raw[key]
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(value, dst)
+}
+
+func decodePhoneBool(raw map[string]json.RawMessage, key string, dst *bool) error {
+	value, ok := raw[key]
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(value, dst)
+}
+
+func verifyPhoneOTP(c *auth.Context, verifyOTP func(context.Context, string, string) (bool, error), phoneNumber string, code string) bool {
+	if verifyOTP == nil {
+		v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationPhoneOTP+phoneNumber)
+		if err != nil || v.Value != code {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+			return false
+		}
+		return true
+	}
+	ok, err := verifyOTP(c.R.Context(), phoneNumber, code)
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	if !ok {
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidOTP))
+		return false
+	}
+	_ = c.Auth.Store().DeleteVerificationByIdentifier(c.R.Context(), constants.VerificationPhoneOTP+phoneNumber)
+	return true
+}
+
+func createPhoneVerificationUser(c *auth.Context, opts *PhoneNumberSignUpOnVerificationOptions, phoneNumber string, raw map[string]json.RawMessage) (*types.User, *apierror.Error, error) {
+	if opts == nil {
+		return nil, nil, nil
+	}
+	if opts.GetTempEmail == nil {
+		return nil, nil, errors.New("phone sign-up temp email callback is required")
+	}
+	additional, fieldErr := c.Auth.ParseAdditionalUserCreateInput(stripPhoneVerifyFields(raw))
+	if fieldErr != nil {
+		return nil, fieldErr, nil
+	}
+	name := phoneNumber
+	if opts.GetTempName != nil {
+		name = opts.GetTempName(phoneNumber)
+	}
+	additional = mergePhoneAdditional(additional, map[string]any{
+		constants.FieldPhoneNumber:   phoneNumber,
+		constants.FieldPhoneVerified: true,
+	})
+	user, err := c.Auth.CreateUser(c.R.Context(), name, opts.GetTempEmail(phoneNumber), nil, additional)
+	return user, nil, err
+}
+
+func stripPhoneVerifyFields(raw map[string]json.RawMessage) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(raw))
+	for key, value := range raw {
+		switch key {
+		case "phoneNumber", "code", "disableSession", "updatePhoneNumber":
+			continue
+		default:
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func mergePhoneAdditional(base map[string]any, next map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(next))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range next {
+		out[key] = value
+	}
+	return out
+}
+
+func notifyPhoneVerification(c *auth.Context, callback func(context.Context, string, *types.User) error, phoneNumber string, user *types.User) bool {
+	if callback == nil {
+		return true
+	}
+	if err := callback(c.R.Context(), phoneNumber, user); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	return true
+}
