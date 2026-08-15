@@ -1,11 +1,13 @@
 package auth
 
 import (
-	constants "github.com/patrickkabwe/betterauth-go/constants"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/cookie"
 	"github.com/patrickkabwe/betterauth-go/internal/crypto"
@@ -126,20 +128,38 @@ func handleSignInEmail(c *Context) {
 	email := strings.ToLower(strings.TrimSpace(body.Email))
 	user, err := c.Auth.cfg.store.FindUserByEmail(c.R.Context(), email)
 	if err != nil {
-		_, _ = c.Auth.cfg.hasher.Hash(body.Password)
+		if !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		if _, err := c.Auth.cfg.hasher.Hash(body.Password); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeInvalidEmailOrPassword))
 		return
 	}
 
 	account, err := c.Auth.cfg.store.FindAccountByUserAndProvider(c.R.Context(), user.ID, constants.ProviderCredential)
 	if err != nil || account.Password == "" {
-		_, _ = c.Auth.cfg.hasher.Hash(body.Password)
+		if err != nil && !errors.Is(err, berrors.ErrNotFound) {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
+		if _, err := c.Auth.cfg.hasher.Hash(body.Password); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+			return
+		}
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeInvalidEmailOrPassword))
 		return
 	}
 
 	valid, err := c.Auth.cfg.hasher.Verify(account.Password, body.Password)
-	if err != nil || !valid {
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, apierror.CodeInternalServerError))
+		return
+	}
+	if !valid {
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeInvalidEmailOrPassword))
 		return
 	}

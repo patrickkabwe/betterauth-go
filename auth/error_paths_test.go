@@ -36,6 +36,63 @@ func TestSignUpCreateSessionFails(t *testing.T) {
 	}
 }
 
+func TestSignInFindUserFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("FindUserByEmail") })
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "finduserfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInMissingUserHashFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Hasher = errorHasher{} })
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "missinghashfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInFindAccountFails(t *testing.T) {
+	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("FindAccountByUserAndProvider") })
+	signUp(t, a, "findaccountfail@example.com")
+	resp, _ := doRequest(a, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "findaccountfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInMissingCredentialHashFails(t *testing.T) {
+	mem := memory.New()
+	fs := &failStore{inner: mem}
+	_ = oauthOnlyCookies(t, fs, "signin-missing-credential", "signin-missing-credential@example.com")
+	a2 := newTestAuth(func(c *auth.Config) { c.Store = fs; c.Hasher = errorHasher{} })
+	resp, _ := doRequest(a2, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "signin-missing-credential@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestSignInVerifyFails(t *testing.T) {
+	mem := memory.New()
+	a1 := newTestAuth(func(c *auth.Config) { c.Store = mem })
+	signUp(t, a1, "signinverifyfail@example.com")
+	a2 := newTestAuth(func(c *auth.Config) { c.Store = mem; c.Hasher = verifyErrorHasher{} })
+	resp, _ := doRequest(a2, http.MethodPost, "/sign-in/email", map[string]any{
+		"email": "signinverifyfail@example.com", "password": "password123",
+	}, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestUpdateUserStoreFails(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) { c.Store = wrapStore("UpdateUser") })
 	cookies := signUp(t, a, "upfail@example.com")

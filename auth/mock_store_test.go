@@ -34,6 +34,9 @@ func (f *failStore) UpdateUser(ctx context.Context, id string, update store.User
 }
 
 func (f *failStore) FindUserByEmail(ctx context.Context, email string) (*types.User, error) {
+	if f.failOn == "FindUserByEmail" {
+		return nil, berrors.ErrInjected
+	}
 	return f.inner.FindUserByEmail(ctx, email)
 }
 
@@ -67,6 +70,9 @@ func (f *failStore) UpdateAccountPassword(ctx context.Context, userID, providerI
 }
 
 func (f *failStore) FindAccountByUserAndProvider(ctx context.Context, userID, providerID string) (*types.Account, error) {
+	if f.failOn == "FindAccountByUserAndProvider" {
+		return nil, berrors.ErrInjected
+	}
 	return f.inner.FindAccountByUserAndProvider(ctx, userID, providerID)
 }
 
