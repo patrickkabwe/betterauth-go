@@ -27,6 +27,10 @@ func handleGetSession(c *Context) {
 		c.WriteNull()
 		return
 	}
+	if resolved.RefreshFailed {
+		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeFailedToGetSession))
+		return
+	}
 
 	resp := types.SessionResponse{
 		Session: toSessionResponse(resolved.Session),
@@ -37,10 +41,14 @@ func handleGetSession(c *Context) {
 	}
 
 	if isPost && resolved.NeedsRefresh && c.Auth.shouldRefresh(c, resolved.Session, opts) {
-		if refreshed, err := c.Auth.refreshSession(c, resolved.Session); err == nil {
-			resp.Session = toSessionResponse(refreshed)
-			c.Auth.setSessionCache(c, refreshed, resolved.User)
+		refreshed, err := c.Auth.refreshSession(c, resolved.Session)
+		if err != nil {
+			cookie.DeleteSessionCookies(c.W, c.Auth.cfg.cookie)
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeFailedToGetSession))
+			return
 		}
+		resp.Session = toSessionResponse(refreshed)
+		c.Auth.setSessionCache(c, refreshed, resolved.User)
 		resp.NeedsRefresh = false
 	}
 

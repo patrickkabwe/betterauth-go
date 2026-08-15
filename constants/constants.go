@@ -149,6 +149,7 @@ const (
 	CodePasswordTooLong             = "PASSWORD_TOO_LONG"
 	CodeFailedToCreateUser          = "FAILED_TO_CREATE_USER"
 	CodeFailedToCreateSession       = "FAILED_TO_CREATE_SESSION"
+	CodeFailedToGetSession          = "FAILED_TO_GET_SESSION"
 	CodeMethodNotAllowed            = "METHOD_NOT_ALLOWED"
 	CodeUnauthorized                = "UNAUTHORIZED"
 	CodeInternalServerError         = "INTERNAL_SERVER_ERROR"
@@ -237,6 +238,7 @@ const (
 	MsgPasswordTooLong             = "Password is too long"
 	MsgFailedToCreateUser          = "Failed to create user"
 	MsgFailedToCreateSession       = "Failed to create session"
+	MsgFailedToGetSession           = "Failed to get session"
 	MsgMethodNotAllowed            = "POST get-session requires deferSessionRefresh"
 	MsgUnauthorized                = "Unauthorized"
 	MsgInternalServerError         = "Internal server error"
@@ -371,6 +373,7 @@ var apiMessages = map[string]string{
 	CodePasswordTooLong:             MsgPasswordTooLong,
 	CodeFailedToCreateUser:          MsgFailedToCreateUser,
 	CodeFailedToCreateSession:       MsgFailedToCreateSession,
+	CodeFailedToGetSession:          MsgFailedToGetSession,
 	CodeMethodNotAllowed:            MsgMethodNotAllowed,
 	CodeUnauthorized:                MsgUnauthorized,
 	CodeInternalServerError:         MsgInternalServerError,

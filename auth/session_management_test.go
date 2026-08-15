@@ -105,6 +105,30 @@ func TestPostGetSessionRefreshesWhenDeferEnabled(t *testing.T) {
 	}
 }
 
+func TestPostGetSessionRefreshFailsClosed(t *testing.T) {
+	fs := &failStore{inner: memory.New()}
+	a := newTestAuth(func(c *auth.Config) {
+		c.Store = fs
+		c.Session.DeferSessionRefresh = true
+	})
+	cookies := signUp(t, a, "postreffail@example.com")
+	_, data := doRequest(a, http.MethodGet, "/get-session", nil, cookies)
+	var sess types.SessionResponse
+	if err := json.Unmarshal(data, &sess); err != nil {
+		t.Fatal(err)
+	}
+	near := time.Now().Add(time.Hour)
+	if _, err := fs.inner.UpdateSession(context.Background(), sess.Session.Token, store.SessionUpdate{ExpiresAt: &near}); err != nil {
+		t.Fatal(err)
+	}
+
+	fs.failOn = "UpdateSession"
+	resp, _ := doRequest(a, http.MethodPost, "/get-session", nil, cookies)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
 func TestSensitiveSessionIgnoresStaleCache(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.Session.CookieCache.Enabled = true

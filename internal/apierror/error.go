@@ -25,6 +25,7 @@ const (
 	CodePasswordTooLong             = constants.CodePasswordTooLong
 	CodeFailedToCreateUser          = constants.CodeFailedToCreateUser
 	CodeFailedToCreateSession       = constants.CodeFailedToCreateSession
+	CodeFailedToGetSession          = constants.CodeFailedToGetSession
 	CodeMethodNotAllowed            = constants.CodeMethodNotAllowed
 	CodeUnauthorized                = constants.CodeUnauthorized
 	CodeInternalServerError         = constants.CodeInternalServerError

@@ -28,9 +28,10 @@ func parseSessionOpts(r *http.Request) SessionOpts {
 }
 
 type resolvedSession struct {
-	Session      *types.Session
-	User         *types.User
-	NeedsRefresh bool
+	Session       *types.Session
+	User          *types.User
+	NeedsRefresh  bool
+	RefreshFailed bool
 }
 
 func (a *Auth) setSessionCache(c *Context, sess *types.Session, user *types.User) {
@@ -162,9 +163,12 @@ func (a *Auth) resolveSession(c *Context, opts SessionOpts, isPost bool) (*resol
 	}
 
 	if needsRefresh {
-		if refreshed, err := a.refreshSession(c, sess); err == nil {
-			sess = refreshed
+		refreshed, err := a.refreshSession(c, sess)
+		if err != nil {
+			cookie.DeleteSessionCookies(c.W, a.cfg.cookie)
+			return &resolvedSession{Session: sess, User: user, NeedsRefresh: true, RefreshFailed: true}, true
 		}
+		sess = refreshed
 	}
 	a.setSessionCache(c, sess, user)
 
@@ -176,6 +180,10 @@ func (c *Context) requireSessionWithOpts(opts SessionOpts) (*types.Session, *typ
 	resolved, ok := c.Auth.resolveSession(c, opts, isPost)
 	if !ok {
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeUnauthorized))
+		return nil, nil, false
+	}
+	if resolved.RefreshFailed {
+		c.WriteError(apierror.WithCode(http.StatusUnauthorized, apierror.CodeFailedToGetSession))
 		return nil, nil, false
 	}
 	return resolved.Session, resolved.User, true
