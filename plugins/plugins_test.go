@@ -48,6 +48,17 @@ func get(t *testing.T, a *auth.Auth, path string) *httptest.ResponseRecorder {
 	return w
 }
 
+func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Code
+}
+
 func TestAnonymousSignIn(t *testing.T) {
 	a := newTestAuth(t, plugins.Anonymous(plugins.AnonymousOptions{}))
 	w := post(t, a, "/sign-in/anonymous", `{}`)
@@ -100,6 +111,27 @@ func TestUsernameAvailabilityRejectsInvalidDefaultUsername(t *testing.T) {
 	w := post(t, a, "/is-username-available", `{"username":"new-user"}`)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeInvalidUsername {
+		t.Fatalf("code %q", code)
+	}
+}
+
+func TestUsernameAvailabilityReportsLengthCodes(t *testing.T) {
+	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{MaxUsernameLength: 5}))
+	w := post(t, a, "/is-username-available", `{"username":"ab"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("short status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeUsernameTooShort {
+		t.Fatalf("short code %q", code)
+	}
+	w = post(t, a, "/is-username-available", `{"username":"abcdef"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("long status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeUsernameTooLong {
+		t.Fatalf("long code %q", code)
 	}
 }
 
@@ -261,6 +293,9 @@ func TestUsernameSignUpRejectsDuplicateNormalizedUsername(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("second status %d body %s", w.Code, w.Body.String())
 	}
+	if code := errorCode(t, w); code != constants.CodeUsernameIsAlreadyTaken {
+		t.Fatalf("second code %q", code)
+	}
 }
 
 func TestUsernameUpdateNormalizesAndRejectsDuplicateUsername(t *testing.T) {
@@ -297,6 +332,9 @@ func TestUsernameUpdateNormalizesAndRejectsDuplicateUsername(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate update status %d body %s", w.Code, w.Body.String())
 	}
+	if code := errorCode(t, w); code != constants.CodeUsernameIsAlreadyTaken {
+		t.Fatalf("duplicate update code %q", code)
+	}
 }
 
 func TestUsernameDisplayUsernameValidatorAndNormalization(t *testing.T) {
@@ -320,6 +358,9 @@ func TestUsernameDisplayUsernameValidatorAndNormalization(t *testing.T) {
 	w = post(t, a, "/sign-up/email", `{"name":"Username User","email":"username-display-blocked@example.com","password":"password123","username":"displayblocked","displayUsername":"blocked"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("blocked status %d body %s", w.Code, w.Body.String())
+	}
+	if code := errorCode(t, w); code != constants.CodeInvalidDisplayUsername {
+		t.Fatalf("blocked code %q", code)
 	}
 }
 

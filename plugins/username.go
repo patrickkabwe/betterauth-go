@@ -101,7 +101,7 @@ func (p usernamePlugin) ProcessUserAdditional(c *auth.Context, action string, cu
 		normalizedUsername := p.opts.normalizer(username)
 		existing, err := c.Auth.FindUserByAdditional(c.R.Context(), constants.FieldUsername, normalizedUsername)
 		if err == nil && (currentUserID == "" || existing.ID != currentUserID) {
-			return nil, apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidUsername)
+			return nil, apierror.WithCode(http.StatusBadRequest, constants.CodeUsernameIsAlreadyTaken)
 		}
 		if err != nil && !errors.Is(err, berrors.ErrNotFound) {
 			return nil, apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError)
@@ -184,8 +184,11 @@ func (r usernameOptionsResolved) displayUsernameToValidate(displayUsername strin
 
 func (r usernameOptionsResolved) validateUsername(c *auth.Context, username string, status int) *apierror.Error {
 	usernameToValidate := r.userInputUsernameToValidate(username)
-	if len(usernameToValidate) < r.minLen || len(usernameToValidate) > r.maxLen {
-		return apierror.WithCode(status, constants.CodeInvalidUsername)
+	if len(usernameToValidate) < r.minLen {
+		return apierror.WithCode(status, constants.CodeUsernameTooShort)
+	}
+	if len(usernameToValidate) > r.maxLen {
+		return apierror.WithCode(status, constants.CodeUsernameTooLong)
 	}
 	ok, err := r.validator(c.R.Context(), usernameToValidate)
 	if err != nil {
@@ -206,14 +209,18 @@ func (r usernameOptionsResolved) validateDisplayUsername(c *auth.Context, displa
 		return apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError)
 	}
 	if !ok {
-		return apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidUsername)
+		return apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidDisplayUsername)
 	}
 	return nil
 }
 
 func writeUsernameValidation(c *auth.Context, opts usernameOptionsResolved, username string, status int) bool {
-	if len(username) < opts.minLen || len(username) > opts.maxLen {
-		c.WriteError(apierror.WithCode(status, constants.CodeInvalidUsername))
+	if len(username) < opts.minLen {
+		c.WriteError(apierror.WithCode(status, constants.CodeUsernameTooShort))
+		return false
+	}
+	if len(username) > opts.maxLen {
+		c.WriteError(apierror.WithCode(status, constants.CodeUsernameTooLong))
 		return false
 	}
 	ok, err := opts.validator(c.R.Context(), username)
