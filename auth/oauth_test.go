@@ -225,6 +225,29 @@ func TestOAuthPostCallbackRedirectsToGet(t *testing.T) {
 	}
 }
 
+func TestOAuthPostCallbackQueryOverridesBody(t *testing.T) {
+	p := &staticOAuthProvider{
+		id:   "mock",
+		user: provider.OAuthUser{ID: "mock-user-post-query", Email: "oauth-post-query@example.com", EmailVerified: true, Name: "OAuth Post Query"},
+	}
+	a := oauthTestAuth(t, p)
+
+	resp, _ := doFormRequest(a, http.MethodPost, "/callback/mock?code=query-code&state=query-state", url.Values{
+		"code":  {"body-code"},
+		"state": {"body-state"},
+	}, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Query().Get("code") != "query-code" || location.Query().Get("state") != "query-state" {
+		t.Fatalf("location = %s", location.String())
+	}
+}
+
 func TestGoogleProviderWiring(t *testing.T) {
 	a := newTestAuth(func(c *auth.Config) {
 		c.Google = auth.GoogleProviderConfig{ClientID: "gid", ClientSecret: "gsecret"}

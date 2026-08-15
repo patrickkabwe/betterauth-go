@@ -256,11 +256,6 @@ func handleOAuthLinkCallback(c *Context, stateData *oauthStatePayload, userInfo 
 
 func redirectOAuthPostCallback(c *Context, providerID string) {
 	params := url.Values{}
-	for key, values := range c.R.URL.Query() {
-		for _, value := range values {
-			params.Add(key, value)
-		}
-	}
 	var body map[string]any
 	if err := c.ParseJSON(&body); err == nil {
 		for key, value := range body {
@@ -272,6 +267,11 @@ func redirectOAuthPostCallback(c *Context, providerID string) {
 				continue
 			}
 			params.Set(key, stringFromOAuthCallbackValue(value))
+		}
+	}
+	for key, values := range c.R.URL.Query() {
+		for _, value := range values {
+			params.Set(key, value)
 		}
 	}
 	target := c.Auth.cfg.baseURL + c.Auth.cfg.basePath + "/callback/" + providerID
