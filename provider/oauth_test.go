@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,98 @@ func TestRefreshAccessTokenOmitsEmptyClientSecret(t *testing.T) {
 	}
 	if _, ok := formValues["client_secret"]; ok {
 		t.Fatalf("form=%v", formValues)
+	}
+}
+
+func TestRefreshAccessTokenWithOptionsAddsExtraParams(t *testing.T) {
+	var formValues url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access"}`))
+	}))
+	defer server.Close()
+
+	tokens, err := RefreshAccessTokenWithOptions(context.Background(), RefreshAccessTokenOpts{
+		TokenURL:       server.URL,
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		RefreshToken:   "refresh-token",
+		Authentication: OAuthClientAuthenticationPost,
+		ExtraParams: map[string]string{
+			"audience": "api",
+			"scope":    "email profile",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens.AccessToken != "new-access" {
+		t.Fatalf("tokens=%+v", tokens)
+	}
+	if formValues.Get("grant_type") != "refresh_token" || formValues.Get("refresh_token") != "refresh-token" || formValues.Get("client_id") != "client" || formValues.Get("client_secret") != "secret" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if formValues.Get("audience") != "api" || formValues.Get("scope") != "email profile" {
+		t.Fatalf("form=%v", formValues)
+	}
+}
+
+func TestRefreshAccessTokenWithOptionsUsesBasicAuth(t *testing.T) {
+	var formValues url.Values
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		formValues = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access"}`))
+	}))
+	defer server.Close()
+
+	_, err := RefreshAccessTokenWithOptions(context.Background(), RefreshAccessTokenOpts{
+		TokenURL:       server.URL,
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		RefreshToken:   "refresh-token",
+		Authentication: OAuthClientAuthenticationBasic,
+		ExtraParams: map[string]string{
+			"resource": "https://api.example.com",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedAuthorization := "Basic " + base64.StdEncoding.EncodeToString([]byte("client:secret"))
+	if authorization != expectedAuthorization {
+		t.Fatalf("authorization=%q", authorization)
+	}
+	if formValues.Get("grant_type") != "refresh_token" || formValues.Get("refresh_token") != "refresh-token" || formValues.Get("resource") != "https://api.example.com" {
+		t.Fatalf("form=%v", formValues)
+	}
+	if _, ok := formValues["client_id"]; ok {
+		t.Fatalf("form=%v", formValues)
+	}
+	if _, ok := formValues["client_secret"]; ok {
+		t.Fatalf("form=%v", formValues)
+	}
+}
+
+func TestRefreshAccessTokenWithOptionsRejectsUnknownAuthentication(t *testing.T) {
+	_, err := RefreshAccessTokenWithOptions(context.Background(), RefreshAccessTokenOpts{
+		TokenURL:       "https://auth.example.com/token",
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		RefreshToken:   "refresh-token",
+		Authentication: OAuthClientAuthentication("custom"),
+	})
+	if err == nil {
+		t.Fatal("expected authentication error")
 	}
 }
 

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +34,24 @@ type CodeExchangeOpts struct {
 	RedirectURI  string
 	CodeVerifier string
 	ExtraParams  map[string]string
+}
+
+// OAuthClientAuthentication controls how client credentials are sent.
+type OAuthClientAuthentication string
+
+const (
+	OAuthClientAuthenticationPost  OAuthClientAuthentication = "post"
+	OAuthClientAuthenticationBasic OAuthClientAuthentication = "basic"
+)
+
+// RefreshAccessTokenOpts configures a refresh_token grant request.
+type RefreshAccessTokenOpts struct {
+	TokenURL       string
+	ClientID       string
+	ClientSecret   string
+	RefreshToken   string
+	Authentication OAuthClientAuthentication
+	ExtraParams    map[string]string
 }
 
 // ExchangeAuthorizationCode performs a standard OAuth2 code exchange.
@@ -208,20 +227,65 @@ func BuildAuthURL(endpoint string, params url.Values) string {
 
 // RefreshAccessToken performs a refresh_token grant.
 func RefreshAccessToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (*OAuthTokens, error) {
-	params := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-		"client_id":     clientID,
-	}
-	if clientSecret != "" {
-		params["client_secret"] = clientSecret
-	}
-	data, err := ExchangeAuthorizationCode(ctx, CodeExchangeOpts{
-		TokenURL:    tokenURL,
-		ExtraParams: params,
+	return RefreshAccessTokenWithOptions(ctx, RefreshAccessTokenOpts{
+		TokenURL:       tokenURL,
+		ClientID:       clientID,
+		ClientSecret:   clientSecret,
+		RefreshToken:   refreshToken,
+		Authentication: OAuthClientAuthenticationPost,
 	})
+}
+
+// RefreshAccessTokenWithOptions performs a refresh_token grant with explicit request options.
+func RefreshAccessTokenWithOptions(ctx context.Context, opts RefreshAccessTokenOpts) (*OAuthTokens, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", opts.RefreshToken)
+	headers := http.Header{}
+	headers.Set("Content-Type", "application/x-www-form-urlencoded")
+	headers.Set("Accept", "application/json")
+	switch opts.Authentication {
+	case OAuthClientAuthenticationPost:
+		form.Set("client_id", opts.ClientID)
+		if opts.ClientSecret != "" {
+			form.Set("client_secret", opts.ClientSecret)
+		}
+	case OAuthClientAuthenticationBasic:
+		credentials := opts.ClientID + ":" + opts.ClientSecret
+		headers.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(credentials)))
+	default:
+		return nil, fmt.Errorf("unsupported oauth client authentication %q for token endpoint %q", opts.Authentication, opts.TokenURL)
+	}
+	for key, value := range opts.ExtraParams {
+		form.Set(key, value)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
+	}
+	req.Header = headers
+	resp, err := noRedirectHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if isRedirectStatus(resp.StatusCode) {
+		return nil, fmt.Errorf("oauth endpoint %q returned an HTTP redirect; configure the final endpoint URL", opts.TokenURL)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("refresh token failed for endpoint %q with status %d: %s", opts.TokenURL, resp.StatusCode, string(body))
+	}
+	var data map[string]any
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, err
+	}
+	if errCode, ok := data["error"].(string); ok && errCode != "" {
+		return nil, fmt.Errorf("oauth refresh error for endpoint %q: %s", opts.TokenURL, errCode)
 	}
 	return TokensFromMap(data), nil
 }
