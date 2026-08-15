@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	constants "github.com/patrickkabwe/betterauth-go/constants"
 	"time"
 
@@ -76,8 +77,11 @@ func (a *Auth) generateOAuthState(c *Context, input oauthStateInput) (state stri
 
 func (a *Auth) parseOAuthState(c *Context, state string) (*oauthStatePayload, error) {
 	v, err := a.cfg.store.FindVerificationByIdentifier(c.R.Context(), constants.VerificationOAuthState+state)
-	if err != nil || time.Now().After(v.ExpiresAt) {
+	if err != nil {
 		return nil, err
+	}
+	if time.Now().After(v.ExpiresAt) {
+		return nil, errors.New("oauth state expired")
 	}
 	var payload oauthStatePayload
 	if err := json.Unmarshal([]byte(v.Value), &payload); err != nil {

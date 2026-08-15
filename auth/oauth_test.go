@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/patrickkabwe/betterauth-go/auth"
+	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/provider"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
@@ -185,6 +186,51 @@ func TestOAuthCallbackProviderErrorUsesStateErrorCallbackURL(t *testing.T) {
 	}
 	location := resp.Header.Get("Location")
 	if !strings.HasPrefix(location, "http://localhost:3000/oauth-error") || !strings.Contains(location, "error=access_denied") || !strings.Contains(location, "error_description=User+denied+access") {
+		t.Fatalf("redirect=%s", location)
+	}
+}
+
+func TestOAuthCallbackExpiredStateRedirectsToMismatch(t *testing.T) {
+	p := &staticOAuthProvider{
+		id: "mock",
+		user: provider.OAuthUser{
+			ID: "mock-expired", Email: "oauth-expired@example.com", EmailVerified: true, Name: "OAuth Expired",
+		},
+	}
+	a := oauthTestAuth(t, p)
+
+	disable := true
+	_, data := doRequest(a, http.MethodPost, "/sign-in/social", map[string]any{
+		"provider":        "mock",
+		"callbackURL":     "http://localhost:3000/done",
+		"disableRedirect": disable,
+	}, nil)
+	var signIn types.SocialSignInResponse
+	_ = json.Unmarshal(data, &signIn)
+	parsed, err := url.Parse(signIn.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := parsed.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in auth url")
+	}
+
+	verification, err := a.Store().FindVerificationByIdentifier(context.Background(), constants.VerificationOAuthState+state)
+	if err != nil {
+		t.Fatalf("find state: %v", err)
+	}
+	verification.ExpiresAt = time.Now().Add(-time.Minute)
+	if err := a.Store().CreateVerification(context.Background(), verification); err != nil {
+		t.Fatalf("expire state: %v", err)
+	}
+
+	resp, _ := doRequest(a, http.MethodGet, "/callback/mock?code=abc&state="+url.QueryEscape(state), nil, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status=%d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.Contains(location, "error=state_mismatch") {
 		t.Fatalf("redirect=%s", location)
 	}
 }
