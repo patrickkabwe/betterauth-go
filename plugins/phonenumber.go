@@ -31,7 +31,7 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodPost, "/phone-number/send-otp", func(c *auth.Context) {
 				if opts.SendOTP == nil {
-					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodePhoneOTPDisabled))
+					c.WriteError(apierror.New(http.StatusNotImplemented, "SEND_OTP_NOT_IMPLEMENTED", "sendOTP not implemented"))
 					return
 				}
 				var body struct {
@@ -41,11 +41,21 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
 					return
 				}
-				otp, _ := id.Generate(6)
+				otp, err := id.Generate(6)
+				if err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
 				otp = otp[:6]
-				_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp, expires)
-				_ = opts.SendOTP(c.R.Context(), body.PhoneNumber, otp)
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp, expires); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				if err := opts.SendOTP(c.R.Context(), body.PhoneNumber, otp); err != nil {
+					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+					return
+				}
+				c.WriteJSON(http.StatusOK, map[string]string{"message": "code sent"})
 			}),
 			rt(http.MethodPost, "/phone-number/verify", func(c *auth.Context) {
 				var body struct {

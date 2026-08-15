@@ -3,6 +3,7 @@ package plugins_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,6 +113,67 @@ func TestUsernameSignInRejectsInvalidUsernameShape(t *testing.T) {
 	a := newTestAuth(t, plugins.Username(plugins.UsernameOptions{}))
 	w := post(t, a, "/sign-in/username", `{"username":"bad-user","password":"password123"}`)
 	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPhoneNumberSendOTPRequiresSender(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "SEND_OTP_NOT_IMPLEMENTED" {
+		t.Fatalf("code %q", resp.Code)
+	}
+}
+
+func TestPhoneNumberSendOTPResponseMatchesUpstream(t *testing.T) {
+	var sent bool
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, phone string, otp string) error {
+			if phone != "+1234567890" {
+				t.Fatalf("phone %q", phone)
+			}
+			if len(otp) != 6 {
+				t.Fatalf("otp length %d", len(otp))
+			}
+			sent = true
+			return nil
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Message != "code sent" {
+		t.Fatalf("message %q", resp.Message)
+	}
+	if !sent {
+		t.Fatal("expected otp sender to be called")
+	}
+}
+
+func TestPhoneNumberSendOTPReturnsProviderError(t *testing.T) {
+	a := newTestAuth(t, plugins.PhoneNumber(plugins.PhoneNumberOptions{
+		SendOTP: func(_ context.Context, _ string, _ string) error {
+			return errors.New("provider failed")
+		},
+	}))
+	w := post(t, a, "/phone-number/send-otp", `{"phoneNumber":"+1234567890"}`)
+	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
 }
