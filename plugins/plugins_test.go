@@ -146,6 +146,9 @@ func TestPhoneNumberSendOTPResponseMatchesUpstream(t *testing.T) {
 			if len(otp) != 6 {
 				t.Fatalf("otp length %d", len(otp))
 			}
+			if !isDigitString(otp) {
+				t.Fatalf("otp should be numeric: %q", otp)
+			}
 			sent = true
 			return nil
 		},
@@ -393,6 +396,9 @@ func TestPhoneNumberRequestPasswordResetSendsOTPForExistingUser(t *testing.T) {
 	if len(sentCode) != 6 {
 		t.Fatalf("sent code length %d", len(sentCode))
 	}
+	if !isDigitString(sentCode) {
+		t.Fatalf("sent code should be numeric: %q", sentCode)
+	}
 }
 
 func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) {
@@ -425,6 +431,9 @@ func TestPhoneNumberRequestPasswordResetDoesNotSendForUnknownUser(t *testing.T) 
 	}
 	if len(verification.Value) != 6 {
 		t.Fatalf("verification code length %d", len(verification.Value))
+	}
+	if !isDigitString(verification.Value) {
+		t.Fatalf("verification code should be numeric: %q", verification.Value)
 	}
 }
 
@@ -608,4 +617,16 @@ func createPhoneCredentialUser(t *testing.T, a *auth.Auth, userID string, phoneN
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func isDigitString(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }

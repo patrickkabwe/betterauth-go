@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
-	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
 
@@ -57,12 +57,11 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
 					return
 				}
-				otp, err := id.Generate(6)
+				otp, err := numericOTP(6)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
-				otp = otp[:6]
 				if err := c.Auth.CreateVerification(c.R.Context(), constants.VerificationPhoneOTP+body.PhoneNumber, otp, expires); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
@@ -203,12 +202,11 @@ func PhoneNumber(opts PhoneNumberOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidPhone))
 					return
 				}
-				otp, err := id.Generate(6)
+				otp, err := numericOTP(6)
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 					return
 				}
-				otp = otp[:6]
 				identifier := body.PhoneNumber + "-request-password-reset"
 				if err := c.Auth.CreateVerification(c.R.Context(), identifier, otp, expires); err != nil {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -409,4 +407,24 @@ func notifyPhoneVerification(c *auth.Context, callback func(context.Context, str
 		return false
 	}
 	return true
+}
+
+func numericOTP(length int) (string, error) {
+	digits := make([]byte, 0, length)
+	buf := make([]byte, length)
+	for len(digits) < length {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, value := range buf {
+			if value >= 250 {
+				continue
+			}
+			digits = append(digits, '0'+value%10)
+			if len(digits) == length {
+				break
+			}
+		}
+	}
+	return string(digits), nil
 }
