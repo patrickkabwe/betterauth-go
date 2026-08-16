@@ -24,6 +24,8 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,6 +35,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify release token
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "Repository secret GH_TOKEN is required so releases are published by the configured user token instead of github-actions[bot]." >&2
+            exit 1
+          fi
 
       - name: Resolve version
         id: version
@@ -86,7 +95,6 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           REPOSITORY: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           PREV_TAG="$(git tag -l 'v*' --sort=-version:refname | grep -Fxv "$TAG" | head -1 || true)"
 
@@ -257,7 +265,6 @@ jobs:
 
       - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           gh release create "$TAG" \
