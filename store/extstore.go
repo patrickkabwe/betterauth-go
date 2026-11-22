@@ -129,7 +129,6 @@ type SSOProviderUpdate struct {
 	OIDCConfig     *string
 	SAMLConfig     *string
 	DomainVerified *bool
-	UpdatedAt      *time.Time
 }
 
 // PasskeyUpdate describes mutable passkey fields.

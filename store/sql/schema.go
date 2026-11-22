@@ -313,9 +313,7 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
 				` + d.quoteIdent("oidcConfig") + ` TEXT,
 				` + d.quoteIdent("samlConfig") + ` TEXT,
-				` + d.quoteIdent("domainVerified") + ` INTEGER NOT NULL DEFAULT 0,
-				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
-				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL
+				` + d.quoteIdent("domainVerified") + ` INTEGER NOT NULL DEFAULT 0
 			)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_providerId_idx ON ` + d.quoteIdent("ssoProvider") + ` (` + d.quoteIdent("providerId") + `)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS ssoProvider_domain_idx ON ` + d.quoteIdent("ssoProvider") + ` (domain)`,

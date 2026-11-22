@@ -1047,16 +1047,15 @@ func (s *Store) scanAPIKey(row interface{ Scan(...any) error }) (*types.APIKey, 
 
 var ssoProviderColNames = []string{
 	"id", "providerId", "issuer", "domain", "organizationId", "userId",
-	"oidcConfig", "samlConfig", "domainVerified", "createdAt", "updatedAt",
+	"oidcConfig", "samlConfig", "domainVerified",
 }
 
 func (s *Store) CreateSSOProvider(ctx context.Context, provider *types.SSOProvider) error {
 	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO `+s.table("ssoProvider")+` (`+s.cols(ssoProviderColNames...)+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		provider.ID, provider.ProviderID, provider.Issuer, provider.Domain, nullStr(provider.OrganizationID), provider.UserID,
-		nullStr(provider.OIDCConfig), nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified),
-		toMillis(provider.CreatedAt), toMillis(provider.UpdatedAt))
+		nullStr(provider.OIDCConfig), nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified))
 	return err
 }
 
@@ -1108,17 +1107,12 @@ func (s *Store) UpdateSSOProvider(ctx context.Context, providerID string, update
 	if update.DomainVerified != nil {
 		provider.DomainVerified = *update.DomainVerified
 	}
-	if update.UpdatedAt != nil {
-		provider.UpdatedAt = *update.UpdatedAt
-	} else {
-		provider.UpdatedAt = time.Now().UTC()
-	}
 	_, err = s.db.ExecContext(ctx, s.q(`
 		UPDATE `+s.table("ssoProvider")+` SET issuer = ?, domain = ?, `+s.table("organizationId")+` = ?,
-		`+s.table("oidcConfig")+` = ?, `+s.table("samlConfig")+` = ?, `+s.table("domainVerified")+` = ?,
-		`+s.table("updatedAt")+` = ? WHERE `+s.table("providerId")+` = ?`),
+		`+s.table("oidcConfig")+` = ?, `+s.table("samlConfig")+` = ?, `+s.table("domainVerified")+` = ?
+		WHERE `+s.table("providerId")+` = ?`),
 		provider.Issuer, provider.Domain, nullStr(provider.OrganizationID), nullStr(provider.OIDCConfig),
-		nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified), toMillis(provider.UpdatedAt), providerID)
+		nullStr(provider.SAMLConfig), boolToInt(provider.DomainVerified), providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1143,12 +1137,10 @@ func (s *Store) scanSSOProvider(row interface{ Scan(...any) error }) (*types.SSO
 		oidcConfig     sql.NullString
 		samlConfig     sql.NullString
 		domainVerified int
-		createdAt      int64
-		updatedAt      int64
 	)
 	err := row.Scan(
 		&provider.ID, &provider.ProviderID, &provider.Issuer, &provider.Domain, &organizationID, &provider.UserID,
-		&oidcConfig, &samlConfig, &domainVerified, &createdAt, &updatedAt,
+		&oidcConfig, &samlConfig, &domainVerified,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1160,8 +1152,6 @@ func (s *Store) scanSSOProvider(row interface{ Scan(...any) error }) (*types.SSO
 	provider.OIDCConfig = oidcConfig.String
 	provider.SAMLConfig = samlConfig.String
 	provider.DomainVerified = domainVerified != 0
-	provider.CreatedAt = fromMillis(createdAt)
-	provider.UpdatedAt = fromMillis(updatedAt)
 	return &provider, nil
 }
 

@@ -473,6 +473,13 @@ func TestSchemaScoping(t *testing.T) {
 		}
 	}
 
+	ssoTable := tableStatement(t, Schema("sso"), `"ssoProvider"`)
+	for _, unexpected := range []string{`"createdAt"`, `"updatedAt"`} {
+		if contains(ssoTable, unexpected) {
+			t.Fatalf("ssoProvider schema should not contain non-JS field %q", unexpected)
+		}
+	}
+
 	// oidc-provider and mcp share the oauth app table; it must appear once.
 	shared := joinSchema(Schema("oidc-provider", "mcp"))
 	if n := countSubstr(shared, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
