@@ -904,19 +904,14 @@ func (s *Store) UpdatePasskey(_ context.Context, id string, update store.Passkey
 	if update.Name != nil {
 		passkey.Name = *update.Name
 	}
-	if update.CredentialJSON != nil {
-		passkey.CredentialJSON = *update.CredentialJSON
+	if update.Counter != nil {
+		passkey.Counter = *update.Counter
 	}
 	if update.Transports != nil {
 		passkey.Transports = *update.Transports
 	}
 	if update.BackedUp != nil {
 		passkey.BackedUp = *update.BackedUp
-	}
-	if update.UpdatedAt != nil {
-		passkey.UpdatedAt = *update.UpdatedAt
-	} else {
-		passkey.UpdatedAt = time.Now().UTC()
 	}
 	cp := *passkey
 	return &cp, nil

@@ -53,7 +53,7 @@ func TestPasskeyListUpdateDelete(t *testing.T) {
 	now := time.Now().UTC()
 	passkey := &types.Passkey{
 		ID: "pk_test", UserID: user.ID, Name: "Laptop", CredentialID: "cred_test",
-		CredentialJSON: "{}", CreatedAt: now, UpdatedAt: now,
+		PublicKey: "cHVi", Counter: 0, DeviceType: "singleDevice", CreatedAt: now,
 	}
 	if err := ext.CreatePasskey(context.Background(), passkey); err != nil {
 		t.Fatal(err)

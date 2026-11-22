@@ -324,14 +324,16 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 		pluginPasskey: {
 			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("passkey") + ` (
 				id TEXT PRIMARY KEY,
-				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
 				name TEXT,
+				` + d.quoteIdent("publicKey") + ` TEXT NOT NULL,
+				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
 				` + d.quoteIdent("credentialID") + ` TEXT NOT NULL,
-				` + d.quoteIdent("credentialJSON") + ` TEXT NOT NULL,
-				transports TEXT,
+				counter INTEGER NOT NULL DEFAULT 0,
+				` + d.quoteIdent("deviceType") + ` TEXT NOT NULL DEFAULT '',
 				` + d.quoteIdent("backedUp") + ` INTEGER NOT NULL DEFAULT 0,
+				transports TEXT,
 				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
-				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL
+				aaguid TEXT
 			)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS passkey_credentialID_idx ON ` + d.quoteIdent("passkey") + ` (` + d.quoteIdent("credentialID") + `)`,
 			`CREATE INDEX IF NOT EXISTS passkey_userId_idx ON ` + d.quoteIdent("passkey") + ` (` + d.quoteIdent("userId") + `)`,

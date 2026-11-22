@@ -181,13 +181,10 @@ func Passkey(opts PasskeyOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
 					return
 				}
-				rawCredential, _ := json.Marshal(credential)
-				rawCredentialString := string(rawCredential)
-				now := time.Now().UTC()
+				newCounter := credential.Authenticator.SignCount
 				_, _ = ext.UpdatePasskey(c.R.Context(), passkey.ID, store.PasskeyUpdate{
-					CredentialJSON: &rawCredentialString,
-					BackedUp:       &credential.Flags.BackupState,
-					UpdatedAt:      &now,
+					Counter:  &newCounter,
+					BackedUp: &credential.Flags.BackupState,
 				})
 				user, err := c.Auth.Store().FindUserByID(c.R.Context(), resolvedUserID)
 				if err != nil {
@@ -237,8 +234,7 @@ func Passkey(opts PasskeyOptions) auth.Plugin {
 				if !userOwnsPasskey(c, ext, user.ID, body.ID) {
 					return
 				}
-				now := time.Now().UTC()
-				passkey, err := ext.UpdatePasskey(c.R.Context(), body.ID, store.PasskeyUpdate{Name: &body.Name, UpdatedAt: &now})
+				passkey, err := ext.UpdatePasskey(c.R.Context(), body.ID, store.PasskeyUpdate{Name: &body.Name})
 				if err != nil {
 					c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeInvalidRequest))
 					return
@@ -328,13 +324,54 @@ func passkeyUserFor(c *auth.Context, user *types.User) (store.ExtStore, passkeyU
 func passkeyUserFromRecords(user *types.User, records []types.Passkey) (passkeyUser, error) {
 	credentials := make([]gowebauthn.Credential, 0, len(records))
 	for _, record := range records {
-		var credential gowebauthn.Credential
-		if err := json.Unmarshal([]byte(record.CredentialJSON), &credential); err != nil {
+		credential, err := credentialFromPasskey(record)
+		if err != nil {
 			return passkeyUser{}, err
 		}
 		credentials = append(credentials, credential)
 	}
 	return passkeyUser{user: user, credentials: credentials}, nil
+}
+
+// credentialFromPasskey rebuilds the go-webauthn credential from the Better
+// Auth passkey columns (publicKey, counter, deviceType, backedUp, transports,
+// aaguid). Login validation needs the public key, sign counter and backup flag;
+// the attestation/user-presence flags are not persisted, matching how Better
+// Auth reconstructs credentials from the same stored fields.
+func credentialFromPasskey(record types.Passkey) (gowebauthn.Credential, error) {
+	credID, err := base64.RawURLEncoding.DecodeString(record.CredentialID)
+	if err != nil {
+		return gowebauthn.Credential{}, err
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(record.PublicKey)
+	if err != nil {
+		return gowebauthn.Credential{}, err
+	}
+	var aaguid []byte
+	if record.AAGUID != "" {
+		if aaguid, err = base64.RawURLEncoding.DecodeString(record.AAGUID); err != nil {
+			return gowebauthn.Credential{}, err
+		}
+	}
+	transports := make([]protocol.AuthenticatorTransport, 0)
+	if record.Transports != "" {
+		for _, t := range strings.Split(record.Transports, ",") {
+			transports = append(transports, protocol.AuthenticatorTransport(t))
+		}
+	}
+	return gowebauthn.Credential{
+		ID:        credID,
+		PublicKey: publicKey,
+		Transport: transports,
+		Flags: gowebauthn.CredentialFlags{
+			BackupEligible: record.DeviceType == "multiDevice",
+			BackupState:    record.BackedUp,
+		},
+		Authenticator: gowebauthn.Authenticator{
+			AAGUID:    aaguid,
+			SignCount: record.Counter,
+		},
+	}, nil
 }
 
 func storePasskeyChallenge(c *auth.Context, opts PasskeyOptions, typ string, session *gowebauthn.SessionData) bool {
@@ -413,10 +450,6 @@ func passkeyRegistrationOptions(c *auth.Context, opts PasskeyOptions) []gowebaut
 }
 
 func passkeyRecordFromCredential(userID string, name string, credential *gowebauthn.Credential) (*types.Passkey, error) {
-	raw, err := json.Marshal(credential)
-	if err != nil {
-		return nil, err
-	}
 	recordID, err := id.Generate(32)
 	if err != nil {
 		return nil, err
@@ -425,15 +458,22 @@ func passkeyRecordFromCredential(userID string, name string, credential *gowebau
 	for _, transport := range credential.Transport {
 		transports = append(transports, string(transport))
 	}
-	now := time.Now().UTC()
+	// Better Auth records deviceType as singleDevice / multiDevice, derived from
+	// the authenticator's backup eligibility flag.
+	deviceType := "singleDevice"
+	if credential.Flags.BackupEligible {
+		deviceType = "multiDevice"
+	}
 	return &types.Passkey{
 		ID: recordID, UserID: userID, Name: name,
-		CredentialID:   base64.RawURLEncoding.EncodeToString(credential.ID),
-		CredentialJSON: string(raw),
-		Transports:     strings.Join(transports, ","),
-		BackedUp:       credential.Flags.BackupState,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		PublicKey:    base64.RawURLEncoding.EncodeToString(credential.PublicKey),
+		CredentialID: base64.RawURLEncoding.EncodeToString(credential.ID),
+		Counter:      credential.Authenticator.SignCount,
+		DeviceType:   deviceType,
+		BackedUp:     credential.Flags.BackupState,
+		Transports:   strings.Join(transports, ","),
+		AAGUID:       base64.RawURLEncoding.EncodeToString(credential.Authenticator.AAGUID),
+		CreatedAt:    time.Now().UTC(),
 	}, nil
 }
 
