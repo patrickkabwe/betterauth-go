@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -103,6 +104,10 @@ func issueOAuthGrant(c *auth.Context, ext store.ExtStore, clientID, userID, sess
 // OIDCProviderOptions configures acting as an OIDC identity provider.
 type OIDCProviderOptions struct {
 	LoginPage string
+	// ConsentPage, when set, is where /oauth2/authorize redirects the user to
+	// collect consent. When empty, authorize responds with JSON
+	// {"consentRequired": true, ...} so a front end can render its own screen.
+	ConsentPage string
 }
 
 // OIDCProvider exposes OIDC provider endpoints.
@@ -113,6 +118,10 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 			rt(http.MethodGet, "/.well-known/openid-configuration", oidcMetadataHandler()),
 			rt(http.MethodGet, "/oauth2/authorize", oidcAuthorizeHandler(opts)),
 			rt(http.MethodPost, "/oauth2/consent", oidcConsentHandler()),
+			rt(http.MethodGet, "/oauth2/get-consent", oidcGetConsentHandler()),
+			rt(http.MethodGet, "/oauth2/get-consents", oidcGetConsentsHandler()),
+			rt(http.MethodPost, "/oauth2/update-consent", oidcUpdateConsentHandler()),
+			rt(http.MethodPost, "/oauth2/delete-consent", oidcDeleteConsentHandler()),
 			rt(http.MethodPost, "/oauth2/token", oidcTokenHandler()),
 			rt(http.MethodGet, "/oauth2/userinfo", oidcUserInfoHandler()),
 			rt(http.MethodPost, "/oauth2/register", oidcRegisterHandler()),
@@ -140,6 +149,35 @@ func oidcMetadataHandler() func(*auth.Context) {
 	}
 }
 
+// issueAuthCode stores the authorization-code grant data in a verification and
+// returns the opaque code. Used by authorize (consent satisfied) and by the
+// consent endpoint after the user accepts.
+func issueAuthCode(c *auth.Context, userID, clientID, sessionID, scope string) string {
+	code, _ := id.Generate(32)
+	data, _ := json.Marshal(oidcCodeData{UserID: userID, ClientID: clientID, SessionID: sessionID, Scope: scope})
+	_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOIDCCode+code, string(data), 10*time.Minute)
+	return code
+}
+
+// consentSatisfied reports whether the client may skip the consent screen for
+// the requested scopes — either the client is marked skipConsent, or a stored
+// consent already covers every requested scope.
+func consentSatisfied(c *auth.Context, ext store.ExtStore, client *types.OAuthClient, userID string, scopes []string) bool {
+	if client.SkipConsent != nil && *client.SkipConsent {
+		return true
+	}
+	consent, err := ext.FindOAuthConsent(c.R.Context(), client.ClientID, userID)
+	if err != nil {
+		return false
+	}
+	for _, s := range scopes {
+		if !hasScope(consent.Scopes, s) {
+			return false
+		}
+	}
+	return true
+}
+
 func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		sess, user, err := c.GetSession()
@@ -151,22 +189,187 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			c.Redirect(login)
 			return
 		}
-		code, _ := id.Generate(32)
-		data, _ := json.Marshal(oidcCodeData{
-			UserID:    user.ID,
-			ClientID:  c.R.URL.Query().Get("client_id"),
-			SessionID: sess.ID,
-			Scope:     c.R.URL.Query().Get("scope"),
-		})
-		_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOIDCCode+code, string(data), 10*time.Minute)
-		redirectURI := c.R.URL.Query().Get("redirect_uri")
-		state := c.R.URL.Query().Get("state")
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		q := c.R.URL.Query()
+		clientID := q.Get("client_id")
+		scope := q.Get("scope")
+		redirectURI := q.Get("redirect_uri")
+		state := q.Get("state")
+		client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeClientNotFound))
+			return
+		}
+		if !consentSatisfied(c, ext, client, user.ID, scopeList(scope)) {
+			// Consent required: hand off to the consent page, or tell the caller.
+			if opts.ConsentPage != "" {
+				c.Redirect(opts.ConsentPage + "?client_id=" + url.QueryEscape(clientID) + "&scope=" + url.QueryEscape(scope) + "&redirect_uri=" + url.QueryEscape(redirectURI) + "&state=" + url.QueryEscape(state))
+				return
+			}
+			c.WriteJSON(http.StatusOK, map[string]any{
+				"consentRequired": true,
+				"clientId":        clientID,
+				"scope":           scope,
+				"redirectUri":     redirectURI,
+				"state":           state,
+			})
+			return
+		}
+		code := issueAuthCode(c, user.ID, clientID, sess.ID, scope)
 		c.Redirect(redirectURI + "?code=" + code + "&state=" + state)
 	}
 }
 
+// oidcConsentHandler records a user's consent decision for a client. On accept
+// it upserts the oauthConsent row and returns the redirect URL carrying a fresh
+// authorization code; on deny it returns a redirect carrying access_denied.
 func oidcConsentHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		sess, user, err := c.GetSession()
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+			return
+		}
+		var body struct {
+			ClientID    string `json:"client_id"`
+			Scope       string `json:"scope"`
+			Accept      bool   `json:"accept"`
+			RedirectURI string `json:"redirect_uri"`
+			State       string `json:"state"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
+			return
+		}
+		if !body.Accept {
+			c.WriteJSON(http.StatusOK, map[string]any{
+				"redirect": body.RedirectURI + "?error=access_denied&state=" + url.QueryEscape(body.State),
+			})
+			return
+		}
+		scopes := scopeList(body.Scope)
+		now := time.Now().UTC()
+		if existing, err := ext.FindOAuthConsent(c.R.Context(), body.ClientID, user.ID); err == nil {
+			_ = ext.UpdateOAuthConsent(c.R.Context(), existing.ID, scopes, existing.Resources, existing.RequestedUserInfoClaims)
+		} else {
+			consentID, _ := id.Generate(32)
+			_ = ext.CreateOAuthConsent(c.R.Context(), &types.OAuthConsent{
+				ID: consentID, ClientID: body.ClientID, UserID: user.ID, Scopes: scopes, CreatedAt: now, UpdatedAt: now,
+			})
+		}
+		code := issueAuthCode(c, user.ID, body.ClientID, sess.ID, body.Scope)
+		c.WriteJSON(http.StatusOK, map[string]any{
+			"redirect": body.RedirectURI + "?code=" + code + "&state=" + url.QueryEscape(body.State),
+		})
+	}
+}
+
+func oidcGetConsentsHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		_, user, err := c.GetSession()
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+			return
+		}
+		consents, err := ext.ListOAuthConsentsByUser(c.R.Context(), user.ID)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, consents)
+	}
+}
+
+func oidcGetConsentHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		_, user, err := c.GetSession()
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+			return
+		}
+		consent, err := ext.FindOAuthConsentByID(c.R.Context(), c.R.URL.Query().Get("id"))
+		if err != nil || consent.UserID != user.ID {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		c.WriteJSON(http.StatusOK, consent)
+	}
+}
+
+func oidcUpdateConsentHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		_, user, err := c.GetSession()
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+			return
+		}
+		var body struct {
+			ID     string `json:"id"`
+			Update struct {
+				Scopes []string `json:"scopes"`
+			} `json:"update"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.ID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
+			return
+		}
+		consent, err := ext.FindOAuthConsentByID(c.R.Context(), body.ID)
+		if err != nil || consent.UserID != user.ID {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		if err := ext.UpdateOAuthConsent(c.R.Context(), body.ID, body.Update.Scopes, consent.Resources, consent.RequestedUserInfoClaims); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		updated, _ := ext.FindOAuthConsentByID(c.R.Context(), body.ID)
+		c.WriteJSON(http.StatusOK, updated)
+	}
+}
+
+func oidcDeleteConsentHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		_, user, err := c.GetSession()
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.ID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
+			return
+		}
+		consent, err := ext.FindOAuthConsentByID(c.R.Context(), body.ID)
+		if err != nil || consent.UserID != user.ID {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		_ = ext.DeleteOAuthConsent(c.R.Context(), body.ID)
 		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }
