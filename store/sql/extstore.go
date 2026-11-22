@@ -1188,6 +1188,43 @@ func (s *Store) DeleteOAuthConsent(ctx context.Context, id string) error {
 }
 
 // =========================================================================
+// OAuth client assertions (oauth-provider, RFC 7523 private_key_jwt replay)
+// =========================================================================
+
+func (s *Store) CreateOAuthClientAssertion(ctx context.Context, a *types.OAuthClientAssertion) error {
+	_, err := s.db.ExecContext(ctx,
+		s.q(`INSERT INTO `+s.table("oauthClientAssertion")+` (id, `+s.table("expiresAt")+`) VALUES (?, ?)`),
+		a.ID, toMillis(a.ExpiresAt))
+	if err != nil {
+		// The id is the primary key, so a duplicate means the jti was already
+		// consumed (replay). Confirm with a lookup and translate; surface any
+		// other insert error unchanged.
+		if existing, findErr := s.FindOAuthClientAssertion(ctx, a.ID); findErr == nil && existing != nil {
+			return berrors.ErrAlreadyExists
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) FindOAuthClientAssertion(ctx context.Context, id string) (*types.OAuthClientAssertion, error) {
+	row := s.db.QueryRowContext(ctx,
+		s.q(`SELECT id, `+s.table("expiresAt")+` FROM `+s.table("oauthClientAssertion")+` WHERE id = ?`), id)
+	var (
+		a         types.OAuthClientAssertion
+		expiresAt int64
+	)
+	if err := row.Scan(&a.ID, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	a.ExpiresAt = fromMillis(expiresAt)
+	return &a, nil
+}
+
+// =========================================================================
 // OAuth resources (oauth-provider, RFC 8707)
 // =========================================================================
 

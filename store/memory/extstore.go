@@ -790,6 +790,28 @@ func (s *Store) DeleteOAuthConsent(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) CreateOAuthClientAssertion(_ context.Context, a *types.OAuthClientAssertion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthClientAssert[a.ID]; ok {
+		return ErrAlreadyExists
+	}
+	cp := *a
+	s.oauthClientAssert[a.ID] = &cp
+	return nil
+}
+
+func (s *Store) FindOAuthClientAssertion(_ context.Context, id string) (*types.OAuthClientAssertion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.oauthClientAssert[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *a
+	return &cp, nil
+}
+
 func (s *Store) CreateOAuthResource(_ context.Context, r *types.OAuthResource) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -10,8 +10,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -228,6 +230,154 @@ func JWKThumbprint(jwk map[string]any) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(canonical))
 	return b64.EncodeToString(sum[:]), nil
+}
+
+// clientAssertionAlgs are the private_key_jwt signing algorithms Better Auth
+// accepts for client-assertion JWTs (RFC 7523), matching its
+// PRIVATE_KEY_JWT_SIGNING_ALGORITHMS set.
+var clientAssertionAlgs = []string{
+	"RS256", "RS384", "RS512",
+	"PS256", "PS384", "PS512",
+	"ES256", "ES384", "ES512",
+	"EdDSA",
+}
+
+// ClientAssertionAlgorithms returns the accepted private_key_jwt signing
+// algorithms (a copy, safe for the caller to retain).
+func ClientAssertionAlgorithms() []string {
+	out := make([]string, len(clientAssertionAlgs))
+	copy(out, clientAssertionAlgs)
+	return out
+}
+
+// UnverifiedClaims decodes a compact JWS payload WITHOUT verifying the
+// signature. Used to read the client_assertion's sub/iss before the signing
+// key is known (RFC 7523 client lookup).
+func UnverifiedClaims(token string) (jwt.MapClaims, error) {
+	claims := jwt.MapClaims{}
+	_, _, err := jwt.NewParser().ParseUnverified(token, claims)
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// VerifyJWSWithJWKS verifies a compact JWS against a set of public JWKs,
+// restricting the signing algorithm to allowedAlgs. When the JWS header carries
+// a `kid`, only keys with a matching (or absent) `kid` are tried; otherwise
+// every key is tried until one verifies. The claims are returned WITHOUT
+// registered-claim (exp/iss/aud) validation — the caller enforces RFC 7523 §3.
+func VerifyJWSWithJWKS(token string, keys []map[string]any, allowedAlgs []string) (jwt.MapClaims, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("oauthcrypto: no client keys configured")
+	}
+	header, err := unverifiedHeader(token)
+	if err != nil {
+		return nil, err
+	}
+	kid, _ := header["kid"].(string)
+
+	var lastErr error = errors.New("oauthcrypto: no matching key for client assertion")
+	for _, k := range keys {
+		if kid != "" {
+			if kkid, _ := k["kid"].(string); kkid != "" && kkid != kid {
+				continue
+			}
+		}
+		pub, err := PublicKeyFromJWK(k)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		claims := jwt.MapClaims{}
+		_, err = jwt.ParseWithClaims(token, claims, func(_ *jwt.Token) (any, error) {
+			return pub, nil
+		}, jwt.WithValidMethods(allowedAlgs), jwt.WithoutClaimsValidation())
+		if err == nil {
+			return claims, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// unverifiedHeader decodes the protected header of a compact JWS.
+func unverifiedHeader(token string) (map[string]any, error) {
+	seg := splitDots(token)[0]
+	if seg == "" {
+		return nil, errors.New("oauthcrypto: malformed JWS header")
+	}
+	raw, err := b64.DecodeString(seg)
+	if err != nil {
+		return nil, errors.New("oauthcrypto: malformed JWS header")
+	}
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return nil, errors.New("oauthcrypto: malformed JWS header")
+	}
+	return header, nil
+}
+
+// PublicKeyFromJWK reconstructs a public key from an RFC 7517 JWK for signature
+// verification. It supports RSA, EC (P-256/P-384/P-521) and OKP (Ed25519) — the
+// key types valid for private_key_jwt.
+func PublicKeyFromJWK(jwk map[string]any) (any, error) {
+	switch jwk["kty"] {
+	case "OKP":
+		if crv, _ := jwk["crv"].(string); crv != "Ed25519" {
+			return nil, fmt.Errorf("oauthcrypto: unsupported OKP curve %v", jwk["crv"])
+		}
+		x, err := b64.DecodeString(stringField(jwk, "x"))
+		if err != nil || len(x) != ed25519.PublicKeySize {
+			return nil, errors.New("oauthcrypto: invalid OKP x")
+		}
+		return ed25519.PublicKey(x), nil
+	case "EC":
+		curve, err := ecCurve(stringField(jwk, "crv"))
+		if err != nil {
+			return nil, err
+		}
+		x, errX := b64.DecodeString(stringField(jwk, "x"))
+		y, errY := b64.DecodeString(stringField(jwk, "y"))
+		if errX != nil || errY != nil {
+			return nil, errors.New("oauthcrypto: invalid EC coordinates")
+		}
+		pub := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+		if !pub.Curve.IsOnCurve(pub.X, pub.Y) {
+			return nil, errors.New("oauthcrypto: EC point not on curve")
+		}
+		return pub, nil
+	case "RSA":
+		nBytes, errN := b64.DecodeString(stringField(jwk, "n"))
+		eBytes, errE := b64.DecodeString(stringField(jwk, "e"))
+		if errN != nil || errE != nil || len(nBytes) == 0 || len(eBytes) == 0 {
+			return nil, errors.New("oauthcrypto: invalid RSA parameters")
+		}
+		// e is a big-endian unsigned integer, typically 65537.
+		e := 0
+		for _, b := range eBytes {
+			e = e<<8 | int(b)
+		}
+		if e <= 0 {
+			return nil, errors.New("oauthcrypto: invalid RSA exponent")
+		}
+		return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: e}, nil
+	default:
+		return nil, fmt.Errorf("oauthcrypto: unsupported jwk kty %v", jwk["kty"])
+	}
+}
+
+func ecCurve(crv string) (elliptic.Curve, error) {
+	switch crv {
+	case "P-256":
+		return elliptic.P256(), nil
+	case "P-384":
+		return elliptic.P384(), nil
+	case "P-521":
+		return elliptic.P521(), nil
+	default:
+		return nil, fmt.Errorf("oauthcrypto: unsupported EC curve %q", crv)
+	}
 }
 
 func stringField(m map[string]any, k string) string {

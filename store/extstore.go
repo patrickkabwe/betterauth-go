@@ -101,6 +101,12 @@ type ExtStore interface {
 	ListOAuthConsentsByUser(ctx context.Context, userID string) ([]types.OAuthConsent, error)
 	DeleteOAuthConsent(ctx context.Context, id string) error
 
+	// OAuth client assertions (oauth-provider, RFC 7523 private_key_jwt replay)
+	// CreateOAuthClientAssertion records a consumed client-assertion jti. The id
+	// is the primary key, so a replay returns errors.ErrAlreadyExists.
+	CreateOAuthClientAssertion(ctx context.Context, assertion *types.OAuthClientAssertion) error
+	FindOAuthClientAssertion(ctx context.Context, id string) (*types.OAuthClientAssertion, error)
+
 	// OAuth resources (oauth-provider, RFC 8707)
 	CreateOAuthResource(ctx context.Context, resource *types.OAuthResource) error
 	FindOAuthResource(ctx context.Context, identifier string) (*types.OAuthResource, error)
