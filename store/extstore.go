@@ -78,6 +78,19 @@ type ExtStore interface {
 	CreateOAuthClient(ctx context.Context, client *types.OAuthClient) error
 	FindOAuthClientByClientID(ctx context.Context, clientID string) (*types.OAuthClient, error)
 
+	// OAuth tokens (oauth-provider)
+	CreateOAuthAccessToken(ctx context.Context, token *types.OAuthAccessToken) error
+	FindOAuthAccessToken(ctx context.Context, token string) (*types.OAuthAccessToken, error)
+	CreateOAuthRefreshToken(ctx context.Context, token *types.OAuthRefreshToken) error
+	FindOAuthRefreshToken(ctx context.Context, token string) (*types.OAuthRefreshToken, error)
+	// RotateOAuthRefreshToken marks a refresh row rotated: sets revoked and
+	// rotatedAt and stores a short-lived replay response for retry races.
+	RotateOAuthRefreshToken(ctx context.Context, id string, replayResponse string, replayExpiresAt time.Time) error
+	// InvalidateOAuthRefreshFamily revokes every refresh token for a
+	// (clientID, userID) pair and the access tokens linked to them, on refresh
+	// token reuse detection (RFC 9700 §4.14).
+	InvalidateOAuthRefreshFamily(ctx context.Context, clientID, userID string) error
+
 	// Wallet
 	CreateWallet(ctx context.Context, w *types.WalletAddress) error
 	FindWalletByAddress(ctx context.Context, address string, chainID int) (*types.WalletAddress, error)
