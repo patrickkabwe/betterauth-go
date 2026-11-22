@@ -338,7 +338,6 @@ func ssoProviderFromPayload(body ssoProviderPayload, userID string) (*types.SSOP
 	if apiErr != nil {
 		return nil, apiErr
 	}
-	now := time.Now().UTC()
 	recordID, err := id.Generate(32)
 	if err != nil {
 		return nil, apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError)
@@ -350,7 +349,7 @@ func ssoProviderFromPayload(body ssoProviderPayload, userID string) (*types.SSOP
 	return &types.SSOProvider{
 		ID: recordID, ProviderID: body.ProviderID, Issuer: body.Issuer, Domain: strings.ToLower(body.Domain),
 		OrganizationID: body.OrganizationID, UserID: userID, OIDCConfig: oidcConfig, SAMLConfig: samlConfig,
-		DomainVerified: domainVerified, CreatedAt: now, UpdatedAt: now,
+		DomainVerified: domainVerified,
 	}, nil
 }
 
@@ -362,8 +361,7 @@ func ssoProviderUpdateFromPayload(body ssoProviderPayload) (store.SSOProviderUpd
 	if apiErr != nil {
 		return store.SSOProviderUpdate{}, apiErr
 	}
-	now := time.Now().UTC()
-	update := store.SSOProviderUpdate{UpdatedAt: &now}
+	update := store.SSOProviderUpdate{}
 	if body.Issuer != "" {
 		update.Issuer = &body.Issuer
 	}
@@ -434,11 +432,9 @@ func findSSOProvider(c *auth.Context, opts SSOOptions, providerID string, domain
 
 func staticSSOProvider(provider SSOProviderConfig) types.SSOProvider {
 	oidcConfig, samlConfig, _ := encodeSSOConfigs(provider.OIDCConfig, provider.SAMLConfig)
-	now := time.Now().UTC()
 	return types.SSOProvider{
 		ID: provider.ProviderID, ProviderID: provider.ProviderID, Issuer: provider.Issuer, Domain: strings.ToLower(provider.Domain),
 		OrganizationID: provider.OrganizationID, OIDCConfig: oidcConfig, SAMLConfig: samlConfig, DomainVerified: true,
-		CreatedAt: now, UpdatedAt: now,
 	}
 }
 

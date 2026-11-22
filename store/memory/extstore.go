@@ -838,11 +838,6 @@ func (s *Store) UpdateSSOProvider(_ context.Context, providerID string, update s
 	if update.DomainVerified != nil {
 		provider.DomainVerified = *update.DomainVerified
 	}
-	if update.UpdatedAt != nil {
-		provider.UpdatedAt = *update.UpdatedAt
-	} else {
-		provider.UpdatedAt = time.Now().UTC()
-	}
 	cp := *provider
 	return &cp, nil
 }

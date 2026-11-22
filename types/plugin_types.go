@@ -172,17 +172,15 @@ type APIKey struct {
 
 // SSOProvider stores enterprise SSO provider metadata.
 type SSOProvider struct {
-	ID             string    `json:"id"`
-	ProviderID     string    `json:"providerId"`
-	Issuer         string    `json:"issuer"`
-	Domain         string    `json:"domain"`
-	OrganizationID string    `json:"organizationId,omitempty"`
-	UserID         string    `json:"userId"`
-	OIDCConfig     string    `json:"oidcConfig,omitempty"`
-	SAMLConfig     string    `json:"samlConfig,omitempty"`
-	DomainVerified bool      `json:"domainVerified"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID             string `json:"id"`
+	ProviderID     string `json:"providerId"`
+	Issuer         string `json:"issuer"`
+	Domain         string `json:"domain"`
+	OrganizationID string `json:"organizationId,omitempty"`
+	UserID         string `json:"userId"`
+	OIDCConfig     string `json:"oidcConfig,omitempty"`
+	SAMLConfig     string `json:"samlConfig,omitempty"`
+	DomainVerified bool   `json:"domainVerified"`
 }
 
 // Passkey stores a WebAuthn credential for a user.
