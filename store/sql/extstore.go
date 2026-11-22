@@ -1084,6 +1084,11 @@ func (s *Store) FindOAuthRefreshToken(ctx context.Context, token string) (*types
 	return &t, nil
 }
 
+func (s *Store) RevokeOAuthAccessToken(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("oauthAccessToken")+` SET revoked = ? WHERE token = ?`), toMillis(time.Now().UTC()), token)
+	return err
+}
+
 func (s *Store) RotateOAuthRefreshToken(ctx context.Context, id string, replayResponse string, replayExpiresAt time.Time) error {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("oauthRefreshToken")+` SET revoked = ?, `+s.table("rotatedAt")+` = ?, `+s.table("rotationReplayResponse")+` = ?, `+s.table("rotationReplayExpiresAt")+` = ? WHERE id = ?`),

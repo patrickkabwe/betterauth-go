@@ -219,6 +219,7 @@ const (
 	CodeInvalidOTP                  = "INVALID_OTP"
 	CodeInvalidCode                 = "INVALID_CODE"
 	CodeInvalidGrant                = "INVALID_GRANT"
+	CodeInvalidClient               = "INVALID_CLIENT"
 	CodeInvalidTarget               = "INVALID_TARGET"
 	CodeInvalidScope                = "INVALID_SCOPE"
 	CodeNotFound                    = "NOT_FOUND"

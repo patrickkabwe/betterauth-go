@@ -203,6 +203,8 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 			rt(http.MethodPost, "/oauth2/client-resource/unlink", oidcUnlinkClientResourceHandler()),
 			rt(http.MethodGet, "/oauth2/client-resource", oidcListClientResourcesHandler()),
 			rt(http.MethodPost, "/oauth2/token", oidcTokenHandler()),
+			rt(http.MethodPost, "/oauth2/introspect", oidcIntrospectHandler()),
+			rt(http.MethodPost, "/oauth2/revoke", oidcRevokeHandler()),
 			rt(http.MethodGet, "/oauth2/userinfo", oidcUserInfoHandler()),
 			rt(http.MethodPost, "/oauth2/register", oidcRegisterHandler()),
 			rt(http.MethodGet, "/oauth2/client/{id}", oidcGetClientHandler()),
@@ -219,6 +221,8 @@ func oidcMetadataHandler() func(*auth.Context) {
 			"issuer":                                c.Auth.BaseURL(),
 			"authorization_endpoint":                base + "/oauth2/authorize",
 			"token_endpoint":                        base + "/oauth2/token",
+			"introspection_endpoint":                base + "/oauth2/introspect",
+			"revocation_endpoint":                   base + "/oauth2/revoke",
 			"userinfo_endpoint":                     base + "/oauth2/userinfo",
 			"registration_endpoint":                 base + "/oauth2/register",
 			"end_session_endpoint":                  base + "/oauth2/endsession",
@@ -650,6 +654,135 @@ func oidcListClientResourcesHandler() func(*auth.Context) {
 			return
 		}
 		c.WriteJSON(http.StatusOK, list)
+	}
+}
+
+// authenticateOAuthClient resolves and authenticates the client from the
+// request body (client_id / client_secret). A client with a stored secret must
+// present a matching one; a public client (no secret) needs only client_id.
+func authenticateOAuthClient(c *auth.Context, ext store.ExtStore, clientID, clientSecret string) (*types.OAuthClient, bool) {
+	if clientID == "" {
+		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, "client authentication failed"))
+		return nil, false
+	}
+	client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
+	if err != nil || (client.ClientSecret != "" && client.ClientSecret != clientSecret) {
+		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, "client authentication failed"))
+		return nil, false
+	}
+	return client, true
+}
+
+// oauthClientMayIntrospect reports whether the introspecting client is allowed
+// to see a token's metadata: it issued the token, or it is linked to one of the
+// token's audience resources. Otherwise the caller gets {active:false}.
+func oauthClientMayIntrospect(c *auth.Context, ext store.ExtStore, clientID, issuerClientID string, resources []string) bool {
+	if clientID == issuerClientID {
+		return true
+	}
+	for _, r := range resources {
+		if linked, _ := ext.IsOAuthClientLinkedToResource(c.R.Context(), clientID, r); linked {
+			return true
+		}
+	}
+	return false
+}
+
+// oidcIntrospectHandler implements RFC 7662 token introspection for opaque
+// access and refresh tokens.
+func oidcIntrospectHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Token         string `json:"token"`
+			TokenTypeHint string `json:"token_type_hint"`
+			ClientID      string `json:"client_id"`
+			ClientSecret  string `json:"client_secret"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
+			return
+		}
+		client, ok := authenticateOAuthClient(c, ext, body.ClientID, body.ClientSecret)
+		if !ok {
+			return
+		}
+		inactive := map[string]any{"active": false}
+		now := time.Now().UTC()
+		iss := c.Auth.BaseURL()
+
+		if body.TokenTypeHint != "refresh_token" {
+			if at, err := ext.FindOAuthAccessToken(c.R.Context(), body.Token); err == nil {
+				if at.Revoked != nil || at.ExpiresAt.Before(now) || !oauthClientMayIntrospect(c, ext, client.ClientID, at.ClientID, at.Resources) {
+					c.WriteJSON(http.StatusOK, inactive)
+					return
+				}
+				c.WriteJSON(http.StatusOK, map[string]any{
+					"active": true, "iss": iss, "client_id": at.ClientID, "sub": at.UserID,
+					"token_type": constants.TokenTypeBearer, "scope": strings.Join(at.Scopes, " "),
+					"aud": at.Resources, "exp": at.ExpiresAt.Unix(), "iat": at.CreatedAt.Unix(),
+				})
+				return
+			}
+		}
+		if rt, err := ext.FindOAuthRefreshToken(c.R.Context(), body.Token); err == nil {
+			if rt.Revoked != nil || rt.ExpiresAt.Before(now) || !oauthClientMayIntrospect(c, ext, client.ClientID, rt.ClientID, rt.Resources) {
+				c.WriteJSON(http.StatusOK, inactive)
+				return
+			}
+			c.WriteJSON(http.StatusOK, map[string]any{
+				"active": true, "iss": iss, "client_id": rt.ClientID, "sub": rt.UserID,
+				"token_type": "refresh_token", "scope": strings.Join(rt.Scopes, " "),
+				"aud": rt.Resources, "exp": rt.ExpiresAt.Unix(), "iat": rt.CreatedAt.Unix(),
+			})
+			return
+		}
+		c.WriteJSON(http.StatusOK, inactive)
+	}
+}
+
+// oidcRevokeHandler implements RFC 7009 token revocation. Revoking an access
+// token marks it revoked; revoking a refresh token tears down its whole family
+// (and the access tokens linked to it). Unknown tokens still return 200.
+func oidcRevokeHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthStore(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Token         string `json:"token"`
+			TokenTypeHint string `json:"token_type_hint"`
+			ClientID      string `json:"client_id"`
+			ClientSecret  string `json:"client_secret"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
+			return
+		}
+		client, ok := authenticateOAuthClient(c, ext, body.ClientID, body.ClientSecret)
+		if !ok {
+			return
+		}
+		// Only the issuing client may revoke; mismatches are ignored per RFC 7009.
+		if body.TokenTypeHint != "refresh_token" {
+			if at, err := ext.FindOAuthAccessToken(c.R.Context(), body.Token); err == nil {
+				if at.ClientID == client.ClientID {
+					_ = ext.RevokeOAuthAccessToken(c.R.Context(), body.Token)
+				}
+				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+				return
+			}
+		}
+		if rt, err := ext.FindOAuthRefreshToken(c.R.Context(), body.Token); err == nil {
+			if rt.ClientID == client.ClientID {
+				_ = ext.InvalidateOAuthRefreshFamily(c.R.Context(), rt.ClientID, rt.UserID)
+			}
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 	}
 }
 
