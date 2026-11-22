@@ -210,6 +210,37 @@ type OAuthRefreshToken struct {
 	Scopes                  []string       `json:"scopes"`
 }
 
+// OAuthResource is a protected resource the provider issues access tokens for,
+// mirroring Better Auth's oauth-provider `oauthResource` table (RFC 8707). A
+// nil TTL/scope field means "inherit the plugin default at issuance time".
+type OAuthResource struct {
+	ID                            string         `json:"id"`
+	Identifier                    string         `json:"identifier"`
+	Name                          string         `json:"name"`
+	AccessTokenTTL                *int           `json:"accessTokenTtl,omitempty"`
+	RefreshTokenTTL               *int           `json:"refreshTokenTtl,omitempty"`
+	SigningAlgorithm              string         `json:"signingAlgorithm,omitempty"`
+	SigningKeyID                  string         `json:"signingKeyId,omitempty"`
+	AllowedScopes                 []string       `json:"allowedScopes,omitempty"`
+	CustomClaims                  map[string]any `json:"customClaims,omitempty"`
+	DPoPBoundAccessTokensRequired bool           `json:"dpopBoundAccessTokensRequired"`
+	Disabled                      bool           `json:"disabled"`
+	CreatedAt                     time.Time      `json:"createdAt"`
+	UpdatedAt                     time.Time      `json:"updatedAt"`
+	PolicyVersion                 int            `json:"policyVersion"`
+	Metadata                      map[string]any `json:"metadata,omitempty"`
+}
+
+// OAuthClientResource links a client to a protected resource it may request,
+// mirroring Better Auth's oauth-provider `oauthClientResource` table.
+type OAuthClientResource struct {
+	ID         string         `json:"id"`
+	ClientID   string         `json:"clientId"`
+	ResourceID string         `json:"resourceId"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+}
+
 // OAuthConsent records a user's consent for a client to access a set of
 // scopes, mirroring Better Auth's oauth-provider `oauthConsent` table.
 type OAuthConsent struct {

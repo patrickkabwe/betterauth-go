@@ -27,10 +27,11 @@ const (
 // oidcCodeData is the JSON stored in the authorization-code verification so the
 // token endpoint can bind the issued tokens to a session and carry scopes.
 type oidcCodeData struct {
-	UserID    string `json:"userId"`
-	ClientID  string `json:"clientId"`
-	SessionID string `json:"sessionId"`
-	Scope     string `json:"scope"`
+	UserID    string   `json:"userId"`
+	ClientID  string   `json:"clientId"`
+	SessionID string   `json:"sessionId"`
+	Scope     string   `json:"scope"`
+	Resources []string `json:"resources,omitempty"`
 }
 
 // oidcTokenResponse is the OAuth token endpoint response.
@@ -67,38 +68,105 @@ func hasScope(scopes []string, want string) bool {
 	return false
 }
 
+// oidcGrant carries the resolved inputs for issuing a token grant.
+type oidcGrant struct {
+	clientID  string
+	userID    string
+	sessionID string
+	scopes    []string
+	resources []string // RFC 8707 resource indicators bound to the tokens
+	accessTTL time.Duration
+}
+
 // issueOAuthGrant creates an access token (and, when offline_access is granted,
-// a rotating refresh token) for the given client/user/session and returns the
-// token response. A non-empty parentRefreshID links tokens created by rotation.
-func issueOAuthGrant(c *auth.Context, ext store.ExtStore, clientID, userID, sessionID string, scopes []string) (oidcTokenResponse, error) {
+// a rotating refresh token) for the grant and returns the token response. The
+// RFC 8707 resources are stored on both tokens as the audience list.
+func issueOAuthGrant(c *auth.Context, ext store.ExtStore, g oidcGrant) (oidcTokenResponse, error) {
 	now := time.Now().UTC()
+	accessTTL := g.accessTTL
+	if accessTTL <= 0 {
+		accessTTL = accessTokenTTL
+	}
 	accessID, _ := id.Generate(32)
 	accessTok, _ := id.Generate(32)
 	refreshID := ""
 	refreshTok := ""
-	if hasScope(scopes, "offline_access") {
+	if hasScope(g.scopes, "offline_access") {
 		refreshID, _ = id.Generate(32)
 		refreshTok, _ = id.Generate(32)
 		if err := ext.CreateOAuthRefreshToken(c.R.Context(), &types.OAuthRefreshToken{
-			ID: refreshID, Token: refreshTok, ClientID: clientID, SessionID: sessionID, UserID: userID,
-			Scopes: scopes, ExpiresAt: now.Add(refreshTokenTTL), CreatedAt: now,
+			ID: refreshID, Token: refreshTok, ClientID: g.clientID, SessionID: g.sessionID, UserID: g.userID,
+			Scopes: g.scopes, Resources: g.resources, ExpiresAt: now.Add(refreshTokenTTL), CreatedAt: now,
 		}); err != nil {
 			return oidcTokenResponse{}, err
 		}
 	}
 	if err := ext.CreateOAuthAccessToken(c.R.Context(), &types.OAuthAccessToken{
-		ID: accessID, Token: accessTok, ClientID: clientID, SessionID: sessionID, UserID: userID,
-		Scopes: scopes, RefreshID: refreshID, ExpiresAt: now.Add(accessTokenTTL), CreatedAt: now,
+		ID: accessID, Token: accessTok, ClientID: g.clientID, SessionID: g.sessionID, UserID: g.userID,
+		Scopes: g.scopes, Resources: g.resources, RefreshID: refreshID, ExpiresAt: now.Add(accessTTL), CreatedAt: now,
 	}); err != nil {
 		return oidcTokenResponse{}, err
 	}
 	return oidcTokenResponse{
 		AccessToken:  accessTok,
 		TokenType:    constants.TokenTypeBearer,
-		ExpiresIn:    int(accessTokenTTL.Seconds()),
-		Scope:        strings.Join(scopes, " "),
+		ExpiresIn:    int(accessTTL.Seconds()),
+		Scope:        strings.Join(g.scopes, " "),
 		RefreshToken: refreshTok,
 	}, nil
+}
+
+// validateResources resolves the RFC 8707 resource indicators for a request:
+// every identifier must map to an enabled oauthResource row, the client must be
+// linked when per-client enforcement is on, and each resource's allowedScopes
+// (when set) must intersect the requested scopes. It returns the validated
+// resource list and the minimum per-resource access-token TTL (0 = default).
+func validateResources(c *auth.Context, ext store.ExtStore, client *types.OAuthClient, scopes, resources []string, enforcePerClient bool) ([]string, time.Duration, *apierror.Error) {
+	if len(resources) == 0 {
+		return nil, 0, nil
+	}
+	var minTTL time.Duration
+	seen := map[string]bool{}
+	out := make([]string, 0, len(resources))
+	for _, identifier := range resources {
+		if seen[identifier] {
+			continue
+		}
+		seen[identifier] = true
+		res, err := ext.FindOAuthResource(c.R.Context(), identifier)
+		if err != nil {
+			return nil, 0, apierror.New(http.StatusBadRequest, constants.CodeInvalidTarget, "requested resource "+identifier+" is not configured")
+		}
+		if res.Disabled {
+			return nil, 0, apierror.New(http.StatusBadRequest, constants.CodeInvalidTarget, "requested resource "+identifier+" is disabled")
+		}
+		if enforcePerClient {
+			linked, _ := ext.IsOAuthClientLinkedToResource(c.R.Context(), client.ClientID, identifier)
+			if !linked {
+				return nil, 0, apierror.New(http.StatusBadRequest, constants.CodeInvalidTarget, "client is not allowed to request resource "+identifier)
+			}
+		}
+		if len(res.AllowedScopes) > 0 {
+			intersects := false
+			for _, s := range scopes {
+				if hasScope(res.AllowedScopes, s) {
+					intersects = true
+					break
+				}
+			}
+			if !intersects {
+				return nil, 0, apierror.New(http.StatusBadRequest, constants.CodeInvalidScope, "requested scopes are not allowed for resource "+identifier)
+			}
+		}
+		if res.AccessTokenTTL != nil {
+			ttl := time.Duration(*res.AccessTokenTTL) * time.Second
+			if minTTL == 0 || ttl < minTTL {
+				minTTL = ttl
+			}
+		}
+		out = append(out, identifier)
+	}
+	return out, minTTL, nil
 }
 
 // OIDCProviderOptions configures acting as an OIDC identity provider.
@@ -108,6 +176,10 @@ type OIDCProviderOptions struct {
 	// collect consent. When empty, authorize responds with JSON
 	// {"consentRequired": true, ...} so a front end can render its own screen.
 	ConsentPage string
+	// EnforcePerClientResources requires a client to be explicitly linked to a
+	// requested RFC 8707 resource (via oauthClientResource) before a token may
+	// be issued for it. When false, any enabled resource may be requested.
+	EnforcePerClientResources bool
 }
 
 // OIDCProvider exposes OIDC provider endpoints.
@@ -117,11 +189,19 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 		routes: []auth.PluginRoute{
 			rt(http.MethodGet, "/.well-known/openid-configuration", oidcMetadataHandler()),
 			rt(http.MethodGet, "/oauth2/authorize", oidcAuthorizeHandler(opts)),
-			rt(http.MethodPost, "/oauth2/consent", oidcConsentHandler()),
+			rt(http.MethodPost, "/oauth2/consent", oidcConsentHandler(opts)),
 			rt(http.MethodGet, "/oauth2/get-consent", oidcGetConsentHandler()),
 			rt(http.MethodGet, "/oauth2/get-consents", oidcGetConsentsHandler()),
 			rt(http.MethodPost, "/oauth2/update-consent", oidcUpdateConsentHandler()),
 			rt(http.MethodPost, "/oauth2/delete-consent", oidcDeleteConsentHandler()),
+			rt(http.MethodPost, "/oauth2/resource", oidcCreateResourceHandler()),
+			rt(http.MethodGet, "/oauth2/resources", oidcListResourcesHandler()),
+			rt(http.MethodGet, "/oauth2/resource", oidcGetResourceHandler()),
+			rt(http.MethodPost, "/oauth2/resource/update", oidcUpdateResourceHandler()),
+			rt(http.MethodPost, "/oauth2/resource/delete", oidcDeleteResourceHandler()),
+			rt(http.MethodPost, "/oauth2/client-resource/link", oidcLinkClientResourceHandler()),
+			rt(http.MethodPost, "/oauth2/client-resource/unlink", oidcUnlinkClientResourceHandler()),
+			rt(http.MethodGet, "/oauth2/client-resource", oidcListClientResourcesHandler()),
 			rt(http.MethodPost, "/oauth2/token", oidcTokenHandler()),
 			rt(http.MethodGet, "/oauth2/userinfo", oidcUserInfoHandler()),
 			rt(http.MethodPost, "/oauth2/register", oidcRegisterHandler()),
@@ -152,9 +232,9 @@ func oidcMetadataHandler() func(*auth.Context) {
 // issueAuthCode stores the authorization-code grant data in a verification and
 // returns the opaque code. Used by authorize (consent satisfied) and by the
 // consent endpoint after the user accepts.
-func issueAuthCode(c *auth.Context, userID, clientID, sessionID, scope string) string {
+func issueAuthCode(c *auth.Context, userID, clientID, sessionID, scope string, resources []string) string {
 	code, _ := id.Generate(32)
-	data, _ := json.Marshal(oidcCodeData{UserID: userID, ClientID: clientID, SessionID: sessionID, Scope: scope})
+	data, _ := json.Marshal(oidcCodeData{UserID: userID, ClientID: clientID, SessionID: sessionID, Scope: scope, Resources: resources})
 	_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationOIDCCode+code, string(data), 10*time.Minute)
 	return code
 }
@@ -203,6 +283,16 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeClientNotFound))
 			return
 		}
+		// RFC 8707: validate requested resource indicators up front.
+		resources, _, apiErr := validateResources(c, ext, client, scopeList(scope), q["resource"], opts.EnforcePerClientResources)
+		if apiErr != nil {
+			if redirectURI != "" {
+				c.Redirect(redirectURI + "?error=" + url.QueryEscape(strings.ToLower(apiErr.Code)) + "&state=" + url.QueryEscape(state))
+				return
+			}
+			c.WriteError(apiErr)
+			return
+		}
 		if !consentSatisfied(c, ext, client, user.ID, scopeList(scope)) {
 			// Consent required: hand off to the consent page, or tell the caller.
 			if opts.ConsentPage != "" {
@@ -213,12 +303,13 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 				"consentRequired": true,
 				"clientId":        clientID,
 				"scope":           scope,
+				"resource":        resources,
 				"redirectUri":     redirectURI,
 				"state":           state,
 			})
 			return
 		}
-		code := issueAuthCode(c, user.ID, clientID, sess.ID, scope)
+		code := issueAuthCode(c, user.ID, clientID, sess.ID, scope, resources)
 		c.Redirect(redirectURI + "?code=" + code + "&state=" + state)
 	}
 }
@@ -226,7 +317,7 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 // oidcConsentHandler records a user's consent decision for a client. On accept
 // it upserts the oauthConsent row and returns the redirect URL carrying a fresh
 // authorization code; on deny it returns a redirect carrying access_denied.
-func oidcConsentHandler() func(*auth.Context) {
+func oidcConsentHandler(opts OIDCProviderOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		ext, ok := requireOAuthStore(c)
 		if !ok {
@@ -238,11 +329,12 @@ func oidcConsentHandler() func(*auth.Context) {
 			return
 		}
 		var body struct {
-			ClientID    string `json:"client_id"`
-			Scope       string `json:"scope"`
-			Accept      bool   `json:"accept"`
-			RedirectURI string `json:"redirect_uri"`
-			State       string `json:"state"`
+			ClientID    string   `json:"client_id"`
+			Scope       string   `json:"scope"`
+			Resource    []string `json:"resource"`
+			Accept      bool     `json:"accept"`
+			RedirectURI string   `json:"redirect_uri"`
+			State       string   `json:"state"`
 		}
 		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
@@ -255,16 +347,26 @@ func oidcConsentHandler() func(*auth.Context) {
 			return
 		}
 		scopes := scopeList(body.Scope)
+		client, err := ext.FindOAuthClientByClientID(c.R.Context(), body.ClientID)
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeClientNotFound))
+			return
+		}
+		resources, _, apiErr := validateResources(c, ext, client, scopes, body.Resource, opts.EnforcePerClientResources)
+		if apiErr != nil {
+			c.WriteError(apiErr)
+			return
+		}
 		now := time.Now().UTC()
 		if existing, err := ext.FindOAuthConsent(c.R.Context(), body.ClientID, user.ID); err == nil {
-			_ = ext.UpdateOAuthConsent(c.R.Context(), existing.ID, scopes, existing.Resources, existing.RequestedUserInfoClaims)
+			_ = ext.UpdateOAuthConsent(c.R.Context(), existing.ID, scopes, resources, existing.RequestedUserInfoClaims)
 		} else {
 			consentID, _ := id.Generate(32)
 			_ = ext.CreateOAuthConsent(c.R.Context(), &types.OAuthConsent{
-				ID: consentID, ClientID: body.ClientID, UserID: user.ID, Scopes: scopes, CreatedAt: now, UpdatedAt: now,
+				ID: consentID, ClientID: body.ClientID, UserID: user.ID, Scopes: scopes, Resources: resources, CreatedAt: now, UpdatedAt: now,
 			})
 		}
-		code := issueAuthCode(c, user.ID, body.ClientID, sess.ID, body.Scope)
+		code := issueAuthCode(c, user.ID, body.ClientID, sess.ID, body.Scope, resources)
 		c.WriteJSON(http.StatusOK, map[string]any{
 			"redirect": body.RedirectURI + "?code=" + code + "&state=" + url.QueryEscape(body.State),
 		})
@@ -374,6 +476,183 @@ func oidcDeleteConsentHandler() func(*auth.Context) {
 	}
 }
 
+// requireOAuthAdmin resolves a session for the resource-management endpoints.
+// NOTE: Better Auth gates these on admin privileges (assertResourcePrivileges).
+// The Go port currently requires only an authenticated session; wiring an admin
+// check to the admin plugin is a follow-up.
+func requireOAuthAdmin(c *auth.Context) (store.ExtStore, bool) {
+	ext, ok := requireOAuthStore(c)
+	if !ok {
+		return nil, false
+	}
+	if _, _, err := c.GetSession(); err != nil {
+		c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+		return nil, false
+	}
+	return ext, true
+}
+
+func oidcCreateResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		var r types.OAuthResource
+		if err := c.ParseJSON(&r); err != nil || r.Identifier == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
+			return
+		}
+		if r.Name == "" {
+			r.Name = r.Identifier
+		}
+		r.ID, _ = id.Generate(32)
+		now := time.Now().UTC()
+		r.CreatedAt, r.UpdatedAt = now, now
+		if r.PolicyVersion == 0 {
+			r.PolicyVersion = 1
+		}
+		if err := ext.CreateOAuthResource(c.R.Context(), &r); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, r)
+	}
+}
+
+func oidcListResourcesHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		list, err := ext.ListOAuthResources(c.R.Context())
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, list)
+	}
+}
+
+func oidcGetResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		r, err := ext.FindOAuthResource(c.R.Context(), c.R.URL.Query().Get("identifier"))
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		c.WriteJSON(http.StatusOK, r)
+	}
+}
+
+func oidcUpdateResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		var r types.OAuthResource
+		if err := c.ParseJSON(&r); err != nil || r.Identifier == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
+			return
+		}
+		if err := ext.UpdateOAuthResource(c.R.Context(), &r); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		updated, _ := ext.FindOAuthResource(c.R.Context(), r.Identifier)
+		c.WriteJSON(http.StatusOK, updated)
+	}
+}
+
+func oidcDeleteResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Identifier string `json:"identifier"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.Identifier == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
+			return
+		}
+		if err := ext.DeleteOAuthResource(c.R.Context(), body.Identifier); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+	}
+}
+
+func oidcLinkClientResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			ClientID   string `json:"client_id"`
+			ResourceID string `json:"resource_id"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" || body.ResourceID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "client_id and resource_id are required"))
+			return
+		}
+		linkID, _ := id.Generate(32)
+		if err := ext.LinkOAuthClientResource(c.R.Context(), &types.OAuthClientResource{
+			ID: linkID, ClientID: body.ClientID, ResourceID: body.ResourceID, CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
+			return
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+	}
+}
+
+func oidcUnlinkClientResourceHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			ClientID   string `json:"client_id"`
+			ResourceID string `json:"resource_id"`
+		}
+		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" || body.ResourceID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "client_id and resource_id are required"))
+			return
+		}
+		if err := ext.UnlinkOAuthClientResource(c.R.Context(), body.ClientID, body.ResourceID); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
+			return
+		}
+		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+	}
+}
+
+func oidcListClientResourcesHandler() func(*auth.Context) {
+	return func(c *auth.Context) {
+		ext, ok := requireOAuthAdmin(c)
+		if !ok {
+			return
+		}
+		list, err := ext.ListOAuthClientResources(c.R.Context(), c.R.URL.Query().Get("client_id"))
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, list)
+	}
+}
+
 func oidcTokenHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
 		ext, ok := requireOAuthStore(c)
@@ -411,7 +690,10 @@ func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, code string
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
 		return
 	}
-	resp, err := issueOAuthGrant(c, ext, data.ClientID, data.UserID, data.SessionID, scopeList(data.Scope))
+	resp, err := issueOAuthGrant(c, ext, oidcGrant{
+		clientID: data.ClientID, userID: data.UserID, sessionID: data.SessionID,
+		scopes: scopeList(data.Scope), resources: data.Resources,
+	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return
@@ -446,7 +728,10 @@ func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, clientID, refres
 		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "invalid refresh token"))
 		return
 	}
-	resp, err := issueOAuthGrant(c, ext, rt.ClientID, rt.UserID, rt.SessionID, rt.Scopes)
+	resp, err := issueOAuthGrant(c, ext, oidcGrant{
+		clientID: rt.ClientID, userID: rt.UserID, sessionID: rt.SessionID,
+		scopes: rt.Scopes, resources: rt.Resources,
+	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 		return

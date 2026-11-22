@@ -1183,6 +1183,159 @@ func (s *Store) DeleteOAuthConsent(ctx context.Context, id string) error {
 }
 
 // =========================================================================
+// OAuth resources (oauth-provider, RFC 8707)
+// =========================================================================
+
+var oauthResourceColNames = []string{
+	"id", "identifier", "name", "accessTokenTtl", "refreshTokenTtl", "signingAlgorithm",
+	"signingKeyId", "allowedScopes", "customClaims", "dpopBoundAccessTokensRequired",
+	"disabled", "createdAt", "updatedAt", "policyVersion", "metadata",
+}
+
+func (s *Store) CreateOAuthResource(ctx context.Context, r *types.OAuthResource) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthResource")+` (`+s.cols(oauthResourceColNames...)+`) VALUES (`+qMarks(len(oauthResourceColNames))+`)`),
+		r.ID, r.Identifier, r.Name, nullInt(r.AccessTokenTTL), nullInt(r.RefreshTokenTTL), nullStr(r.SigningAlgorithm),
+		nullStr(r.SigningKeyID), jsonList(r.AllowedScopes), jsonObj(r.CustomClaims), boolToInt(r.DPoPBoundAccessTokensRequired),
+		boolToInt(r.Disabled), toMillis(r.CreatedAt), toMillis(r.UpdatedAt), r.PolicyVersion, jsonObj(r.Metadata))
+	return err
+}
+
+func (s *Store) scanOAuthResource(row interface{ Scan(...any) error }) (*types.OAuthResource, error) {
+	var (
+		r                           types.OAuthResource
+		accessTTL, refreshTTL       sql.NullInt64
+		signingAlg, signingKey      sql.NullString
+		allowedScopes, customClaims sql.NullString
+		metadata                    sql.NullString
+		dpopRequired, disabled      int
+		createdAt, updatedAt        int64
+	)
+	err := row.Scan(&r.ID, &r.Identifier, &r.Name, &accessTTL, &refreshTTL, &signingAlg, &signingKey,
+		&allowedScopes, &customClaims, &dpopRequired, &disabled, &createdAt, &updatedAt, &r.PolicyVersion, &metadata)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	if accessTTL.Valid {
+		v := int(accessTTL.Int64)
+		r.AccessTokenTTL = &v
+	}
+	if refreshTTL.Valid {
+		v := int(refreshTTL.Int64)
+		r.RefreshTokenTTL = &v
+	}
+	r.SigningAlgorithm = signingAlg.String
+	r.SigningKeyID = signingKey.String
+	r.AllowedScopes = scanJSONList(allowedScopes)
+	r.CustomClaims = scanJSONObj(customClaims)
+	r.DPoPBoundAccessTokensRequired = dpopRequired != 0
+	r.Disabled = disabled != 0
+	r.CreatedAt = fromMillis(createdAt)
+	r.UpdatedAt = fromMillis(updatedAt)
+	r.Metadata = scanJSONObj(metadata)
+	return &r, nil
+}
+
+func (s *Store) FindOAuthResource(ctx context.Context, identifier string) (*types.OAuthResource, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthResourceColNames...)+` FROM `+s.table("oauthResource")+` WHERE identifier = ?`), identifier)
+	return s.scanOAuthResource(row)
+}
+
+func (s *Store) ListOAuthResources(ctx context.Context) ([]types.OAuthResource, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(oauthResourceColNames...)+` FROM `+s.table("oauthResource")))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.OAuthResource, 0)
+	for rows.Next() {
+		r, err := s.scanOAuthResource(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateOAuthResource(ctx context.Context, r *types.OAuthResource) error {
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("oauthResource")+` SET name = ?, `+s.table("accessTokenTtl")+` = ?, `+s.table("refreshTokenTtl")+` = ?, `+s.table("allowedScopes")+` = ?, disabled = ?, `+s.table("updatedAt")+` = ?, metadata = ? WHERE identifier = ?`),
+		r.Name, nullInt(r.AccessTokenTTL), nullInt(r.RefreshTokenTTL), jsonList(r.AllowedScopes), boolToInt(r.Disabled), toMillis(time.Now().UTC()), jsonObj(r.Metadata), r.Identifier)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteOAuthResource(ctx context.Context, identifier string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("oauthResource")+` WHERE identifier = ?`), identifier)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) LinkOAuthClientResource(ctx context.Context, l *types.OAuthClientResource) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthClientResource")+` (id, `+s.table("clientId")+`, `+s.table("resourceId")+`, metadata, `+s.table("createdAt")+`) VALUES (?, ?, ?, ?, ?)`),
+		l.ID, l.ClientID, l.ResourceID, jsonObj(l.Metadata), toMillis(l.CreatedAt))
+	return err
+}
+
+func (s *Store) UnlinkOAuthClientResource(ctx context.Context, clientID, resourceID string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("oauthClientResource")+` WHERE `+s.table("clientId")+` = ? AND `+s.table("resourceId")+` = ?`), clientID, resourceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) IsOAuthClientLinkedToResource(ctx context.Context, clientID, resourceID string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, s.q(`SELECT 1 FROM `+s.table("oauthClientResource")+` WHERE `+s.table("clientId")+` = ? AND `+s.table("resourceId")+` = ?`), clientID, resourceID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) ListOAuthClientResources(ctx context.Context, clientID string) ([]types.OAuthClientResource, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, `+s.table("clientId")+`, `+s.table("resourceId")+`, metadata, `+s.table("createdAt")+` FROM `+s.table("oauthClientResource")+` WHERE `+s.table("clientId")+` = ?`), clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.OAuthClientResource, 0)
+	for rows.Next() {
+		var (
+			l         types.OAuthClientResource
+			metadata  sql.NullString
+			createdAt int64
+		)
+		if err := rows.Scan(&l.ID, &l.ClientID, &l.ResourceID, &metadata, &createdAt); err != nil {
+			return nil, err
+		}
+		l.Metadata = scanJSONObj(metadata)
+		l.CreatedAt = fromMillis(createdAt)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// =========================================================================
 // Wallet
 // =========================================================================
 

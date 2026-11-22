@@ -435,6 +435,53 @@ func TestExtStoreOAuthConsent(t *testing.T) {
 	}
 }
 
+func TestExtStoreOAuthResource(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ttl := 600
+
+	must(t, st.CreateOAuthResource(ctx, &types.OAuthResource{
+		ID: "r1", Identifier: "https://api.example", Name: "API",
+		AccessTokenTTL: &ttl, AllowedScopes: []string{"read", "write"},
+		PolicyVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	got, err := st.FindOAuthResource(ctx, "https://api.example")
+	if err != nil || got.Name != "API" || got.AccessTokenTTL == nil || *got.AccessTokenTTL != 600 || len(got.AllowedScopes) != 2 {
+		t.Fatalf("resource round-trip: %+v err=%v", got, err)
+	}
+	if list, err := st.ListOAuthResources(ctx); err != nil || len(list) != 1 {
+		t.Fatalf("list resources: %d err=%v", len(list), err)
+	}
+
+	got.Disabled = true
+	got.Name = "API v2"
+	must(t, st.UpdateOAuthResource(ctx, got))
+	got, _ = st.FindOAuthResource(ctx, "https://api.example")
+	if !got.Disabled || got.Name != "API v2" {
+		t.Fatalf("resource update not applied: %+v", got)
+	}
+
+	// Client-resource linkage.
+	must(t, st.LinkOAuthClientResource(ctx, &types.OAuthClientResource{ID: "l1", ClientID: "c1", ResourceID: "https://api.example", CreatedAt: now}))
+	if linked, _ := st.IsOAuthClientLinkedToResource(ctx, "c1", "https://api.example"); !linked {
+		t.Fatal("client should be linked")
+	}
+	if links, err := st.ListOAuthClientResources(ctx, "c1"); err != nil || len(links) != 1 {
+		t.Fatalf("list client-resources: %d err=%v", len(links), err)
+	}
+	must(t, st.UnlinkOAuthClientResource(ctx, "c1", "https://api.example"))
+	if linked, _ := st.IsOAuthClientLinkedToResource(ctx, "c1", "https://api.example"); linked {
+		t.Fatal("client should be unlinked")
+	}
+
+	must(t, st.DeleteOAuthResource(ctx, "https://api.example"))
+	if _, err := st.FindOAuthResource(ctx, "https://api.example"); err == nil {
+		t.Fatal("resource should be gone after delete")
+	}
+}
+
 func TestSchemaScoping(t *testing.T) {
 	core := joinSchema(Schema())
 	for _, want := range []string{`"user"`, `"account"`, `"session"`, `"verification"`} {
