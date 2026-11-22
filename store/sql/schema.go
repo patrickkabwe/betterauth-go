@@ -198,6 +198,7 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
 				` + d.quoteIdent("organizationId") + ` TEXT NOT NULL,
+				` + d.quoteIdent("memberCount") + ` INTEGER NOT NULL DEFAULT 0,
 				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
 				` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + `
 			)`,
@@ -206,9 +207,11 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 				id TEXT PRIMARY KEY,
 				` + d.quoteIdent("teamId") + ` TEXT NOT NULL,
 				` + d.quoteIdent("userId") + ` TEXT NOT NULL,
+				` + d.quoteIdent("membershipKey") + ` TEXT,
 				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL
 			)`,
 			`CREATE INDEX IF NOT EXISTS teamMember_teamId_idx ON ` + d.quoteIdent("teamMember") + ` (` + d.quoteIdent("teamId") + `)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS teamMember_membershipKey_idx ON ` + d.quoteIdent("teamMember") + ` (` + d.quoteIdent("membershipKey") + `)`,
 		},
 		pluginOrganizationRoles: {
 			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("organizationRole") + ` (
