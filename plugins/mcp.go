@@ -9,7 +9,6 @@ import (
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
-	"github.com/patrickkabwe/betterauth-go/types"
 )
 
 // MCPOptions configures Model Context Protocol auth endpoints.
@@ -97,21 +96,9 @@ func MCP(opts MCPOptions) auth.Plugin {
 			}
 			c.WriteJSON(http.StatusOK, resp)
 		}),
-		rt(http.MethodPost, "/mcp/register", func(c *auth.Context) {
-			ext, ok := auth.ExtStore(c.Auth.Store())
-			if !ok {
-				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeExtStoreRequired))
-				return
-			}
-			clientID, _ := id.Generate(16)
-			secret, _ := id.Generate(32)
-			now := time.Now()
-			_ = ext.CreateOAuthClient(c.R.Context(), &types.OAuthClient{
-				ID: clientID, ClientID: clientID, ClientSecret: secret, Name: "mcp-client",
-				CreatedAt: now, UpdatedAt: now,
-			})
-			c.WriteJSON(http.StatusOK, map[string]string{"client_id": clientID, "client_secret": secret})
-		}),
+		// MCP dynamic client registration is OAuth DCR; reuse the oauth-provider's
+		// RFC 7591 handler so both registration paths share one validated shape.
+		rt(http.MethodPost, "/mcp/register", oidcRegisterHandler()),
 		rt(http.MethodGet, "/mcp/get-session", func(c *auth.Context) {
 			sess, user, err := c.GetSession()
 			if err != nil {

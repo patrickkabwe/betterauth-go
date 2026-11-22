@@ -170,20 +170,30 @@ func DeviceAuthorization(opts DeviceAuthorizationOptions) auth.Plugin {
 					c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeExtStoreRequired))
 					return
 				}
+				// RFC 8628 §3.1: client_id identifies the requesting device, and
+				// scope is bound to the code so the token endpoint can honour it.
+				var body struct {
+					ClientID string `json:"client_id"`
+					Scope    string `json:"scope"`
+				}
+				_ = c.ParseJSON(&body)
 				deviceCode, _ := id.Generate(32)
 				userCode, _ := id.Generate(8)
 				dcID, _ := id.Generate(32)
 				now := time.Now()
 				_ = ext.CreateDeviceCode(c.R.Context(), &types.DeviceCode{
 					ID: dcID, DeviceCode: deviceCode, UserCode: userCode,
-					Status: constants.DeviceStatusPending, ExpiresAt: now.Add(expires), Interval: interval, CreatedAt: now,
+					Status: constants.DeviceStatusPending, ExpiresAt: now.Add(expires), Interval: interval,
+					ClientID: body.ClientID, Scope: body.Scope, CreatedAt: now,
 				})
+				base := c.Auth.BaseURL() + c.Auth.BasePath()
 				c.WriteJSON(http.StatusOK, map[string]any{
-					"device_code":      deviceCode,
-					"user_code":        userCode,
-					"verification_uri": c.Auth.BaseURL() + c.Auth.BasePath() + "/device",
-					"expires_in":       int(expires.Seconds()),
-					"interval":         interval,
+					"device_code":               deviceCode,
+					"user_code":                 userCode,
+					"verification_uri":          base + "/device",
+					"verification_uri_complete": base + "/device?user_code=" + userCode,
+					"expires_in":                int(expires.Seconds()),
+					"interval":                  interval,
 				})
 			}),
 			rt(http.MethodPost, "/device/token", func(c *auth.Context) {

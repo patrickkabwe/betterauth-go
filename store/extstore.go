@@ -69,6 +69,8 @@ type ExtStore interface {
 	FindDeviceCodeByDeviceCode(ctx context.Context, code string) (*types.DeviceCode, error)
 	FindDeviceCodeByUserCode(ctx context.Context, code string) (*types.DeviceCode, error)
 	UpdateDeviceCode(ctx context.Context, id string, userID, status string) error
+	SetDeviceCodePolled(ctx context.Context, id string, t time.Time) error
+	DeleteDeviceCode(ctx context.Context, id string) error
 
 	// JWKS
 	CreateJWKS(ctx context.Context, rec *types.JWKSRecord) error

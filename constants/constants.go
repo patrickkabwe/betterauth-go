@@ -114,11 +114,14 @@ const (
 
 // JWT / OAuth.
 const (
-	JWTAlgHS256        = "HS256"
-	JWTTypeJWT         = "JWT"
-	JWTKtyOct          = "oct"
-	OAuthGrantTypeCode = "authorization_code"
-	TokenTypeBearer    = "Bearer"
+	JWTAlgHS256               = "HS256"
+	JWTTypeJWT                = "JWT"
+	JWTKtyOct                 = "oct"
+	OAuthGrantTypeCode        = "authorization_code"
+	OAuthGrantTypeRefresh     = "refresh_token"
+	OAuthGrantTypeClientCreds = "client_credentials"
+	OAuthGrantTypeDeviceCode  = "urn:ietf:params:oauth:grant-type:device_code"
+	TokenTypeBearer           = "Bearer"
 )
 
 // Plugin IDs.
@@ -254,7 +257,11 @@ const (
 	CodeAPIKeyExpired               = "API_KEY_EXPIRED"
 	CodeAccessDenied                = "ACCESS_DENIED"
 	CodeAuthorizationPending        = "AUTHORIZATION_PENDING"
+	CodeSlowDown                    = "SLOW_DOWN"
+	CodeExpiredToken                = "EXPIRED_TOKEN"
 	CodeClientNotFound              = "CLIENT_NOT_FOUND"
+	CodeInvalidClientMetadata       = "INVALID_CLIENT_METADATA"
+	CodeInvalidRedirectURI          = "INVALID_REDIRECT_URI"
 	CodeExtStoreRequired            = "EXT_STORE_REQUIRED"
 )
 
@@ -352,7 +359,11 @@ const (
 	MsgAPIKeyExpired                = "API key has expired"
 	MsgAccessDenied                 = "Access denied"
 	MsgAuthorizationPending         = "Authorization pending"
+	MsgSlowDown                     = "Polling too frequently"
+	MsgExpiredToken                 = "Device code has expired"
 	MsgClientNotFound               = "Client not found"
+	MsgInvalidClientMetadata        = "Invalid client metadata"
+	MsgInvalidRedirectURI           = "Invalid redirect URI"
 	MsgExtStoreRequired             = "ExtStore required"
 	MsgPasswordBreach               = "password has been found in a data breach"
 	MsgResetPasswordIfExists        = "If this email exists in our system, check your email for the reset link"
@@ -485,6 +496,10 @@ var apiMessages = map[string]string{
 	CodeAPIKeyExpired:               MsgAPIKeyExpired,
 	CodeAccessDenied:                MsgAccessDenied,
 	CodeAuthorizationPending:        MsgAuthorizationPending,
+	CodeSlowDown:                    MsgSlowDown,
+	CodeExpiredToken:                MsgExpiredToken,
 	CodeClientNotFound:              MsgClientNotFound,
+	CodeInvalidClientMetadata:       MsgInvalidClientMetadata,
+	CodeInvalidRedirectURI:          MsgInvalidRedirectURI,
 	CodeExtStoreRequired:            MsgExtStoreRequired,
 }

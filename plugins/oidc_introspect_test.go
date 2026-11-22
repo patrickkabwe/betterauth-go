@@ -12,7 +12,7 @@ import (
 func registerClientWithSecret(t *testing.T, a *auth.Auth) (string, string) {
 	t.Helper()
 	w := post(t, a, "/oauth2/register", `{"client_name":"Test","redirect_uris":["https://app.example/cb"]}`)
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusCreated {
 		t.Fatalf("register status=%d body=%s", w.Code, w.Body.String())
 	}
 	var reg struct {

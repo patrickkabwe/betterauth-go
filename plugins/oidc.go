@@ -1,12 +1,8 @@
 package plugins
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"crypto/subtle"
 	"encoding/json"
-	stderrors "errors"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,7 +11,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
-	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/internal/oauthcrypto"
@@ -110,6 +105,38 @@ func hasScope(scopes []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// clientAllowsRedirect reports whether redirectURI exactly matches one of the
+// client's registered redirect URIs (RFC 6749 §3.1.2.3). An empty or
+// unregistered URI is rejected so an authorization code is never delivered to
+// an attacker-controlled endpoint.
+func clientAllowsRedirect(client *types.OAuthClient, redirectURI string) bool {
+	return redirectURI != "" && hasScope(client.RedirectURIs, redirectURI)
+}
+
+// redirectWithParams appends query parameters to a validated redirect URI,
+// preserving any query string already present and percent-encoding values so a
+// parameter such as state cannot break out of the query.
+func redirectWithParams(base string, params map[string]string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	q := u.Query()
+	for k, v := range params {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// secretsEqual compares two client secrets in constant time to avoid leaking
+// the secret through comparison timing.
+func secretsEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // oidcGrant carries the resolved inputs for issuing a token grant.
@@ -321,24 +348,40 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 func oidcMetadataHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
 		base := c.Auth.BaseURL() + c.Auth.BasePath()
+		authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
 		c.WriteJSON(http.StatusOK, map[string]any{
-			"issuer":                                c.Auth.BaseURL(),
-			"authorization_endpoint":                base + "/oauth2/authorize",
-			"token_endpoint":                        base + "/oauth2/token",
-			"introspection_endpoint":                base + "/oauth2/introspect",
-			"revocation_endpoint":                   base + "/oauth2/revoke",
-			"userinfo_endpoint":                     base + "/oauth2/userinfo",
-			"registration_endpoint":                 base + "/oauth2/register",
-			"end_session_endpoint":                  base + "/oauth2/endsession",
-			"jwks_uri":                              c.Auth.BaseURL() + c.Auth.BasePath() + "/jwks",
-			"response_types_supported":              []string{"code"},
-			"subject_types_supported":               []string{"public"},
-			"id_token_signing_alg_values_supported": []string{constants.JWTAlgHS256},
-			"dpop_signing_alg_values_supported":     []string{"EdDSA", "ES256"},
-			"token_endpoint_auth_methods_supported": []string{
-				"client_secret_post", "client_secret_basic", "private_key_jwt", "none",
+			"issuer":                        c.Auth.BaseURL(),
+			"authorization_endpoint":        base + "/oauth2/authorize",
+			"token_endpoint":                base + "/oauth2/token",
+			"introspection_endpoint":        base + "/oauth2/introspect",
+			"revocation_endpoint":           base + "/oauth2/revoke",
+			"userinfo_endpoint":             base + "/oauth2/userinfo",
+			"registration_endpoint":         base + "/oauth2/register",
+			"end_session_endpoint":          base + "/oauth2/endsession",
+			"device_authorization_endpoint": base + "/device/code",
+			"jwks_uri":                      base + "/jwks",
+			"scopes_supported":              []string{"openid", "profile", "email", "offline_access"},
+			"response_types_supported":      []string{"code"},
+			"response_modes_supported":      []string{"query"},
+			"grant_types_supported": []string{
+				constants.OAuthGrantTypeCode,
+				constants.OAuthGrantTypeRefresh,
+				constants.OAuthGrantTypeDeviceCode,
 			},
+			"subject_types_supported":                          []string{"public"},
+			"id_token_signing_alg_values_supported":            []string{constants.JWTAlgHS256},
+			"code_challenge_methods_supported":                 []string{"S256"},
+			"dpop_signing_alg_values_supported":                []string{"EdDSA", "ES256"},
+			"token_endpoint_auth_methods_supported":            authMethods,
 			"token_endpoint_auth_signing_alg_values_supported": oauthcrypto.ClientAssertionAlgorithms(),
+			"introspection_endpoint_auth_methods_supported":    authMethods,
+			"revocation_endpoint_auth_methods_supported":       authMethods,
+			"authorization_response_iss_parameter_supported":   true,
+			"claims_supported":                                 []string{"sub", "email", "email_verified", "name"},
+			"claims_parameter_supported":                       true,
+			"request_parameter_supported":                      false,
+			"request_uri_parameter_supported":                  false,
+			"prompt_values_supported":                          []string{"login", "consent", "none"},
 		})
 	}
 }
@@ -397,14 +440,17 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeClientNotFound))
 			return
 		}
+		// RFC 6749 §3.1.2.3: the redirect_uri must be one the client registered.
+		// This is checked before anything is redirected, so a code or error is
+		// never delivered to an unregistered (attacker-controlled) URI.
+		if !clientAllowsRedirect(client, redirectURI) {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, constants.MsgInvalidRedirectURI))
+			return
+		}
 		// RFC 8707: validate requested resource indicators up front.
 		resources, _, apiErr := validateResources(c, ext, client, scopeList(scope), q["resource"], opts.EnforcePerClientResources)
 		if apiErr != nil {
-			if redirectURI != "" {
-				c.Redirect(redirectURI + "?error=" + url.QueryEscape(strings.ToLower(apiErr.Code)) + "&state=" + url.QueryEscape(state))
-				return
-			}
-			c.WriteError(apiErr)
+			c.Redirect(redirectWithParams(redirectURI, map[string]string{"error": strings.ToLower(apiErr.Code), "state": state}))
 			return
 		}
 		if !consentSatisfied(c, ext, client, user.ID, scopeList(scope)) {
@@ -424,7 +470,7 @@ func oidcAuthorizeHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			return
 		}
 		code := issueAuthCode(c, user.ID, clientID, sess.ID, scope, resources)
-		c.Redirect(redirectURI + "?code=" + code + "&state=" + state)
+		c.Redirect(redirectWithParams(redirectURI, map[string]string{"code": code, "state": state}))
 	}
 }
 
@@ -454,18 +500,24 @@ func oidcConsentHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
 			return
 		}
-		if !body.Accept {
-			c.WriteJSON(http.StatusOK, map[string]any{
-				"redirect": body.RedirectURI + "?error=access_denied&state=" + url.QueryEscape(body.State),
-			})
-			return
-		}
-		scopes := scopeList(body.Scope)
 		client, err := ext.FindOAuthClientByClientID(c.R.Context(), body.ClientID)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeClientNotFound))
 			return
 		}
+		// The redirect target must be registered before any code or error is
+		// handed back for the front end to redirect to (RFC 6749 §3.1.2.3).
+		if !clientAllowsRedirect(client, body.RedirectURI) {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, constants.MsgInvalidRedirectURI))
+			return
+		}
+		if !body.Accept {
+			c.WriteJSON(http.StatusOK, map[string]any{
+				"redirect": redirectWithParams(body.RedirectURI, map[string]string{"error": "access_denied", "state": body.State}),
+			})
+			return
+		}
+		scopes := scopeList(body.Scope)
 		resources, _, apiErr := validateResources(c, ext, client, scopes, body.Resource, opts.EnforcePerClientResources)
 		if apiErr != nil {
 			c.WriteError(apiErr)
@@ -482,20 +534,15 @@ func oidcConsentHandler(opts OIDCProviderOptions) func(*auth.Context) {
 		}
 		code := issueAuthCode(c, user.ID, body.ClientID, sess.ID, body.Scope, resources)
 		c.WriteJSON(http.StatusOK, map[string]any{
-			"redirect": body.RedirectURI + "?code=" + code + "&state=" + url.QueryEscape(body.State),
+			"redirect": redirectWithParams(body.RedirectURI, map[string]string{"code": code, "state": body.State}),
 		})
 	}
 }
 
 func oidcGetConsentsHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
+		ext, user, ok := requireOAuthUser(c)
 		if !ok {
-			return
-		}
-		_, user, err := c.GetSession()
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
 			return
 		}
 		consents, err := ext.ListOAuthConsentsByUser(c.R.Context(), user.ID)
@@ -509,13 +556,8 @@ func oidcGetConsentsHandler() func(*auth.Context) {
 
 func oidcGetConsentHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
+		ext, user, ok := requireOAuthUser(c)
 		if !ok {
-			return
-		}
-		_, user, err := c.GetSession()
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
 			return
 		}
 		consent, err := ext.FindOAuthConsentByID(c.R.Context(), c.R.URL.Query().Get("id"))
@@ -529,13 +571,8 @@ func oidcGetConsentHandler() func(*auth.Context) {
 
 func oidcUpdateConsentHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
+		ext, user, ok := requireOAuthUser(c)
 		if !ok {
-			return
-		}
-		_, user, err := c.GetSession()
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
 			return
 		}
 		var body struct {
@@ -564,13 +601,8 @@ func oidcUpdateConsentHandler() func(*auth.Context) {
 
 func oidcDeleteConsentHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
+		ext, user, ok := requireOAuthUser(c)
 		if !ok {
-			return
-		}
-		_, user, err := c.GetSession()
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
 			return
 		}
 		var body struct {
@@ -595,616 +627,24 @@ func oidcDeleteConsentHandler() func(*auth.Context) {
 // The Go port currently requires only an authenticated session; wiring an admin
 // check to the admin plugin is a follow-up.
 func requireOAuthAdmin(c *auth.Context) (store.ExtStore, bool) {
+	ext, _, ok := requireOAuthUser(c)
+	return ext, ok
+}
+
+// requireOAuthUser resolves the ext store and the authenticated end-user shared
+// by the consent and management endpoints, writing the ext-store or
+// unauthorized error and returning ok=false when either is missing.
+func requireOAuthUser(c *auth.Context) (store.ExtStore, *types.User, bool) {
 	ext, ok := requireOAuthStore(c)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
-	if _, _, err := c.GetSession(); err != nil {
+	_, user, err := c.GetSession()
+	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
-		return nil, false
+		return nil, nil, false
 	}
-	return ext, true
-}
-
-func oidcCreateResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		var r types.OAuthResource
-		if err := c.ParseJSON(&r); err != nil || r.Identifier == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
-			return
-		}
-		if r.Name == "" {
-			r.Name = r.Identifier
-		}
-		r.ID, _ = id.Generate(32)
-		now := time.Now().UTC()
-		r.CreatedAt, r.UpdatedAt = now, now
-		if r.PolicyVersion == 0 {
-			r.PolicyVersion = 1
-		}
-		if err := ext.CreateOAuthResource(c.R.Context(), &r); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-			return
-		}
-		c.WriteJSON(http.StatusOK, r)
-	}
-}
-
-func oidcListResourcesHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		list, err := ext.ListOAuthResources(c.R.Context())
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-			return
-		}
-		c.WriteJSON(http.StatusOK, list)
-	}
-}
-
-func oidcGetResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		r, err := ext.FindOAuthResource(c.R.Context(), c.R.URL.Query().Get("identifier"))
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
-			return
-		}
-		c.WriteJSON(http.StatusOK, r)
-	}
-}
-
-func oidcUpdateResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		var r types.OAuthResource
-		if err := c.ParseJSON(&r); err != nil || r.Identifier == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
-			return
-		}
-		if err := ext.UpdateOAuthResource(c.R.Context(), &r); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
-			return
-		}
-		updated, _ := ext.FindOAuthResource(c.R.Context(), r.Identifier)
-		c.WriteJSON(http.StatusOK, updated)
-	}
-}
-
-func oidcDeleteResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			Identifier string `json:"identifier"`
-		}
-		if err := c.ParseJSON(&body); err != nil || body.Identifier == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "identifier is required"))
-			return
-		}
-		if err := ext.DeleteOAuthResource(c.R.Context(), body.Identifier); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
-			return
-		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-	}
-}
-
-func oidcLinkClientResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			ClientID   string `json:"client_id"`
-			ResourceID string `json:"resource_id"`
-		}
-		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" || body.ResourceID == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "client_id and resource_id are required"))
-			return
-		}
-		linkID, _ := id.Generate(32)
-		if err := ext.LinkOAuthClientResource(c.R.Context(), &types.OAuthClientResource{
-			ID: linkID, ClientID: body.ClientID, ResourceID: body.ResourceID, CreatedAt: time.Now().UTC(),
-		}); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
-			return
-		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-	}
-}
-
-func oidcUnlinkClientResourceHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			ClientID   string `json:"client_id"`
-			ResourceID string `json:"resource_id"`
-		}
-		if err := c.ParseJSON(&body); err != nil || body.ClientID == "" || body.ResourceID == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, "client_id and resource_id are required"))
-			return
-		}
-		if err := ext.UnlinkOAuthClientResource(c.R.Context(), body.ClientID, body.ResourceID); err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeNotFound))
-			return
-		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-	}
-}
-
-func oidcListClientResourcesHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthAdmin(c)
-		if !ok {
-			return
-		}
-		list, err := ext.ListOAuthClientResources(c.R.Context(), c.R.URL.Query().Get("client_id"))
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-			return
-		}
-		c.WriteJSON(http.StatusOK, list)
-	}
-}
-
-// authenticateOAuthClient resolves and authenticates the client from the
-// request body (client_id / client_secret). A client with a stored secret must
-// present a matching one; a public client (no secret) needs only client_id.
-func authenticateOAuthClient(c *auth.Context, ext store.ExtStore, clientID, clientSecret string) (*types.OAuthClient, bool) {
-	if clientID == "" {
-		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, "client authentication failed"))
-		return nil, false
-	}
-	client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
-	if err != nil || (client.ClientSecret != "" && client.ClientSecret != clientSecret) {
-		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, "client authentication failed"))
-		return nil, false
-	}
-	return client, true
-}
-
-// resolveOAuthClient authenticates the request's client. When a client_assertion
-// is present it uses RFC 7523 private_key_jwt (verifyClientAssertion); otherwise
-// it falls back to client_secret (authenticateOAuthClient). On failure it writes
-// the error and returns ok=false.
-func resolveOAuthClient(c *auth.Context, ext store.ExtStore, clientID, clientSecret, assertion, assertionType string) (*types.OAuthClient, bool) {
-	if assertion != "" {
-		return verifyClientAssertion(c, ext, assertion, assertionType, clientID)
-	}
-	return authenticateOAuthClient(c, ext, clientID, clientSecret)
-}
-
-// verifyClientAssertion authenticates a confidential client with an RFC 7523
-// private_key_jwt assertion. It mirrors Better Auth's verifyClientAssertion +
-// consumeClientAssertion: it checks the assertion type and signing algorithm,
-// looks the client up by the assertion's sub/iss, verifies the signature against
-// the client's registered JWK set, enforces the iss/sub/aud/exp/iat claims, and
-// consumes the jti once (replay protection via oauthClientAssertion). On any
-// failure it writes an invalid_client error and returns ok=false.
-func verifyClientAssertion(c *auth.Context, ext store.ExtStore, assertion, assertionType, clientIDHint string) (*types.OAuthClient, bool) {
-	fail := func(msg string) (*types.OAuthClient, bool) {
-		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, msg))
-		return nil, false
-	}
-	if assertionType != clientAssertionType {
-		return fail("unsupported client_assertion_type")
-	}
-
-	// Read sub/iss from the unverified payload to find the client (and its keys).
-	unverified, err := oauthcrypto.UnverifiedClaims(assertion)
-	if err != nil {
-		return fail("malformed client assertion")
-	}
-	clientID, _ := unverified["sub"].(string)
-	if clientID == "" {
-		clientID, _ = unverified["iss"].(string)
-	}
-	if clientID == "" {
-		return fail("client assertion must contain sub or iss claim identifying the client")
-	}
-	if clientIDHint != "" && clientIDHint != clientID {
-		return fail("client_id in body does not match assertion sub/iss")
-	}
-
-	client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
-	if err != nil {
-		return fail("client not found")
-	}
-	if client.Disabled {
-		return fail("client is disabled")
-	}
-	if client.TokenEndpointAuthMethod != "private_key_jwt" {
-		return fail("client is not registered for private_key_jwt authentication")
-	}
-
-	keys, err := clientAssertionKeys(client)
-	if err != nil {
-		return fail(err.Error())
-	}
-	claims, err := oauthcrypto.VerifyJWSWithJWKS(assertion, keys, oauthcrypto.ClientAssertionAlgorithms())
-	if err != nil {
-		return fail("client assertion signature verification failed")
-	}
-
-	// RFC 7523 §3: iss and sub both identify the client.
-	if iss, _ := claims["iss"].(string); iss != clientID {
-		return fail("client assertion iss must equal the client id")
-	}
-	if sub, _ := claims["sub"].(string); sub != clientID {
-		return fail("client assertion sub must equal the client id")
-	}
-	if !consumeClientAssertion(c, ext, claims, clientID) {
-		return nil, false
-	}
-	return client, true
-}
-
-// clientAssertionKeys resolves the client's public JWK set for signature
-// verification: an inline `jwks` JSON Web Key Set, or a `jwks_uri` fetched over
-// HTTPS. It returns the key list (RFC 7517 `keys` array as maps).
-func clientAssertionKeys(client *types.OAuthClient) ([]map[string]any, error) {
-	if client.JWKS != "" {
-		keys, err := parseJWKSet([]byte(client.JWKS))
-		if err != nil {
-			return nil, stderrors.New("invalid client jwks")
-		}
-		return keys, nil
-	}
-	if client.JWKSURI != "" {
-		body, err := fetchClientJWKSURI(client.JWKSURI)
-		if err != nil {
-			return nil, stderrors.New("failed to fetch client JWKS")
-		}
-		keys, err := parseJWKSet(body)
-		if err != nil {
-			return nil, stderrors.New("invalid client jwks")
-		}
-		return keys, nil
-	}
-	return nil, stderrors.New("client has no JWKS configured")
-}
-
-// maxClientJWKSBytes bounds a fetched client JWKS document (RFC 7517 sets are
-// small; this matches Better Auth's 64 KiB cap).
-const maxClientJWKSBytes = 64 * 1024
-
-// fetchClientJWKSURI fetches a client's JWK set from its jwks_uri. It is an
-// SSRF-guarded HTTPS GET: HTTPS only, no redirects, a private/reserved host is
-// rejected, the body is size-bounded, and a JSON media type is required. (A
-// simplified port of Better Auth's fetchJwksFromUri — no cross-origin discovery
-// hooks and no stale-if-error cache.)
-func fetchClientJWKSURI(jwksURI string) ([]byte, error) {
-	parsed, err := url.Parse(jwksURI)
-	if err != nil || parsed.Scheme != "https" {
-		return nil, stderrors.New("jwks_uri must use HTTPS")
-	}
-	if parsed.User != nil || strings.Contains(jwksURI, "#") {
-		return nil, stderrors.New("jwks_uri must not contain credentials or a fragment")
-	}
-	if isPrivateJWKSHost(parsed.Hostname()) {
-		return nil, stderrors.New("jwks_uri must not point to a private or reserved address")
-	}
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return stderrors.New("jwks_uri must not redirect")
-		},
-	}
-	req, err := http.NewRequest(http.MethodGet, jwksURI, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, stderrors.New("jwks_uri returned a non-200 status")
-	}
-	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "json") {
-		return nil, stderrors.New("jwks_uri response must use a JSON media type")
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxClientJWKSBytes+1))
-}
-
-// isPrivateJWKSHost reports whether a hostname is not publicly routable — a
-// syntactic SSRF check for loopback, private, link-local and reserved targets.
-func isPrivateJWKSHost(host string) bool {
-	host = strings.Trim(host, "[]")
-	lower := strings.ToLower(host)
-	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") ||
-		strings.HasSuffix(lower, ".local") || strings.HasSuffix(lower, ".internal") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false // a public name whose DNS is not resolved here
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		ip.Equal(net.ParseIP("169.254.169.254"))
-}
-
-// parseJWKSet parses an RFC 7517 `{"keys":[...]}` document into a slice of JWK
-// maps, rejecting an empty set.
-func parseJWKSet(raw []byte) ([]map[string]any, error) {
-	var set struct {
-		Keys []map[string]any `json:"keys"`
-	}
-	if err := json.Unmarshal(raw, &set); err != nil {
-		return nil, err
-	}
-	if len(set.Keys) == 0 {
-		return nil, stderrors.New("empty jwk set")
-	}
-	return set.Keys, nil
-}
-
-// consumeClientAssertion enforces the RFC 7523 §3 assertion-hygiene claims
-// (aud/exp/iat) and single-use jti replay protection, mirroring Better Auth's
-// consumeClientAssertion. The jti tombstone id is a digest of the namespaced
-// jti, inserted under the primary key so a cross-worker replay fails atomically.
-func consumeClientAssertion(c *auth.Context, ext store.ExtStore, claims jwt.MapClaims, clientID string) bool {
-	fail := func(msg string) bool {
-		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, msg))
-		return false
-	}
-
-	// aud MUST include the token endpoint (or the issuer).
-	accepted := map[string]bool{
-		endpointURL(c, "/oauth2/token"): true,
-		c.Auth.BaseURL():                true,
-	}
-	audOK := false
-	for _, a := range audienceValues(claims["aud"]) {
-		if accepted[a] {
-			audOK = true
-			break
-		}
-	}
-	if !audOK {
-		return fail("client assertion aud does not match the endpoint")
-	}
-
-	now := time.Now().Unix()
-	maxLifetime := int64(assertionMaxLifetime / time.Second)
-	expF, ok := claims["exp"].(float64)
-	if !ok {
-		return fail("client assertion must include exp claim")
-	}
-	exp := int64(expF)
-	if exp <= now {
-		return fail("client assertion has expired")
-	}
-	if exp-now > maxLifetime {
-		return fail("client assertion exp is too far in the future")
-	}
-	if iatF, ok := claims["iat"].(float64); ok {
-		if now-int64(iatF) > maxLifetime {
-			return fail("client assertion iat is too far in the past")
-		}
-	}
-
-	jti, _ := claims["jti"].(string)
-	if jti == "" {
-		return fail("client assertion must include jti claim")
-	}
-
-	// Single-use: the id is a digest of `private_key_jwt:<clientId>:<jti>`, so the
-	// same jti can recur across clients but never within one. A duplicate primary
-	// key means replay.
-	sum := sha256.Sum256([]byte("private_key_jwt:" + clientID + ":" + jti))
-	jtiID := hex.EncodeToString(sum[:])
-	err := ext.CreateOAuthClientAssertion(c.R.Context(), &types.OAuthClientAssertion{
-		ID:        jtiID,
-		ExpiresAt: time.Unix(exp, 0).UTC(),
-	})
-	if stderrors.Is(err, berrors.ErrAlreadyExists) {
-		return fail("client assertion jti has already been used")
-	}
-	if err != nil {
-		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
-		return false
-	}
-	return true
-}
-
-// audienceValues normalizes a JWT `aud` claim (a string or array of strings)
-// into a slice.
-func audienceValues(aud any) []string {
-	switch v := aud.(type) {
-	case string:
-		return []string{v}
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, a := range v {
-			if s, ok := a.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-// oauthClientMayIntrospect reports whether the introspecting client is allowed
-// to see a token's metadata: it issued the token, or it is linked to one of the
-// token's audience resources. Otherwise the caller gets {active:false}.
-func oauthClientMayIntrospect(c *auth.Context, ext store.ExtStore, clientID, issuerClientID string, resources []string) bool {
-	if clientID == issuerClientID {
-		return true
-	}
-	for _, r := range resources {
-		if linked, _ := ext.IsOAuthClientLinkedToResource(c.R.Context(), clientID, r); linked {
-			return true
-		}
-	}
-	return false
-}
-
-// oidcIntrospectHandler implements RFC 7662 token introspection for opaque
-// access and refresh tokens.
-func oidcIntrospectHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			Token               string `json:"token"`
-			TokenTypeHint       string `json:"token_type_hint"`
-			ClientID            string `json:"client_id"`
-			ClientSecret        string `json:"client_secret"`
-			ClientAssertion     string `json:"client_assertion"`
-			ClientAssertionType string `json:"client_assertion_type"`
-		}
-		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
-			return
-		}
-		client, ok := resolveOAuthClient(c, ext, body.ClientID, body.ClientSecret, body.ClientAssertion, body.ClientAssertionType)
-		if !ok {
-			return
-		}
-		inactive := map[string]any{"active": false}
-		now := time.Now().UTC()
-		iss := c.Auth.BaseURL()
-
-		// RFC 9068 JWT access tokens are self-contained: verify the signature
-		// and surface the claims (revocation state cannot be checked).
-		if oauthcrypto.LooksLikeJWT(body.Token) {
-			key, keyOK := oauthVerifyKey(c, ext)
-			if !keyOK {
-				c.WriteJSON(http.StatusOK, inactive)
-				return
-			}
-			claims, err := oauthcrypto.ParseAccessToken(body.Token, key.Public())
-			if err != nil {
-				c.WriteJSON(http.StatusOK, inactive)
-				return
-			}
-			issuerClient, _ := claims["client_id"].(string)
-			var resources []string
-			if aud, ok := claims["aud"].([]any); ok {
-				for _, a := range aud {
-					if s, ok := a.(string); ok {
-						resources = append(resources, s)
-					}
-				}
-			}
-			if !oauthClientMayIntrospect(c, ext, client.ClientID, issuerClient, resources) {
-				c.WriteJSON(http.StatusOK, inactive)
-				return
-			}
-			tokenType := constants.TokenTypeBearer
-			if _, ok := claims["cnf"]; ok {
-				tokenType = "DPoP"
-			}
-			out := map[string]any{"active": true, "token_type": tokenType}
-			for _, k := range []string{"iss", "sub", "client_id", "scope", "aud", "exp", "iat", "jti", "cnf"} {
-				if v, ok := claims[k]; ok {
-					out[k] = v
-				}
-			}
-			c.WriteJSON(http.StatusOK, out)
-			return
-		}
-
-		if body.TokenTypeHint != "refresh_token" {
-			if at, err := ext.FindOAuthAccessToken(c.R.Context(), body.Token); err == nil {
-				if at.Revoked != nil || at.ExpiresAt.Before(now) || !oauthClientMayIntrospect(c, ext, client.ClientID, at.ClientID, at.Resources) {
-					c.WriteJSON(http.StatusOK, inactive)
-					return
-				}
-				c.WriteJSON(http.StatusOK, map[string]any{
-					"active": true, "iss": iss, "client_id": at.ClientID, "sub": at.UserID,
-					"token_type": constants.TokenTypeBearer, "scope": strings.Join(at.Scopes, " "),
-					"aud": at.Resources, "exp": at.ExpiresAt.Unix(), "iat": at.CreatedAt.Unix(),
-				})
-				return
-			}
-		}
-		if rt, err := ext.FindOAuthRefreshToken(c.R.Context(), body.Token); err == nil {
-			if rt.Revoked != nil || rt.ExpiresAt.Before(now) || !oauthClientMayIntrospect(c, ext, client.ClientID, rt.ClientID, rt.Resources) {
-				c.WriteJSON(http.StatusOK, inactive)
-				return
-			}
-			c.WriteJSON(http.StatusOK, map[string]any{
-				"active": true, "iss": iss, "client_id": rt.ClientID, "sub": rt.UserID,
-				"token_type": "refresh_token", "scope": strings.Join(rt.Scopes, " "),
-				"aud": rt.Resources, "exp": rt.ExpiresAt.Unix(), "iat": rt.CreatedAt.Unix(),
-			})
-			return
-		}
-		c.WriteJSON(http.StatusOK, inactive)
-	}
-}
-
-// oidcRevokeHandler implements RFC 7009 token revocation. Revoking an access
-// token marks it revoked; revoking a refresh token tears down its whole family
-// (and the access tokens linked to it). Unknown tokens still return 200.
-func oidcRevokeHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := requireOAuthStore(c)
-		if !ok {
-			return
-		}
-		var body struct {
-			Token               string `json:"token"`
-			TokenTypeHint       string `json:"token_type_hint"`
-			ClientID            string `json:"client_id"`
-			ClientSecret        string `json:"client_secret"`
-			ClientAssertion     string `json:"client_assertion"`
-			ClientAssertionType string `json:"client_assertion_type"`
-		}
-		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
-			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
-			return
-		}
-		client, ok := resolveOAuthClient(c, ext, body.ClientID, body.ClientSecret, body.ClientAssertion, body.ClientAssertionType)
-		if !ok {
-			return
-		}
-		// Only the issuing client may revoke; mismatches are ignored per RFC 7009.
-		if body.TokenTypeHint != "refresh_token" {
-			if at, err := ext.FindOAuthAccessToken(c.R.Context(), body.Token); err == nil {
-				if at.ClientID == client.ClientID {
-					_ = ext.RevokeOAuthAccessToken(c.R.Context(), body.Token)
-				}
-				c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-				return
-			}
-		}
-		if rt, err := ext.FindOAuthRefreshToken(c.R.Context(), body.Token); err == nil {
-			if rt.ClientID == client.ClientID {
-				_ = ext.InvalidateOAuthRefreshFamily(c.R.Context(), rt.ClientID, rt.UserID)
-			}
-		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-	}
+	return ext, user, true
 }
 
 func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
@@ -1219,6 +659,7 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			ClientID            string `json:"client_id"`
 			ClientSecret        string `json:"client_secret"`
 			RefreshToken        string `json:"refresh_token"`
+			DeviceCode          string `json:"device_code"`
 			ClientAssertion     string `json:"client_assertion"`
 			ClientAssertionType string `json:"client_assertion_type"`
 		}
@@ -1247,8 +688,10 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			dpopJKT = jkt
 		}
 		switch body.GrantType {
-		case "refresh_token":
+		case constants.OAuthGrantTypeRefresh:
 			oidcRefreshTokenGrant(c, ext, opts, clientID, body.RefreshToken, dpopJKT)
+		case constants.OAuthGrantTypeDeviceCode:
+			oidcDeviceCodeGrant(c, ext, opts, clientID, body.DeviceCode, dpopJKT)
 		default: // authorization_code (default preserves prior behaviour)
 			oidcAuthorizationCodeGrant(c, ext, opts, body.Code, clientID, body.ClientAssertion != "", dpopJKT)
 		}
@@ -1323,6 +766,75 @@ func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, opts OIDCProvide
 	replay, _ := json.Marshal(resp)
 	_ = ext.RotateOAuthRefreshToken(c.R.Context(), rt.ID, string(replay), now.Add(refreshReplayWindow))
 	c.WriteJSON(http.StatusOK, resp)
+}
+
+// oidcDeviceCodeGrant redeems an RFC 8628 device_code for OAuth tokens. It runs
+// the device-authorization polling state machine (shared deviceCode table with
+// the device-authorization plugin): slow_down when polled faster than the
+// interval, expired_token past the deadline, authorization_pending while the
+// user has not acted, access_denied on refusal, and — once approved — issues
+// the client's OAuth tokens and consumes the code so it cannot be replayed.
+func oidcDeviceCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, clientID, deviceCode, dpopJKT string) {
+	if deviceCode == "" {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, constants.MsgInvalidDeviceCode))
+		return
+	}
+	dc, err := ext.FindDeviceCodeByDeviceCode(c.R.Context(), deviceCode)
+	if err != nil {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, constants.MsgInvalidDeviceCode))
+		return
+	}
+	now := time.Now().UTC()
+
+	// RFC 8628 §3.5: reject polls that arrive faster than the interval.
+	if dc.LastPolledAt != nil && dc.Interval > 0 {
+		if now.Sub(dc.LastPolledAt.UTC()) < time.Duration(dc.Interval)*time.Second {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeSlowDown))
+			return
+		}
+	}
+	_ = ext.SetDeviceCodePolled(c.R.Context(), dc.ID, now)
+
+	if now.After(dc.ExpiresAt) {
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeExpiredToken))
+		return
+	}
+
+	// The OAuth device grant only redeems codes bound to a client at
+	// /device/code, and the token request must present that same client_id
+	// (RFC 8628 §3.4). An unbound code belongs to the standalone session flow.
+	if dc.ClientID == "" || clientID == "" || dc.ClientID != clientID {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "client id mismatch"))
+		return
+	}
+
+	switch dc.Status {
+	case constants.DeviceStatusPending:
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeAuthorizationPending))
+	case constants.DeviceStatusDenied:
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeAccessDenied))
+	case constants.DeviceStatusApproved:
+		if dc.UserID == "" {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidGrant))
+			return
+		}
+		// Consume the code before issuing credentials so concurrent polls cannot
+		// both redeem it.
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		resp, err := issueOAuthGrant(c, ext, oidcGrant{
+			clientID: clientID, userID: dc.UserID,
+			scopes: scopeList(dc.Scope), jwtAccessTokens: opts.JWTAccessTokens, dpopJKT: dpopJKT,
+		})
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, resp)
+	default:
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "invalid device code status"))
+	}
 }
 
 // oauthVerifyKey loads the provider's EdDSA public key for verifying JWT access
@@ -1417,55 +929,5 @@ func oidcUserInfoHandler() func(*auth.Context) {
 	}
 }
 
-func oidcRegisterHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := auth.ExtStore(c.Auth.Store())
-		if !ok {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeExtStoreRequired))
-			return
-		}
-		var body struct {
-			ClientName   string   `json:"client_name"`
-			RedirectURIs []string `json:"redirect_uris"`
-		}
-		_ = c.ParseJSON(&body)
-		clientID, _ := id.Generate(16)
-		secret, _ := id.Generate(32)
-		now := time.Now()
-		_ = ext.CreateOAuthClient(c.R.Context(), &types.OAuthClient{
-			ID: clientID, ClientID: clientID, ClientSecret: secret, Name: body.ClientName,
-			RedirectURIs: body.RedirectURIs, CreatedAt: now, UpdatedAt: now,
-		})
-		c.WriteJSON(http.StatusOK, map[string]string{
-			"client_id": clientID, "client_secret": secret,
-		})
-	}
-}
-
-func oidcGetClientHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		ext, ok := auth.ExtStore(c.Auth.Store())
-		if !ok {
-			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeExtStoreRequired))
-			return
-		}
-		client, err := ext.FindOAuthClientByClientID(c.R.Context(), c.Vars["id"])
-		if err != nil {
-			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeClientNotFound))
-			return
-		}
-		c.WriteJSON(http.StatusOK, client)
-	}
-}
-
-func oidcEndSessionHandler() func(*auth.Context) {
-	return func(c *auth.Context) {
-		c.Auth.ClearSessionCookie(c)
-		postLogout := c.R.URL.Query().Get("post_logout_redirect_uri")
-		if postLogout != "" {
-			c.Redirect(postLogout)
-			return
-		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
-	}
-}
+// registrationAuthMethods are the token_endpoint_auth_method values the provider
+// accepts for a dynamically registered client (RFC 7591).

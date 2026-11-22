@@ -773,6 +773,21 @@ func (s *Store) UpdateDeviceCode(ctx context.Context, id string, userID, status 
 	return nil
 }
 
+// SetDeviceCodePolled records the most recent poll time so the token endpoint
+// can enforce the RFC 8628 §3.5 polling interval (slow_down).
+func (s *Store) SetDeviceCodePolled(ctx context.Context, id string, t time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("deviceCode")+` SET `+s.table("lastPolledAt")+` = ? WHERE id = ?`),
+		toMillis(t), id)
+	return err
+}
+
+// DeleteDeviceCode removes a device code, used to consume it on successful
+// redemption and to clean up expired or denied codes.
+func (s *Store) DeleteDeviceCode(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("deviceCode")+` WHERE id = ?`), id)
+	return err
+}
+
 // =========================================================================
 // JWKS
 // =========================================================================
