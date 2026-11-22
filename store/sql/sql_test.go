@@ -331,22 +331,30 @@ func TestExtStoreDeviceCode(t *testing.T) {
 	}
 }
 
-func TestExtStoreOAuthApplication(t *testing.T) {
+func TestExtStoreOAuthClient(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
-	must(t, st.CreateOAuthApp(ctx, &types.OAuthApplication{
+	skip := true
+	must(t, st.CreateOAuthClient(ctx, &types.OAuthClient{
 		ID: "app1", ClientID: "client1", ClientSecret: "secret", Name: "App",
-		Icon: "https://example.com/icon.png", Metadata: `{"env":"test"}`,
-		RedirectURLs: "https://example.com/callback", Type: "web", Disabled: true,
+		Icon: "https://example.com/icon.png", Metadata: map[string]any{"env": "test"},
+		RedirectURIs: []string{"https://example.com/callback", "https://example.com/cb2"},
+		Scopes:       []string{"openid", "email"}, SkipConsent: &skip, Disabled: true,
 		UserID: "u1", CreatedAt: now, UpdatedAt: now,
 	}))
-	app, err := st.FindOAuthAppByClientID(ctx, "client1")
+	client, err := st.FindOAuthClientByClientID(ctx, "client1")
 	if err != nil {
-		t.Fatalf("oauth app: %v", err)
+		t.Fatalf("oauth client: %v", err)
 	}
-	if app.ID != "app1" || app.Icon == "" || app.Metadata == "" || !app.Disabled || app.UserID != "u1" || app.UpdatedAt.IsZero() {
-		t.Fatalf("oauth app JS fields not persisted: %+v", app)
+	if client.ID != "app1" || client.Icon == "" || client.Metadata["env"] != "test" || !client.Disabled || client.UserID != "u1" || client.UpdatedAt.IsZero() {
+		t.Fatalf("oauth client fields not persisted: %+v", client)
+	}
+	if len(client.RedirectURIs) != 2 || client.RedirectURIs[0] != "https://example.com/callback" {
+		t.Fatalf("redirectUris not round-tripped: %+v", client.RedirectURIs)
+	}
+	if len(client.Scopes) != 2 || client.SkipConsent == nil || !*client.SkipConsent {
+		t.Fatalf("scopes/skipConsent not round-tripped: %+v", client)
 	}
 }
 
@@ -388,7 +396,7 @@ func TestSchemaScoping(t *testing.T) {
 	if contains(orgSession, `"activeTeamId"`) {
 		t.Fatal("organization schema should not include activeTeamId without teams")
 	}
-	for _, unexpected := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"oauthApplication"`, `"deviceCode"`} {
+	for _, unexpected := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"oauthClient"`, `"deviceCode"`} {
 		if contains(core, unexpected) {
 			t.Fatalf("core schema unexpectedly contains %q", unexpected)
 		}
@@ -461,10 +469,21 @@ func TestSchemaScoping(t *testing.T) {
 		t.Fatal("deviceCode schema should not contain non-JS createdAt field")
 	}
 
-	oauthTable := tableStatement(t, Schema("oidc-provider"), `"oauthApplication"`)
-	for _, want := range []string{"icon", "metadata", "disabled", `"userId"`, `"updatedAt"`} {
-		if !contains(oauthTable, want) {
-			t.Fatalf("oauthApplication schema missing Better Auth JS field %q", want)
+	// oauth-provider replaces the legacy oauthApplication table with the
+	// seven-table model; every table must be present and oauthApplication gone.
+	oauthSchema := joinSchema(Schema("oidc-provider"))
+	for _, want := range []string{`"oauthClient"`, `"oauthResource"`, `"oauthClientResource"`, `"oauthRefreshToken"`, `"oauthAccessToken"`, `"oauthConsent"`, `"oauthClientAssertion"`} {
+		if !contains(oauthSchema, `CREATE TABLE IF NOT EXISTS `+want) {
+			t.Fatalf("oauth-provider schema missing Better Auth table %q", want)
+		}
+	}
+	if contains(oauthSchema, `"oauthApplication"`) {
+		t.Fatal("oauth-provider schema should no longer emit the legacy oauthApplication table")
+	}
+	oauthClientTable := tableStatement(t, Schema("oidc-provider"), `"oauthClient"`)
+	for _, want := range []string{`"clientId"`, `"redirectUris"`, "scopes", `"skipConsent"`, `"dpopBoundAccessTokens"`, "metadata"} {
+		if !contains(oauthClientTable, want) {
+			t.Fatalf("oauthClient schema missing Better Auth JS field %q", want)
 		}
 	}
 
@@ -494,10 +513,13 @@ func TestSchemaScoping(t *testing.T) {
 		}
 	}
 
-	// oidc-provider and mcp share the oauth app table; it must appear once.
+	// oidc-provider and mcp share the oauth-provider table set; each table must
+	// appear once even when both plugins are enabled.
 	shared := joinSchema(Schema("oidc-provider", "mcp"))
-	if n := countSubstr(shared, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
-		t.Fatalf("shared oauthApplication should appear once, got %d", n)
+	for _, tbl := range []string{"oauthClient", "oauthAccessToken", "oauthConsent", "oauthClientAssertion"} {
+		if n := countSubstr(shared, `CREATE TABLE IF NOT EXISTS "`+tbl+`"`); n != 1 {
+			t.Fatalf("shared %s should appear once, got %d", tbl, n)
+		}
 	}
 
 	// MigrateFor should only create the requested tables. Use a fresh DB so the

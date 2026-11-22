@@ -123,12 +123,6 @@ const (
 	TokenTypeBearer    = "Bearer"
 )
 
-// OAuth application types.
-const (
-	OAuthAppTypeWeb = "web"
-	OAuthAppTypeMCP = "mcp"
-)
-
 // Plugin IDs.
 const (
 	PluginBearer            = "bearer"

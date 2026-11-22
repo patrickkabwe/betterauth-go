@@ -122,20 +122,46 @@ type JWKSRecord struct {
 	Crv        *string    `json:"crv,omitempty"`
 }
 
-// OAuthApplication is a registered OAuth client.
-type OAuthApplication struct {
-	ID           string    `json:"id"`
-	ClientID     string    `json:"clientId"`
-	ClientSecret string    `json:"clientSecret,omitempty"`
-	Name         string    `json:"name"`
-	Icon         string    `json:"icon,omitempty"`
-	Metadata     string    `json:"metadata,omitempty"`
-	RedirectURLs string    `json:"redirectUrls"`
-	Type         string    `json:"type"`
-	Disabled     bool      `json:"disabled,omitempty"`
-	UserID       string    `json:"userId,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+// OAuthClient is a registered OAuth client, mirroring Better Auth's
+// oauth-provider `oauthClient` table. List-typed columns (redirectUris, scopes,
+// …) are stored as JSON TEXT and metadata as a JSON object.
+type OAuthClient struct {
+	ID                               string         `json:"id"`
+	ClientID                         string         `json:"clientId"`
+	ClientSecret                     string         `json:"clientSecret,omitempty"`
+	ClientDiscoveryID                string         `json:"clientDiscoveryId,omitempty"`
+	Disabled                         bool           `json:"disabled,omitempty"`
+	SkipConsent                      *bool          `json:"skipConsent,omitempty"`
+	EnableEndSession                 *bool          `json:"enableEndSession,omitempty"`
+	SubjectType                      string         `json:"subjectType,omitempty"`
+	Scopes                           []string       `json:"scopes,omitempty"`
+	ClientCredentialsScopes          []string       `json:"clientCredentialsScopes,omitempty"`
+	UserID                           string         `json:"userId,omitempty"`
+	CreatedAt                        time.Time      `json:"createdAt"`
+	UpdatedAt                        time.Time      `json:"updatedAt"`
+	Name                             string         `json:"name,omitempty"`
+	URI                              string         `json:"uri,omitempty"`
+	Icon                             string         `json:"icon,omitempty"`
+	Contacts                         []string       `json:"contacts,omitempty"`
+	TOS                              string         `json:"tos,omitempty"`
+	Policy                           string         `json:"policy,omitempty"`
+	SoftwareID                       string         `json:"softwareId,omitempty"`
+	SoftwareVersion                  string         `json:"softwareVersion,omitempty"`
+	SoftwareStatement                string         `json:"softwareStatement,omitempty"`
+	RedirectURIs                     []string       `json:"redirectUris"`
+	PostLogoutRedirectURIs           []string       `json:"postLogoutRedirectUris,omitempty"`
+	BackchannelLogoutURI             string         `json:"backchannelLogoutUri,omitempty"`
+	BackchannelLogoutSessionRequired *bool          `json:"backchannelLogoutSessionRequired,omitempty"`
+	TokenEndpointAuthMethod          string         `json:"tokenEndpointAuthMethod,omitempty"`
+	ApplicationType                  string         `json:"applicationType,omitempty"`
+	JWKS                             string         `json:"jwks,omitempty"`
+	JWKSURI                          string         `json:"jwksUri,omitempty"`
+	GrantTypes                       []string       `json:"grantTypes,omitempty"`
+	ResponseTypes                    []string       `json:"responseTypes,omitempty"`
+	RequirePKCE                      *bool          `json:"requirePKCE,omitempty"`
+	DPoPBoundAccessTokens            bool           `json:"dpopBoundAccessTokens,omitempty"`
+	ReferenceID                      string         `json:"referenceId,omitempty"`
+	Metadata                         map[string]any `json:"metadata,omitempty"`
 }
 
 // WalletAddress links a blockchain wallet to a user.

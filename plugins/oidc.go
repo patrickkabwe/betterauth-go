@@ -152,16 +152,9 @@ func oidcRegisterHandler() func(*auth.Context) {
 		clientID, _ := id.Generate(16)
 		secret, _ := id.Generate(32)
 		now := time.Now()
-		redirects := ""
-		for i, u := range body.RedirectURIs {
-			if i > 0 {
-				redirects += ","
-			}
-			redirects += u
-		}
-		_ = ext.CreateOAuthApp(c.R.Context(), &types.OAuthApplication{
+		_ = ext.CreateOAuthClient(c.R.Context(), &types.OAuthClient{
 			ID: clientID, ClientID: clientID, ClientSecret: secret, Name: body.ClientName,
-			RedirectURLs: redirects, Type: constants.OAuthAppTypeWeb, CreatedAt: now, UpdatedAt: now,
+			RedirectURIs: body.RedirectURIs, CreatedAt: now, UpdatedAt: now,
 		})
 		c.WriteJSON(http.StatusOK, map[string]string{
 			"client_id": clientID, "client_secret": secret,
@@ -176,12 +169,12 @@ func oidcGetClientHandler() func(*auth.Context) {
 			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeExtStoreRequired))
 			return
 		}
-		app, err := ext.FindOAuthAppByClientID(c.R.Context(), c.Vars["id"])
+		client, err := ext.FindOAuthClientByClientID(c.R.Context(), c.Vars["id"])
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusNotFound, constants.CodeClientNotFound))
 			return
 		}
-		c.WriteJSON(http.StatusOK, app)
+		c.WriteJSON(http.StatusOK, client)
 	}
 }
 

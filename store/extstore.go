@@ -74,9 +74,9 @@ type ExtStore interface {
 	CreateJWKS(ctx context.Context, rec *types.JWKSRecord) error
 	ListJWKS(ctx context.Context) ([]types.JWKSRecord, error)
 
-	// OAuthApplication
-	CreateOAuthApp(ctx context.Context, app *types.OAuthApplication) error
-	FindOAuthAppByClientID(ctx context.Context, clientID string) (*types.OAuthApplication, error)
+	// OAuthClient (oauth-provider)
+	CreateOAuthClient(ctx context.Context, client *types.OAuthClient) error
+	FindOAuthClientByClientID(ctx context.Context, clientID string) (*types.OAuthClient, error)
 
 	// Wallet
 	CreateWallet(ctx context.Context, w *types.WalletAddress) error

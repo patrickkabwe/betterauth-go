@@ -813,45 +813,174 @@ func (s *Store) ListJWKS(ctx context.Context) ([]types.JWKSRecord, error) {
 }
 
 // =========================================================================
-// OAuthApplication
+// OAuthClient (oauth-provider)
 // =========================================================================
 
-func (s *Store) CreateOAuthApp(ctx context.Context, app *types.OAuthApplication) error {
-	_, err := s.db.ExecContext(ctx, s.q(`
-		INSERT INTO `+s.table("oauthApplication")+` (id, `+s.table("clientId")+`, `+s.table("clientSecret")+`, name, icon, metadata, `+s.table("redirectUrls")+`, type, disabled, `+s.table("userId")+`, `+s.table("createdAt")+`, `+s.table("updatedAt")+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		app.ID, app.ClientID, nullStr(app.ClientSecret), app.Name, nullStr(app.Icon), nullStr(app.Metadata),
-		app.RedirectURLs, app.Type, boolToInt(app.Disabled), nullStr(app.UserID), toMillis(app.CreatedAt), toMillis(app.UpdatedAt))
+var oauthClientColNames = []string{
+	"id", "clientId", "clientSecret", "clientDiscoveryId", "disabled", "skipConsent",
+	"enableEndSession", "subjectType", "scopes", "clientCredentialsScopes", "userId",
+	"createdAt", "updatedAt", "name", "uri", "icon", "contacts", "tos", "policy",
+	"softwareId", "softwareVersion", "softwareStatement", "redirectUris",
+	"postLogoutRedirectUris", "backchannelLogoutUri", "backchannelLogoutSessionRequired",
+	"tokenEndpointAuthMethod", "applicationType", "jwks", "jwksUri", "grantTypes",
+	"responseTypes", "requirePKCE", "dpopBoundAccessTokens", "referenceId", "metadata",
+}
+
+func (s *Store) CreateOAuthClient(ctx context.Context, c *types.OAuthClient) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthClient")+` (`+s.cols(oauthClientColNames...)+`) VALUES (`+qMarks(len(oauthClientColNames))+`)`),
+		c.ID, c.ClientID, nullStr(c.ClientSecret), nullStr(c.ClientDiscoveryID), boolToInt(c.Disabled), nullBoolPtr(c.SkipConsent),
+		nullBoolPtr(c.EnableEndSession), nullStr(c.SubjectType), jsonList(c.Scopes), jsonList(c.ClientCredentialsScopes), nullStr(c.UserID),
+		toMillis(c.CreatedAt), toMillis(c.UpdatedAt), nullStr(c.Name), nullStr(c.URI), nullStr(c.Icon), jsonList(c.Contacts), nullStr(c.TOS), nullStr(c.Policy),
+		nullStr(c.SoftwareID), nullStr(c.SoftwareVersion), nullStr(c.SoftwareStatement), jsonListText(c.RedirectURIs),
+		jsonList(c.PostLogoutRedirectURIs), nullStr(c.BackchannelLogoutURI), nullBoolPtr(c.BackchannelLogoutSessionRequired),
+		nullStr(c.TokenEndpointAuthMethod), nullStr(c.ApplicationType), nullStr(c.JWKS), nullStr(c.JWKSURI), jsonList(c.GrantTypes),
+		jsonList(c.ResponseTypes), nullBoolPtr(c.RequirePKCE), boolToInt(c.DPoPBoundAccessTokens), nullStr(c.ReferenceID), jsonObj(c.Metadata))
 	return err
 }
 
-func (s *Store) FindOAuthAppByClientID(ctx context.Context, clientID string) (*types.OAuthApplication, error) {
+func (s *Store) FindOAuthClientByClientID(ctx context.Context, clientID string) (*types.OAuthClient, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthClientColNames...)+` FROM `+s.table("oauthClient")+` WHERE `+s.table("clientId")+` = ?`), clientID)
+	return scanOAuthClient(row)
+}
+
+func scanOAuthClient(row interface{ Scan(...any) error }) (*types.OAuthClient, error) {
 	var (
-		app          types.OAuthApplication
-		clientSecret sql.NullString
-		icon         sql.NullString
-		metadata     sql.NullString
-		userID       sql.NullString
-		disabled     int
-		createdAt    int64
-		updatedAt    int64
+		c                                                                   types.OAuthClient
+		clientSecret, clientDiscoveryID, subjectType, userID                sql.NullString
+		scopes, ccScopes, name, uri, icon, contacts, tos, policy            sql.NullString
+		softwareID, softwareVersion, softwareStatement, redirectUris        sql.NullString
+		postLogout, backchannelURI, tokenAuthMethod, appType, jwks, jwksURI sql.NullString
+		grantTypes, responseTypes, referenceID, metadata                    sql.NullString
+		disabled, dpopBound                                                 int
+		skipConsent, enableEndSession, backchannelSessionReq, requirePKCE   sql.NullInt64
+		createdAt, updatedAt                                                int64
 	)
-	row := s.db.QueryRowContext(ctx, s.q(`
-		SELECT id, `+s.table("clientId")+`, `+s.table("clientSecret")+`, name, icon, metadata, `+s.table("redirectUrls")+`, type, disabled, `+s.table("userId")+`, `+s.table("createdAt")+`, `+s.table("updatedAt")+` FROM `+s.table("oauthApplication")+` WHERE `+s.table("clientId")+` = ?`), clientID)
-	if err := row.Scan(&app.ID, &app.ClientID, &clientSecret, &app.Name, &icon, &metadata, &app.RedirectURLs, &app.Type, &disabled, &userID, &createdAt, &updatedAt); err != nil {
+	err := row.Scan(&c.ID, &c.ClientID, &clientSecret, &clientDiscoveryID, &disabled, &skipConsent,
+		&enableEndSession, &subjectType, &scopes, &ccScopes, &userID,
+		&createdAt, &updatedAt, &name, &uri, &icon, &contacts, &tos, &policy,
+		&softwareID, &softwareVersion, &softwareStatement, &redirectUris,
+		&postLogout, &backchannelURI, &backchannelSessionReq,
+		&tokenAuthMethod, &appType, &jwks, &jwksURI, &grantTypes,
+		&responseTypes, &requirePKCE, &dpopBound, &referenceID, &metadata)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
 		return nil, err
 	}
-	app.ClientSecret = clientSecret.String
-	app.Icon = icon.String
-	app.Metadata = metadata.String
-	app.Disabled = disabled != 0
-	app.UserID = userID.String
-	app.CreatedAt = fromMillis(createdAt)
-	app.UpdatedAt = fromMillis(updatedAt)
-	return &app, nil
+	c.ClientSecret = clientSecret.String
+	c.ClientDiscoveryID = clientDiscoveryID.String
+	c.Disabled = disabled != 0
+	c.SkipConsent = scanNullBoolPtr(skipConsent)
+	c.EnableEndSession = scanNullBoolPtr(enableEndSession)
+	c.SubjectType = subjectType.String
+	c.Scopes = scanJSONList(scopes)
+	c.ClientCredentialsScopes = scanJSONList(ccScopes)
+	c.UserID = userID.String
+	c.CreatedAt = fromMillis(createdAt)
+	c.UpdatedAt = fromMillis(updatedAt)
+	c.Name = name.String
+	c.URI = uri.String
+	c.Icon = icon.String
+	c.Contacts = scanJSONList(contacts)
+	c.TOS = tos.String
+	c.Policy = policy.String
+	c.SoftwareID = softwareID.String
+	c.SoftwareVersion = softwareVersion.String
+	c.SoftwareStatement = softwareStatement.String
+	c.RedirectURIs = scanJSONList(redirectUris)
+	c.PostLogoutRedirectURIs = scanJSONList(postLogout)
+	c.BackchannelLogoutURI = backchannelURI.String
+	c.BackchannelLogoutSessionRequired = scanNullBoolPtr(backchannelSessionReq)
+	c.TokenEndpointAuthMethod = tokenAuthMethod.String
+	c.ApplicationType = appType.String
+	c.JWKS = jwks.String
+	c.JWKSURI = jwksURI.String
+	c.GrantTypes = scanJSONList(grantTypes)
+	c.ResponseTypes = scanJSONList(responseTypes)
+	c.RequirePKCE = scanNullBoolPtr(requirePKCE)
+	c.DPoPBoundAccessTokens = dpopBound != 0
+	c.ReferenceID = referenceID.String
+	c.Metadata = scanJSONObj(metadata)
+	return &c, nil
+}
+
+// qMarks returns n comma-separated SQL placeholders: "?, ?, ?".
+func qMarks(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	b := make([]byte, 0, n*3)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b = append(b, ',', ' ')
+		}
+		b = append(b, '?')
+	}
+	return string(b)
+}
+
+// jsonList encodes a string slice as JSON TEXT, or SQL NULL when empty.
+func jsonList(v []string) any {
+	if len(v) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// jsonListText is jsonList for NOT NULL columns: empty encodes as "[]".
+func jsonListText(v []string) string {
+	if len(v) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func scanJSONList(v sql.NullString) []string {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	var out []string
+	_ = json.Unmarshal([]byte(v.String), &out)
+	return out
+}
+
+func jsonObj(v map[string]any) any {
+	if len(v) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func scanJSONObj(v sql.NullString) map[string]any {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	var out map[string]any
+	_ = json.Unmarshal([]byte(v.String), &out)
+	return out
+}
+
+// nullBoolPtr maps a *bool to a nullable INTEGER (NULL / 0 / 1).
+func nullBoolPtr(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	if *v {
+		return 1
+	}
+	return 0
+}
+
+func scanNullBoolPtr(v sql.NullInt64) *bool {
+	if !v.Valid {
+		return nil
+	}
+	b := v.Int64 != 0
+	return &b
 }
 
 // =========================================================================
