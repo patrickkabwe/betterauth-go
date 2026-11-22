@@ -7,13 +7,44 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
+	"github.com/patrickkabwe/betterauth-go/internal/oauthcrypto"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
 )
+
+const dpopProofMaxAge = time.Minute
+
+// oauthSigningKey loads the provider's EdDSA signing key from the jwks table,
+// generating and persisting one on first use. Used for RFC 9068 JWT access
+// tokens; the public key is exposed at the JWKS endpoint.
+func oauthSigningKey(c *auth.Context, ext store.ExtStore) (oauthcrypto.SigningKey, error) {
+	keys, _ := ext.ListJWKS(c.R.Context())
+	for _, k := range keys {
+		if k.Alg != nil && *k.Alg == "EdDSA" && k.PrivateKey != "" {
+			return oauthcrypto.SigningKeyFromSeed(k.ID, k.PrivateKey)
+		}
+	}
+	kid, _ := id.Generate(16)
+	key, seed, err := oauthcrypto.NewSigningKey(kid)
+	if err != nil {
+		return oauthcrypto.SigningKey{}, err
+	}
+	alg, crv := "EdDSA", "Ed25519"
+	_ = ext.CreateJWKS(c.R.Context(), &types.JWKSRecord{
+		ID: kid, PublicKey: key.PublicX, PrivateKey: seed, Alg: &alg, Crv: &crv, CreatedAt: time.Now().UTC(),
+	})
+	return key, nil
+}
+
+// endpointURL is the public URL for a provider endpoint (the DPoP `htu`).
+func endpointURL(c *auth.Context, path string) string {
+	return c.Auth.BaseURL() + c.Auth.BasePath() + path
+}
 
 // accessTokenTTL and refreshTokenTTL are the Phase 2 defaults (Better Auth uses
 // 1h / 30d). refreshReplayWindow is how long a just-rotated refresh token still
@@ -70,25 +101,26 @@ func hasScope(scopes []string, want string) bool {
 
 // oidcGrant carries the resolved inputs for issuing a token grant.
 type oidcGrant struct {
-	clientID  string
-	userID    string
-	sessionID string
-	scopes    []string
-	resources []string // RFC 8707 resource indicators bound to the tokens
-	accessTTL time.Duration
+	clientID        string
+	userID          string
+	sessionID       string
+	scopes          []string
+	resources       []string // RFC 8707 resource indicators bound to the tokens
+	accessTTL       time.Duration
+	jwtAccessTokens bool   // issue an RFC 9068 JWT access token instead of opaque
+	dpopJKT         string // RFC 9449 confirmation thumbprint, when DPoP-bound
 }
 
-// issueOAuthGrant creates an access token (and, when offline_access is granted,
-// a rotating refresh token) for the grant and returns the token response. The
-// RFC 8707 resources are stored on both tokens as the audience list.
+// issueOAuthGrant mints the access token (JWT or opaque) and, when
+// offline_access is granted, an opaque refresh token, and returns the token
+// response. RFC 8707 resources become the audience; a DPoP jkt sender-constrains
+// the token (cnf claim on JWTs, confirmation column on opaque tokens).
 func issueOAuthGrant(c *auth.Context, ext store.ExtStore, g oidcGrant) (oidcTokenResponse, error) {
 	now := time.Now().UTC()
 	accessTTL := g.accessTTL
 	if accessTTL <= 0 {
 		accessTTL = accessTokenTTL
 	}
-	accessID, _ := id.Generate(32)
-	accessTok, _ := id.Generate(32)
 	refreshID := ""
 	refreshTok := ""
 	if hasScope(g.scopes, "offline_access") {
@@ -101,19 +133,74 @@ func issueOAuthGrant(c *auth.Context, ext store.ExtStore, g oidcGrant) (oidcToke
 			return oidcTokenResponse{}, err
 		}
 	}
-	if err := ext.CreateOAuthAccessToken(c.R.Context(), &types.OAuthAccessToken{
-		ID: accessID, Token: accessTok, ClientID: g.clientID, SessionID: g.sessionID, UserID: g.userID,
-		Scopes: g.scopes, Resources: g.resources, RefreshID: refreshID, ExpiresAt: now.Add(accessTTL), CreatedAt: now,
-	}); err != nil {
-		return oidcTokenResponse{}, err
+
+	var accessTok string
+	if g.jwtAccessTokens {
+		key, err := oauthSigningKey(c, ext)
+		if err != nil {
+			return oidcTokenResponse{}, err
+		}
+		jti, _ := id.Generate(16)
+		claims := jwt.MapClaims{
+			"iss": c.Auth.BaseURL(), "sub": g.userID, "client_id": g.clientID,
+			"iat": now.Unix(), "exp": now.Add(accessTTL).Unix(), "jti": jti,
+			"scope": strings.Join(g.scopes, " "),
+		}
+		if len(g.resources) > 0 {
+			claims["aud"] = g.resources
+		}
+		if g.dpopJKT != "" {
+			claims["cnf"] = map[string]any{"jkt": g.dpopJKT}
+		}
+		if accessTok, err = key.SignAccessToken(claims); err != nil {
+			return oidcTokenResponse{}, err
+		}
+		// RFC 9068 JWT access tokens are self-contained and not stored.
+	} else {
+		accessID, _ := id.Generate(32)
+		accessTok, _ = id.Generate(32)
+		var confirmation map[string]any
+		if g.dpopJKT != "" {
+			confirmation = map[string]any{"jkt": g.dpopJKT}
+		}
+		if err := ext.CreateOAuthAccessToken(c.R.Context(), &types.OAuthAccessToken{
+			ID: accessID, Token: accessTok, ClientID: g.clientID, SessionID: g.sessionID, UserID: g.userID,
+			Scopes: g.scopes, Resources: g.resources, RefreshID: refreshID, Confirmation: confirmation,
+			ExpiresAt: now.Add(accessTTL), CreatedAt: now,
+		}); err != nil {
+			return oidcTokenResponse{}, err
+		}
+	}
+
+	tokenType := constants.TokenTypeBearer
+	if g.dpopJKT != "" {
+		tokenType = "DPoP"
 	}
 	return oidcTokenResponse{
 		AccessToken:  accessTok,
-		TokenType:    constants.TokenTypeBearer,
+		TokenType:    tokenType,
 		ExpiresIn:    int(accessTTL.Seconds()),
 		Scope:        strings.Join(g.scopes, " "),
 		RefreshToken: refreshTok,
 	}, nil
+}
+
+// verifyDPoPAtEndpoint verifies a DPoP proof for an endpoint, enforcing single
+// use of its jti via the verification store. Returns the key thumbprint.
+func verifyDPoPAtEndpoint(c *auth.Context, proof, method, path, ath string) (string, error) {
+	res, err := oauthcrypto.VerifyDPoPProof(proof, method, endpointURL(c, path), time.Now().UTC(), dpopProofMaxAge)
+	if err != nil {
+		return "", err
+	}
+	if ath != "" && res.ATH != ath {
+		return "", apierror.New(http.StatusUnauthorized, constants.CodeUnauthorized, "dpop ath mismatch")
+	}
+	// Replay protection: the jti may be presented only once within its lifetime.
+	if _, err := c.Auth.Store().FindVerificationByIdentifier(c.R.Context(), "dpop:"+res.JTI); err == nil {
+		return "", apierror.New(http.StatusUnauthorized, constants.CodeInvalidDPoPProof, "dpop proof replayed")
+	}
+	_ = c.Auth.CreateVerification(c.R.Context(), "dpop:"+res.JTI, "1", dpopProofMaxAge+30*time.Second)
+	return res.JKT, nil
 }
 
 // validateResources resolves the RFC 8707 resource indicators for a request:
@@ -180,6 +267,10 @@ type OIDCProviderOptions struct {
 	// requested RFC 8707 resource (via oauthClientResource) before a token may
 	// be issued for it. When false, any enabled resource may be requested.
 	EnforcePerClientResources bool
+	// JWTAccessTokens issues stateless RFC 9068 EdDSA-signed JWT access tokens
+	// instead of opaque ones. When a DPoP proof accompanies the token request,
+	// the JWT is sender-constrained with a cnf:{jkt} claim (RFC 9449).
+	JWTAccessTokens bool
 }
 
 // OIDCProvider exposes OIDC provider endpoints.
@@ -202,7 +293,7 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 			rt(http.MethodPost, "/oauth2/client-resource/link", oidcLinkClientResourceHandler()),
 			rt(http.MethodPost, "/oauth2/client-resource/unlink", oidcUnlinkClientResourceHandler()),
 			rt(http.MethodGet, "/oauth2/client-resource", oidcListClientResourcesHandler()),
-			rt(http.MethodPost, "/oauth2/token", oidcTokenHandler()),
+			rt(http.MethodPost, "/oauth2/token", oidcTokenHandler(opts)),
 			rt(http.MethodPost, "/oauth2/introspect", oidcIntrospectHandler()),
 			rt(http.MethodPost, "/oauth2/revoke", oidcRevokeHandler()),
 			rt(http.MethodGet, "/oauth2/userinfo", oidcUserInfoHandler()),
@@ -226,9 +317,11 @@ func oidcMetadataHandler() func(*auth.Context) {
 			"userinfo_endpoint":                     base + "/oauth2/userinfo",
 			"registration_endpoint":                 base + "/oauth2/register",
 			"end_session_endpoint":                  base + "/oauth2/endsession",
+			"jwks_uri":                              c.Auth.BaseURL() + c.Auth.BasePath() + "/jwks",
 			"response_types_supported":              []string{"code"},
 			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{constants.JWTAlgHS256},
+			"dpop_signing_alg_values_supported":     []string{"EdDSA", "ES256"},
 		})
 	}
 }
@@ -714,6 +807,46 @@ func oidcIntrospectHandler() func(*auth.Context) {
 		now := time.Now().UTC()
 		iss := c.Auth.BaseURL()
 
+		// RFC 9068 JWT access tokens are self-contained: verify the signature
+		// and surface the claims (revocation state cannot be checked).
+		if oauthcrypto.LooksLikeJWT(body.Token) {
+			key, keyOK := oauthVerifyKey(c, ext)
+			if !keyOK {
+				c.WriteJSON(http.StatusOK, inactive)
+				return
+			}
+			claims, err := oauthcrypto.ParseAccessToken(body.Token, key.Public())
+			if err != nil {
+				c.WriteJSON(http.StatusOK, inactive)
+				return
+			}
+			issuerClient, _ := claims["client_id"].(string)
+			var resources []string
+			if aud, ok := claims["aud"].([]any); ok {
+				for _, a := range aud {
+					if s, ok := a.(string); ok {
+						resources = append(resources, s)
+					}
+				}
+			}
+			if !oauthClientMayIntrospect(c, ext, client.ClientID, issuerClient, resources) {
+				c.WriteJSON(http.StatusOK, inactive)
+				return
+			}
+			tokenType := constants.TokenTypeBearer
+			if _, ok := claims["cnf"]; ok {
+				tokenType = "DPoP"
+			}
+			out := map[string]any{"active": true, "token_type": tokenType}
+			for _, k := range []string{"iss", "sub", "client_id", "scope", "aud", "exp", "iat", "jti", "cnf"} {
+				if v, ok := claims[k]; ok {
+					out[k] = v
+				}
+			}
+			c.WriteJSON(http.StatusOK, out)
+			return
+		}
+
 		if body.TokenTypeHint != "refresh_token" {
 			if at, err := ext.FindOAuthAccessToken(c.R.Context(), body.Token); err == nil {
 				if at.Revoked != nil || at.ExpiresAt.Before(now) || !oauthClientMayIntrospect(c, ext, client.ClientID, at.ClientID, at.Resources) {
@@ -786,7 +919,7 @@ func oidcRevokeHandler() func(*auth.Context) {
 	}
 }
 
-func oidcTokenHandler() func(*auth.Context) {
+func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 	return func(c *auth.Context) {
 		ext, ok := requireOAuthStore(c)
 		if !ok {
@@ -803,16 +936,26 @@ func oidcTokenHandler() func(*auth.Context) {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidTokenRequest))
 			return
 		}
+		// RFC 9449: a DPoP proof on the token request sender-constrains the token.
+		dpopJKT := ""
+		if proof := c.R.Header.Get("DPoP"); proof != "" {
+			jkt, err := verifyDPoPAtEndpoint(c, proof, http.MethodPost, "/oauth2/token", "")
+			if err != nil {
+				c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidDPoPProof, "invalid dpop proof"))
+				return
+			}
+			dpopJKT = jkt
+		}
 		switch body.GrantType {
 		case "refresh_token":
-			oidcRefreshTokenGrant(c, ext, body.ClientID, body.RefreshToken)
+			oidcRefreshTokenGrant(c, ext, opts, body.ClientID, body.RefreshToken, dpopJKT)
 		default: // authorization_code (default preserves prior behaviour)
-			oidcAuthorizationCodeGrant(c, ext, body.Code)
+			oidcAuthorizationCodeGrant(c, ext, opts, body.Code, dpopJKT)
 		}
 	}
 }
 
-func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, code string) {
+func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, code, dpopJKT string) {
 	v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationOIDCCode+code)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
@@ -826,6 +969,7 @@ func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, code string
 	resp, err := issueOAuthGrant(c, ext, oidcGrant{
 		clientID: data.ClientID, userID: data.UserID, sessionID: data.SessionID,
 		scopes: scopeList(data.Scope), resources: data.Resources,
+		jwtAccessTokens: opts.JWTAccessTokens, dpopJKT: dpopJKT,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -838,7 +982,7 @@ func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, code string
 // refresh token, then revokes the presented one and records the response for a
 // short replay window. A revoked token presented again replays that response
 // inside the window, or triggers family invalidation (reuse) outside it.
-func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, clientID, refreshToken string) {
+func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, clientID, refreshToken, dpopJKT string) {
 	rt, err := ext.FindOAuthRefreshToken(c.R.Context(), refreshToken)
 	if err != nil {
 		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "session not found"))
@@ -864,6 +1008,7 @@ func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, clientID, refres
 	resp, err := issueOAuthGrant(c, ext, oidcGrant{
 		clientID: rt.ClientID, userID: rt.UserID, sessionID: rt.SessionID,
 		scopes: rt.Scopes, resources: rt.Resources,
+		jwtAccessTokens: opts.JWTAccessTokens, dpopJKT: dpopJKT,
 	})
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
@@ -874,23 +1019,88 @@ func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, clientID, refres
 	c.WriteJSON(http.StatusOK, resp)
 }
 
+// oauthVerifyKey loads the provider's EdDSA public key for verifying JWT access
+// tokens, without creating one (read-only, unlike oauthSigningKey).
+func oauthVerifyKey(c *auth.Context, ext store.ExtStore) (oauthcrypto.SigningKey, bool) {
+	keys, _ := ext.ListJWKS(c.R.Context())
+	for _, k := range keys {
+		if k.Alg != nil && *k.Alg == "EdDSA" && k.PrivateKey != "" {
+			if sk, err := oauthcrypto.SigningKeyFromSeed(k.ID, k.PrivateKey); err == nil {
+				return sk, true
+			}
+		}
+	}
+	return oauthcrypto.SigningKey{}, false
+}
+
+// bearerToken extracts the access token from the Authorization header, accepting
+// both the Bearer and DPoP schemes.
+func bearerToken(c *auth.Context) string {
+	h := c.R.Header.Get(constants.HeaderAuthorization)
+	for _, scheme := range []string{constants.TokenTypeBearer + " ", "DPoP "} {
+		if len(h) > len(scheme) && strings.EqualFold(h[:len(scheme)], scheme) {
+			return h[len(scheme):]
+		}
+	}
+	return h
+}
+
 func oidcUserInfoHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
 		ext, ok := requireOAuthStore(c)
 		if !ok {
 			return
 		}
-		token := c.R.Header.Get(constants.HeaderAuthorization)
-		bearerPrefix := constants.TokenTypeBearer + " "
-		if len(token) > len(bearerPrefix) && strings.EqualFold(token[:len(bearerPrefix)], bearerPrefix) {
-			token = token[len(bearerPrefix):]
+		token := bearerToken(c)
+		now := time.Now().UTC()
+		var userID, cnfJKT string
+
+		if oauthcrypto.LooksLikeJWT(token) {
+			key, ok := oauthVerifyKey(c, ext)
+			if !ok {
+				c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+				return
+			}
+			claims, err := oauthcrypto.ParseAccessToken(token, key.Public())
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+				return
+			}
+			if iss, _ := claims["iss"].(string); iss != c.Auth.BaseURL() {
+				c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+				return
+			}
+			userID, _ = claims["sub"].(string)
+			if cnf, ok := claims["cnf"].(map[string]any); ok {
+				cnfJKT, _ = cnf["jkt"].(string)
+			}
+		} else {
+			at, err := ext.FindOAuthAccessToken(c.R.Context(), token)
+			if err != nil || at.Revoked != nil || at.ExpiresAt.Before(now) {
+				c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
+				return
+			}
+			userID = at.UserID
+			if at.Confirmation != nil {
+				cnfJKT, _ = at.Confirmation["jkt"].(string)
+			}
 		}
-		at, err := ext.FindOAuthAccessToken(c.R.Context(), token)
-		if err != nil || at.Revoked != nil || at.ExpiresAt.Before(time.Now().UTC()) {
-			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
-			return
+
+		// RFC 9449: a sender-constrained token requires a matching DPoP proof.
+		if cnfJKT != "" {
+			proof := c.R.Header.Get("DPoP")
+			if proof == "" {
+				c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidDPoPProof, "dpop proof required"))
+				return
+			}
+			jkt, err := verifyDPoPAtEndpoint(c, proof, http.MethodGet, "/oauth2/userinfo", oauthcrypto.AccessTokenHash(token))
+			if err != nil || jkt != cnfJKT {
+				c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidDPoPProof, "invalid dpop proof"))
+				return
+			}
 		}
-		user, err := c.Auth.Store().FindUserByID(c.R.Context(), at.UserID)
+
+		user, err := c.Auth.Store().FindUserByID(c.R.Context(), userID)
 		if err != nil {
 			c.WriteError(apierror.WithCode(http.StatusUnauthorized, constants.CodeUnauthorized))
 			return

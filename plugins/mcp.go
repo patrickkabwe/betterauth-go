@@ -74,7 +74,7 @@ func MCP(opts MCPOptions) auth.Plugin {
 				return
 			}
 			if body.GrantType == "refresh_token" {
-				oidcRefreshTokenGrant(c, ext, "", body.RefreshToken)
+				oidcRefreshTokenGrant(c, ext, OIDCProviderOptions{}, "", body.RefreshToken, "")
 				return
 			}
 			v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationMCPCode+body.Code)
