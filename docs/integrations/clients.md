@@ -1,6 +1,6 @@
 # Client integration
 
-Use the official Better Auth client SDKs unchanged — point `baseURL` at your Go
+Use the official Better Auth client SDKs unchanged. Point `baseURL` at your Go
 server.
 
 ## React

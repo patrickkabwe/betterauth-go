@@ -61,7 +61,7 @@ column names match Better Auth JS defaults.
 | `verification` | Email verification, reset tokens, OAuth state |
 
 Plugin tables and plugin-contributed core fields are created only when those
-plugins are enabled — see the [CLI](cli.md) and `betterauth-go generate`.
+plugins are enabled. See the [CLI](cli.md) and `betterauth-go generate`.
 
 ## In-memory store
 

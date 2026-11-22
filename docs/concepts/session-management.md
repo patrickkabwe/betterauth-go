@@ -56,7 +56,7 @@ Disable entirely with `DisableSessionRefresh: true` or the query parameter
 
 ## Fresh sessions
 
-Some sensitive operations (e.g. delete user) require a **fresh** session —
+Some sensitive operations (e.g. delete user) require a **fresh** session,
 created within `FreshAge` (default 24h). Set `FreshAge` to `0` to disable
 freshness checks.
 
@@ -84,6 +84,6 @@ separate cookies. See [Plugin overview](../plugins/overview.md).
 ## Secondary storage
 
 `SecondaryStorage` (Redis-like interface) is defined for session/cache offload.
-Wiring is optional — see [ROADMAP](../../ROADMAP.md).
+Wiring is optional; see [ROADMAP](../../ROADMAP.md).
 
 Next: [Cookies →](cookies.md)

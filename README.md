@@ -4,21 +4,21 @@
   <img src="docs/assets/betterauth-go-banner.png" alt="BetterAuth-Go — Authentication that feels native to Go" width="100%" />
 </p>
 
-A Go server implementation compatible with [Better Auth](https://better-auth.com) clients — React, Vue, Svelte, Solid, and the framework-agnostic client.
+A Go server implementation compatible with [Better Auth](https://better-auth.com) clients: React, Vue, Svelte, Solid, and the framework-agnostic client.
 
 Drop this into any Go HTTP server and point your `better-auth/react` (or other) client at it.
 
 ## Features
 
-- **Client-compatible API** — implements the endpoints expected by official Better Auth clients
-- **Signed session cookies** — HMAC-SHA256 signing matching `better-call` (`better-auth.session_token`)
-- **Scrypt passwords** — compatible hash format (`salt:key`) with the TypeScript server
-- **Pluggable storage** — `Store` interface with in-memory and SQL (Postgres / SQLite / MySQL) adapters
-- **24 core plugins** — bearer, JWT, organization, admin, 2FA, magic link, email OTP, passkey-adjacent, OIDC provider, and more
-- **Production middleware** — credentials-aware CORS (with wildcard origins), origin-based CSRF protection, and per-path rate limiting
-- **Database hooks** — before/after callbacks around user and session create/update/delete
-- **Secret rotation** — sign with a new secret while still trusting old ones (zero-downtime rotation)
-- **Cross-subdomain & custom cookies** — shared cookie domains, custom names, and the `Partitioned` attribute
+- **Client-compatible API.** Implements the endpoints expected by official Better Auth clients
+- **Signed session cookies.** HMAC-SHA256 signing matching `better-call` (`better-auth.session_token`)
+- **Scrypt passwords.** Compatible hash format (`salt:key`) with the TypeScript server
+- **Pluggable storage.** `Store` interface with in-memory and SQL (Postgres / SQLite / MySQL) adapters
+- **24 core plugins.** Bearer, JWT, organization, admin, 2FA, magic link, email OTP, passkey-adjacent, OIDC provider, and more
+- **Production middleware.** Credentials-aware CORS (with wildcard origins), origin-based CSRF protection, and per-path rate limiting
+- **Database hooks.** Before/after callbacks around user and session create/update/delete
+- **Secret rotation.** Sign with a new secret while still trusting old ones (zero-downtime rotation)
+- **Cross-subdomain & custom cookies.** Shared cookie domains, custom names, and the `Partitioned` attribute
 
 ## Supported Endpoints
 
@@ -79,10 +79,10 @@ go run ./examples/basic
 A full Vite + React app lives in `examples/client/`:
 
 ```bash
-# Terminal 1 — Go server
+# Terminal 1: Go server
 go run ./examples/basic
 
-# Terminal 2 — React client
+# Terminal 2: React client
 cd examples/client
 npm install
 npm run dev
@@ -223,7 +223,7 @@ include everything with `--all`.
 The bundled binary embeds the SQLite driver. Because Go is statically compiled,
 `generate`/`migrate`/`info` read your real config from an `*auth.Auth` instance
 (the Go equivalent of the TS CLI's `--config` file). Build a tiny binary that
-constructs your auth and calls `core.Run` — this lets `migrate` apply the schema
+constructs your auth and calls `core.Run`. This lets `migrate` apply the schema
 to your already-configured Postgres/MySQL connection:
 
 ```go
@@ -267,7 +267,7 @@ Wrap `a.Handler()` as middleware or mount at `/api/auth`.
 This library implements the core email/password flow, social OAuth, session
 management, user/account management, and 24 core plugins (bearer, JWT,
 organization, admin, two-factor, magic link, email OTP, OIDC provider, and
-more — see [`plugins/`](plugins) and the [ROADMAP](ROADMAP.md)).
+more; see [`plugins/`](plugins) and the [ROADMAP](ROADMAP.md)).
 
 Session cookies use the same signing algorithm as Better Auth (`value.hmac_sha256_base64`). Password hashes use scrypt with `N=16384, r=16, p=1, dkLen=64`.
 

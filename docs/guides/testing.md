@@ -1,6 +1,6 @@
 # Testing
 
-Test auth flows in Go using the in-memory store and `httptest` — no database
+Test auth flows in Go using the in-memory store and `httptest`, with no database
 required.
 
 ## Minimal test setup

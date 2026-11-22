@@ -101,7 +101,7 @@ When you pass an `*auth.Auth` instance, plugin detection is automatic.
 
 ## Embedded CLI
 
-Go is statically compiled — commands that need your real config read from an
+Go is statically compiled, so commands that need your real config read from an
 `*auth.Auth` you provide (the Go equivalent of `--config` in the TS CLI):
 
 ```go

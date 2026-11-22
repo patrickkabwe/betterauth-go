@@ -1,7 +1,7 @@
 # Server-side API
 
 Beyond `auth.Handler()`, the `*auth.Auth` instance exposes helper methods for
-plugins, custom routes, and server-side code — a partial equivalent of the
+plugins, custom routes, and server-side code, a partial equivalent of the
 TypeScript `auth.api.*` namespace.
 
 ## Session helpers

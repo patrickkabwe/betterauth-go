@@ -1,6 +1,6 @@
 # Hooks
 
-Hooks let you intercept requests and database operations — the Go equivalent of
+Hooks let you intercept requests and database operations, the Go equivalent of
 Better Auth's `hooks` and `databaseHooks` options.
 
 ## Request hooks

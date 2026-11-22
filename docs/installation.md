@@ -67,4 +67,4 @@ mux := http.NewServeMux()
 mux.Handle("/api/auth/", http.StripPrefix("/api/auth", a.Handler()))
 ```
 
-That's it — continue to [Basic usage →](basic-usage.md).
+That's it. Continue to [Basic usage →](basic-usage.md).

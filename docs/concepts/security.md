@@ -17,7 +17,7 @@ TrustedOrigins: []string{
 
 `BaseURL` is automatically added to the trusted set.
 
-Wildcards use `*` segments — `"*"` alone allows any origin (use with care).
+Wildcards use `*` segments. `"*"` alone allows any origin (use with care).
 
 ## CORS
 
@@ -27,7 +27,7 @@ actual requests from trusted origins. Credentials (cookies) are supported.
 ## CSRF protection
 
 For state-changing requests (POST, PUT, PATCH, DELETE), the server checks the
-`Origin` header — or `Referer` when Origin is absent — against trusted origins.
+`Origin` header (or `Referer` when Origin is absent) against trusted origins.
 
 - GET/HEAD/OPTIONS are exempt.
 - Requests with no Origin or Referer are allowed (non-browser clients, bearer

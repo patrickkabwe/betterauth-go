@@ -21,7 +21,7 @@ r := chi.NewRouter()
 r.Mount("/api/auth", a.Handler())
 ```
 
-Chi strips the mount prefix automatically — no `StripPrefix` needed.
+Chi strips the mount prefix automatically, so no `StripPrefix` is needed.
 
 ## Gin
 

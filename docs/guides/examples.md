@@ -5,7 +5,7 @@ framework.
 
 ## Go server
 
-**[`examples/basic/`](../../examples/basic/main.go)** — full-featured reference
+**[`examples/basic/`](../../examples/basic/main.go)** is a full-featured reference
 server with:
 
 - In-memory or SQLite store (`DATABASE_PATH`)

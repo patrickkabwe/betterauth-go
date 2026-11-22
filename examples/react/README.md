@@ -9,7 +9,7 @@ React + Vite playground using the official [`better-auth/react`](https://better-
 
 ## Run
 
-**Terminal 1 — Go auth server**
+**Terminal 1: Go auth server**
 
 ```bash
 cd ../..   # repo root
@@ -18,7 +18,7 @@ go run ./examples/basic
 
 The server uses SQLite (`better-auth-example.db` in the working directory) so organization and two-factor plugins work. Email links, OTPs, and magic links are **logged to this terminal**.
 
-**Terminal 2 — React client**
+**Terminal 2: React client**
 
 ```bash
 cd examples/react
