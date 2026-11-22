@@ -94,6 +94,14 @@ func JWT(opts JWTOptions) auth.Plugin {
 				keys, _ := ext.ListJWKS(c.R.Context())
 				out := make([]map[string]string, 0, len(keys))
 				for _, k := range keys {
+					// EdDSA keys (used for RFC 9068 JWT access tokens) are exposed
+					// as OKP public JWKs; the legacy HS256 keys stay symmetric.
+					if k.Alg != nil && *k.Alg == "EdDSA" {
+						out = append(out, map[string]string{
+							"kid": k.ID, "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "use": "sig", "x": k.PublicKey,
+						})
+						continue
+					}
 					out = append(out, map[string]string{
 						"kid": k.ID, "kty": constants.JWTKtyOct, "alg": constants.JWTAlgHS256, "k": k.PublicKey,
 					})
