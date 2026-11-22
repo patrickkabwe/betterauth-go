@@ -59,16 +59,18 @@ type Team struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	OrganizationID string    `json:"organizationId"`
+	MemberCount    int       `json:"memberCount"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt,omitempty"`
 }
 
 // TeamMember links a user to a team.
 type TeamMember struct {
-	ID        string    `json:"id"`
-	TeamID    string    `json:"teamId"`
-	UserID    string    `json:"userId"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID            string    `json:"id"`
+	TeamID        string    `json:"teamId"`
+	UserID        string    `json:"userId"`
+	MembershipKey string    `json:"-"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // OrganizationRole stores a dynamic organization role definition.

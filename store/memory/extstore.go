@@ -339,15 +339,26 @@ func (s *Store) ListTeamsByUser(_ context.Context, userID string) ([]types.Team,
 func (s *Store) CreateTeamMember(_ context.Context, tm *types.TeamMember) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if tm.MembershipKey == "" {
+		tm.MembershipKey = store.TeamMembershipKey(tm.TeamID, tm.UserID)
+	}
 	cp := *tm
 	s.teamMembers[tm.ID] = &cp
+	s.syncTeamMemberCountLocked(tm.TeamID)
 	return nil
 }
 
 func (s *Store) DeleteTeamMember(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	teamID := ""
+	if tm, ok := s.teamMembers[id]; ok {
+		teamID = tm.TeamID
+	}
 	delete(s.teamMembers, id)
+	if teamID != "" {
+		s.syncTeamMemberCountLocked(teamID)
+	}
 	return nil
 }
 
@@ -357,10 +368,25 @@ func (s *Store) DeleteTeamMemberByTeamAndUser(_ context.Context, teamID string, 
 	for id, tm := range s.teamMembers {
 		if tm.TeamID == teamID && tm.UserID == userID {
 			delete(s.teamMembers, id)
+			s.syncTeamMemberCountLocked(teamID)
 			return nil
 		}
 	}
 	return ErrNotFound
+}
+
+// syncTeamMemberCountLocked recomputes team.MemberCount from teamMember rows.
+// Callers must already hold s.mu.
+func (s *Store) syncTeamMemberCountLocked(teamID string) {
+	count := 0
+	for _, tm := range s.teamMembers {
+		if tm.TeamID == teamID {
+			count++
+		}
+	}
+	if team, ok := s.teams[teamID]; ok {
+		team.MemberCount = count
+	}
 }
 
 func (s *Store) FindTeamMember(_ context.Context, teamID string, userID string) (*types.TeamMember, error) {

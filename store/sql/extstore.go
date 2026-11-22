@@ -342,7 +342,7 @@ func (s *Store) ListInvitationsByEmail(ctx context.Context, email string) ([]typ
 // Team
 // =========================================================================
 
-var teamColNames = []string{"id", "name", "organizationId", "createdAt", "updatedAt"}
+var teamColNames = []string{"id", "name", "organizationId", "memberCount", "createdAt", "updatedAt"}
 
 func (s *Store) scanTeam(row interface{ Scan(...any) error }) (*types.Team, error) {
 	var (
@@ -350,7 +350,7 @@ func (s *Store) scanTeam(row interface{ Scan(...any) error }) (*types.Team, erro
 		createdAt int64
 		updatedAt sql.NullInt64
 	)
-	if err := row.Scan(&t.ID, &t.Name, &t.OrganizationID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.OrganizationID, &t.MemberCount, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
 		}
@@ -364,9 +364,14 @@ func (s *Store) scanTeam(row interface{ Scan(...any) error }) (*types.Team, erro
 }
 
 func (s *Store) CreateTeam(ctx context.Context, t *types.Team) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("team")+` (`+s.cols(teamColNames...)+`) VALUES (?, ?, ?, ?, ?)`),
-		t.ID, t.Name, t.OrganizationID, toMillis(t.CreatedAt), nullTimeMillis(t.UpdatedAt))
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("team")+` (`+s.cols(teamColNames...)+`) VALUES (?, ?, ?, ?, ?, ?)`),
+		t.ID, t.Name, t.OrganizationID, t.MemberCount, toMillis(t.CreatedAt), nullTimeMillis(t.UpdatedAt))
 	return err
+}
+
+// syncTeamMemberCount recomputes team.memberCount from the teamMember rows.
+func (s *Store) syncTeamMemberCount(ctx context.Context, teamID string) {
+	_, _ = s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("team")+` SET `+s.table("memberCount")+` = (SELECT COUNT(*) FROM `+s.table("teamMember")+` WHERE `+s.table("teamId")+` = ?) WHERE id = ?`), teamID, teamID)
 }
 
 func (s *Store) DeleteTeam(ctx context.Context, id string) error {
@@ -420,7 +425,7 @@ func (s *Store) ListTeamsByOrg(ctx context.Context, orgID string) ([]types.Team,
 }
 
 func (s *Store) ListTeamsByUser(ctx context.Context, userID string) ([]types.Team, error) {
-	teamCols := `t.` + s.table("id") + `, t.` + s.table("name") + `, t.` + s.table("organizationId") + `, t.` + s.table("createdAt") + `, t.` + s.table("updatedAt")
+	teamCols := `t.` + s.table("id") + `, t.` + s.table("name") + `, t.` + s.table("organizationId") + `, t.` + s.table("memberCount") + `, t.` + s.table("createdAt") + `, t.` + s.table("updatedAt")
 	rows, err := s.db.QueryContext(ctx, s.q(`
 		SELECT `+teamCols+`
 		FROM `+s.table("team")+` t
@@ -446,14 +451,29 @@ func (s *Store) ListTeamsByUser(ctx context.Context, userID string) ([]types.Tea
 // =========================================================================
 
 func (s *Store) CreateTeamMember(ctx context.Context, tm *types.TeamMember) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("teamMember")+` (id, `+s.table("teamId")+`, `+s.table("userId")+`, `+s.table("createdAt")+`) VALUES (?, ?, ?, ?)`),
-		tm.ID, tm.TeamID, tm.UserID, toMillis(tm.CreatedAt))
-	return err
+	if tm.MembershipKey == "" {
+		tm.MembershipKey = store.TeamMembershipKey(tm.TeamID, tm.UserID)
+	}
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("teamMember")+` (id, `+s.table("teamId")+`, `+s.table("userId")+`, `+s.table("membershipKey")+`, `+s.table("createdAt")+`) VALUES (?, ?, ?, ?, ?)`),
+		tm.ID, tm.TeamID, tm.UserID, tm.MembershipKey, toMillis(tm.CreatedAt))
+	if err != nil {
+		return err
+	}
+	s.syncTeamMemberCount(ctx, tm.TeamID)
+	return nil
 }
 
 func (s *Store) DeleteTeamMember(ctx context.Context, id string) error {
+	var teamID string
+	_ = s.db.QueryRowContext(ctx, s.q(`SELECT `+s.table("teamId")+` FROM `+s.table("teamMember")+` WHERE id = ?`), id).Scan(&teamID)
 	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("teamMember")+` WHERE id = ?`), id)
-	return err
+	if err != nil {
+		return err
+	}
+	if teamID != "" {
+		s.syncTeamMemberCount(ctx, teamID)
+	}
+	return nil
 }
 
 func (s *Store) DeleteTeamMemberByTeamAndUser(ctx context.Context, teamID string, userID string) error {
@@ -464,6 +484,7 @@ func (s *Store) DeleteTeamMemberByTeamAndUser(ctx context.Context, teamID string
 	if n, _ := res.RowsAffected(); n == 0 {
 		return berrors.ErrNotFound
 	}
+	s.syncTeamMemberCount(ctx, teamID)
 	return nil
 }
 

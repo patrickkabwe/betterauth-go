@@ -427,6 +427,13 @@ func TestSchemaScoping(t *testing.T) {
 	if !contains(teamTable, `"updatedAt"`) {
 		t.Fatal("team schema should include Better Auth JS updatedAt field")
 	}
+	if !contains(teamTable, `"memberCount"`) {
+		t.Fatal("team schema should include Better Auth JS memberCount field")
+	}
+	teamMemberTable := tableStatement(t, Schema("organization", "organization-teams"), `"teamMember"`)
+	if !contains(teamMemberTable, `"membershipKey"`) {
+		t.Fatal("teamMember schema should include Better Auth JS membershipKey field")
+	}
 	roleTable := tableStatement(t, Schema("organization", "organization-roles"), `"organizationRole"`)
 	for _, want := range []string{`"organizationId"`, `permission TEXT NOT NULL`, `"createdAt"`, `"updatedAt"`} {
 		if !contains(roleTable, want) {
