@@ -1,7 +1,8 @@
 # Bearer plugin
 
 Authenticate via `Authorization: Bearer` instead of (or alongside) session
-cookies. Essential for mobile apps, API clients, and SSR services.
+cookies. Use it for mobile apps, API clients, and SSR services that can't rely
+on cookies.
 
 ## Enable
 
@@ -57,6 +58,6 @@ c := client.New("http://localhost:8080",
 sess, err := c.GetSession(ctx)
 ```
 
-No client plugin import needed on the server — bearer is server-side only.
+No client plugin import needed on the server. Bearer is server-side only.
 
 Back to: [Plugin overview](overview.md)

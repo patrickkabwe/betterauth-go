@@ -5,12 +5,12 @@ while keeping existing clients.
 
 ## What stays the same
 
-- **Client SDKs** — `better-auth/react`, `/vue`, `/svelte`, `/client` unchanged
-- **Wire format** — same endpoints, JSON shapes, cookie names, signing
-- **Password hashes** — scrypt `salt:key` compatible
-- **Session cookies** — HMAC-SHA256 `value.signature` format
-- **24 core plugins** — same IDs and routes (when enabled)
-- **CLI workflow** — `generate`, `migrate`, `secret`, `init`, `info`
+- **Client SDKs.** `better-auth/react`, `/vue`, `/svelte`, `/client` unchanged
+- **Wire format.** Same endpoints, JSON shapes, cookie names, signing
+- **Password hashes.** Scrypt `salt:key` compatible
+- **Session cookies.** HMAC-SHA256 `value.signature` format
+- **24 core plugins.** Same IDs and routes (when enabled)
+- **CLI workflow.** `generate`, `migrate`, `secret`, `init`, `info`
 
 ## What changes
 
@@ -28,7 +28,7 @@ while keeping existing clients.
 
 ### 1. Match your config
 
-Map each `betterAuth({ … })` option to `auth.Config` — see the
+Map each `betterAuth({ … })` option to `auth.Config`. See the
 [configuration reference](../reference/configuration.md).
 
 ### 2. Migrate data
@@ -56,7 +56,7 @@ betterauth-go generate --plugins organization,two-factor --dialect postgres
 
 ### 4. Point clients at Go
 
-Change only `baseURL` in `createAuthClient` — no client code changes otherwise.
+Change only `baseURL` in `createAuthClient`; no client code changes otherwise.
 
 ### 5. Verify parity
 

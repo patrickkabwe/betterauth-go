@@ -43,10 +43,10 @@ curl http://localhost:8080/api/auth/client-schema
 
 Returns JSON describing:
 
-- `features` — email/password, social providers, bearer
-- `user` — additional field definitions
-- `plugins` — enabled plugins with client pairing info
-- `routes` — all HTTP endpoints
+- `features`: email/password, social providers, bearer
+- `user`: additional field definitions
+- `plugins`: enabled plugins with client pairing info
+- `routes`: all HTTP endpoints
 
 ## TypeScript inference
 

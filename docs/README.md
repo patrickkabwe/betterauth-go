@@ -89,10 +89,10 @@ python3 -m http.server 4321 --directory docs
 | [http://localhost:4321](http://localhost:4321) | Landing page |
 | [http://localhost:4321/guide/](http://localhost:4321/guide/) | **Documentation viewer** — Better Auth–style layout, Geist font, light/dark |
 
-The viewer loads the markdown files from this directory — no build step. Edit
+The viewer loads the markdown files from this directory, with no build step. Edit
 `.md` files and refresh the browser.
 
 Deploy with GitHub Actions (`.github/workflows/docs.yml`): push to `main`, or run
 **Actions → Deploy Docs → Run workflow**. In **Settings → Pages**, set source to
-**GitHub Actions**. Docs URL: `https://<user>.github.io/betterauth/` — link to
+**GitHub Actions**. Docs URL: `https://<user>.github.io/betterauth/`. Link to
 `/guide/` for the documentation viewer.

@@ -87,7 +87,7 @@ bearer-token clients are unaffected).
 
 1. Add current secret to `OldSecrets`.
 2. Set new value as `Secret`.
-3. Deploy — existing cookies keep working.
+3. Deploy. Existing cookies keep working.
 4. After all sessions expire, remove the old secret from `OldSecrets`.
 
 ## Health check

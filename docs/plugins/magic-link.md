@@ -17,7 +17,7 @@ Plugins: []auth.Plugin{
 },
 ```
 
-`SendMagicLink` is **required** — without it, requests return
+`SendMagicLink` is **required**. Without it, requests return
 `MAGIC_LINK_DISABLED`.
 
 ## Client

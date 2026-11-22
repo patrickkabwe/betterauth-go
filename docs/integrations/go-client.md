@@ -1,7 +1,7 @@
 # Go client
 
 The `github.com/patrickkabwe/betterauth-go/client` package calls Better Auth endpoints
-from Go services — SSR backends, workers, CLI tools, and custom middleware.
+from Go services: SSR backends, workers, CLI tools, and custom middleware.
 
 ## Install
 

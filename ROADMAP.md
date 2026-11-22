@@ -405,7 +405,7 @@ Options from the TypeScript `betterAuth({ ... })` config.
 ## How to contribute
 
 1. Pick an item marked ⬜ from the current phase.
-2. Match the TypeScript endpoint path, request/response shape, and cookie behavior exactly — clients depend on it.
+2. Match the TypeScript endpoint path, request/response shape, and cookie behavior exactly. Clients depend on it.
 3. Add tests in `auth/handler_test.go` (or package-specific tests).
 4. Update this file: change status and add notes.
 

@@ -141,10 +141,13 @@ role CRUD endpoints. Custom roles use the Better Auth JS `organizationRole`
 table and participate in `/organization/has-permission`.
 
 Set `DisableOrganizationDeletion` to make `/organization/delete` unavailable.
-`OrganizationHooks` supports Better Auth JS-style callbacks around organization
-create, update, and delete operations, plus member add, remove, and role update
-operations, invitation create, accept, reject, and cancel operations, and team
-create, update, delete, add-member, and remove-member operations.
+`OrganizationHooks` supports Better Auth JS-style callbacks around four operation
+groups:
+
+- Organization: create, update, delete
+- Member: add, remove, role update
+- Invitation: create, accept, reject, cancel
+- Team: create, update, delete, add-member, remove-member
 
 ## Example
 

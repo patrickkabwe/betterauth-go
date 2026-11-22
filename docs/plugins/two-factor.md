@@ -33,9 +33,9 @@ When omitted, OTP sending returns `OTP_NOT_CONFIGURED`.
 `/two-factor/enable`, `/two-factor/disable`, `/two-factor/get-totp-uri`, and
 `/two-factor/generate-backup-codes` require `password` when the user has a
 credential password. This matches Better Auth's `allowPasswordless` behavior.
-During sign-in challenges, failed second-factor verifications are counted across
-OTP, TOTP, and backup codes. The account is temporarily locked after the
-configured number of consecutive failures and the count resets after success.
+During sign-in challenges, the plugin counts failed second-factor verifications
+across OTP, TOTP, and backup codes, and temporarily locks the account after the
+configured number of consecutive failures. The count resets after a success.
 TOTP and backup-code sign-in challenges also enforce the same five-attempt
 per-challenge budget used by Better Auth.
 `TOTPDigits` accepts 6 or 8 digits, and `TOTPPeriod` controls the TOTP time
@@ -58,12 +58,12 @@ betterauth-go generate --plugins two-factor --dialect sqlite
 
 ## Flow
 
-1. **Enable** — `POST /two-factor/enable` → returns `totpURI` for QR code and 10 backup codes
-2. **Verify TOTP** — `POST /two-factor/verify-totp` with `{ code }`
-3. **Send OTP** — `POST /two-factor/send-otp` sends a one-time code through `SendOTP`
-4. **Verify OTP** — `POST /two-factor/verify-otp` with `{ code }`
-5. **Sign in with 2FA** — credential sign-in returns `{ twoFactorRedirect: true, twoFactorMethods }` and a signed `better-auth.two_factor` challenge cookie instead of a session token
-6. **Disable** — `POST /two-factor/disable`
+1. **Enable.** `POST /two-factor/enable` → returns `totpURI` for QR code and 10 backup codes
+2. **Verify TOTP.** `POST /two-factor/verify-totp` with `{ code }`
+3. **Send OTP.** `POST /two-factor/send-otp` sends a one-time code through `SendOTP`
+4. **Verify OTP.** `POST /two-factor/verify-otp` with `{ code }`
+5. **Sign in with 2FA.** Credential sign-in returns `{ twoFactorRedirect: true, twoFactorMethods }` and a signed `better-auth.two_factor` challenge cookie instead of a session token
+6. **Disable.** `POST /two-factor/disable`
 
 During a two-factor sign-in challenge, call `/two-factor/send-otp`,
 `/two-factor/verify-otp`, `/two-factor/verify-totp`, or

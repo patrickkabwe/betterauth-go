@@ -3,17 +3,16 @@
 **better-auth.go** is a Go server that speaks the same wire protocol as
 [Better Auth](https://better-auth.com). Drop it into any Go HTTP server and
 point an official Better Auth client (`better-auth/react`, `/vue`, `/svelte`,
-Expo, or the framework-agnostic client) at it — the endpoints, request/response
-shapes, and cookie behavior match, so the client doesn't know (or care) that the
-backend is Go.
+Expo, or the framework-agnostic client) at it. The endpoints, request/response
+shapes, and cookie behavior match, so the client can't tell the backend is Go.
 
 ## Why
 
 - **Use your Go stack.** Keep auth in the same binary, deployment, and database
-  as the rest of your Go services — no separate Node process.
+  as the rest of your Go services, with no separate Node process.
 - **Client compatibility.** Reuse the mature Better Auth client SDKs and their
   React/Vue/Svelte hooks.
-- **Batteries included.** Email/password, sessions, social OAuth, 24 plugins,
+- **Everything built in.** Email/password, sessions, social OAuth, 24 plugins,
   SQL adapters, production middleware (CORS, CSRF, rate limiting), and a CLI.
 
 ## How it compares to the TypeScript server
