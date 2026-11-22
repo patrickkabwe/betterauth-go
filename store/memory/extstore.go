@@ -617,22 +617,22 @@ func (s *Store) ListJWKS(_ context.Context) ([]types.JWKSRecord, error) {
 	return out, nil
 }
 
-func (s *Store) CreateOAuthApp(_ context.Context, app *types.OAuthApplication) error {
+func (s *Store) CreateOAuthClient(_ context.Context, client *types.OAuthClient) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := *app
-	s.oauthApps[app.ClientID] = &cp
+	cp := *client
+	s.oauthClients[client.ClientID] = &cp
 	return nil
 }
 
-func (s *Store) FindOAuthAppByClientID(_ context.Context, clientID string) (*types.OAuthApplication, error) {
+func (s *Store) FindOAuthClientByClientID(_ context.Context, clientID string) (*types.OAuthClient, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	app, ok := s.oauthApps[clientID]
+	client, ok := s.oauthClients[clientID]
 	if !ok {
 		return nil, ErrNotFound
 	}
-	cp := *app
+	cp := *client
 	return &cp, nil
 }
 

@@ -264,9 +264,11 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 				crv TEXT
 			)`,
 		},
-		// oidc-provider and mcp both persist registered OAuth applications.
-		pluginOIDCProvider: {oauthAppStatements(d)[0], oauthAppStatements(d)[1]},
-		pluginMCP:          {oauthAppStatements(d)[0], oauthAppStatements(d)[1]},
+		// oidc-provider and mcp both persist registered OAuth clients and share
+		// the oauth-provider table set; SchemaForDialect dedupes the shared
+		// statements so each table is emitted once.
+		pluginOIDCProvider: oauthProviderStatements(d),
+		pluginMCP:          oauthProviderStatements(d),
 		pluginSIWE: {
 			`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("walletAddress") + ` (
 				id TEXT PRIMARY KEY,
@@ -344,23 +346,148 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 	}
 }
 
-func oauthAppStatements(d Dialect) []string {
+// oauthProviderStatements returns the seven-table OAuth provider schema used by
+// Better Auth's oauth-provider package (oauthClient, oauthResource,
+// oauthClientResource, oauthRefreshToken, oauthAccessToken, oauthConsent,
+// oauthClientAssertion). string[] and json columns are stored as TEXT holding
+// JSON; booleans as INTEGER; dates as the dialect timestamp type.
+func oauthProviderStatements(d Dialect) []string {
+	ts := d.timestampType()
 	return []string{
-		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthApplication") + ` (
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthClient") + ` (
 			id TEXT PRIMARY KEY,
 			` + d.quoteIdent("clientId") + ` TEXT NOT NULL,
 			` + d.quoteIdent("clientSecret") + ` TEXT,
-			name TEXT NOT NULL DEFAULT '',
-			icon TEXT,
-			metadata TEXT,
-			` + d.quoteIdent("redirectUrls") + ` TEXT NOT NULL DEFAULT '',
-			type TEXT NOT NULL DEFAULT '',
+			` + d.quoteIdent("clientDiscoveryId") + ` TEXT,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			` + d.quoteIdent("skipConsent") + ` INTEGER,
+			` + d.quoteIdent("enableEndSession") + ` INTEGER,
+			` + d.quoteIdent("subjectType") + ` TEXT,
+			scopes TEXT,
+			` + d.quoteIdent("clientCredentialsScopes") + ` TEXT,
 			` + d.quoteIdent("userId") + ` TEXT,
-			` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
-			` + d.quoteIdent("updatedAt") + ` ` + d.timestampType() + ` NOT NULL
+			` + d.quoteIdent("createdAt") + ` ` + ts + `,
+			` + d.quoteIdent("updatedAt") + ` ` + ts + `,
+			name TEXT,
+			uri TEXT,
+			icon TEXT,
+			contacts TEXT,
+			tos TEXT,
+			policy TEXT,
+			` + d.quoteIdent("softwareId") + ` TEXT,
+			` + d.quoteIdent("softwareVersion") + ` TEXT,
+			` + d.quoteIdent("softwareStatement") + ` TEXT,
+			` + d.quoteIdent("redirectUris") + ` TEXT NOT NULL,
+			` + d.quoteIdent("postLogoutRedirectUris") + ` TEXT,
+			` + d.quoteIdent("backchannelLogoutUri") + ` TEXT,
+			` + d.quoteIdent("backchannelLogoutSessionRequired") + ` INTEGER,
+			` + d.quoteIdent("tokenEndpointAuthMethod") + ` TEXT,
+			` + d.quoteIdent("applicationType") + ` TEXT,
+			jwks TEXT,
+			` + d.quoteIdent("jwksUri") + ` TEXT,
+			` + d.quoteIdent("grantTypes") + ` TEXT,
+			` + d.quoteIdent("responseTypes") + ` TEXT,
+			` + d.quoteIdent("requirePKCE") + ` INTEGER,
+			` + d.quoteIdent("dpopBoundAccessTokens") + ` INTEGER NOT NULL DEFAULT 0,
+			` + d.quoteIdent("referenceId") + ` TEXT,
+			metadata TEXT
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS oauthApplication_clientId_idx ON ` + d.quoteIdent("oauthApplication") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS oauthClient_clientId_idx ON ` + d.quoteIdent("oauthClient") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE INDEX IF NOT EXISTS oauthClient_userId_idx ON ` + d.quoteIdent("oauthClient") + ` (` + d.quoteIdent("userId") + `)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthResource") + ` (
+			id TEXT PRIMARY KEY,
+			identifier TEXT NOT NULL,
+			name TEXT NOT NULL,
+			` + d.quoteIdent("accessTokenTtl") + ` INTEGER,
+			` + d.quoteIdent("refreshTokenTtl") + ` INTEGER,
+			` + d.quoteIdent("signingAlgorithm") + ` TEXT,
+			` + d.quoteIdent("signingKeyId") + ` TEXT,
+			` + d.quoteIdent("allowedScopes") + ` TEXT,
+			` + d.quoteIdent("customClaims") + ` TEXT,
+			` + d.quoteIdent("dpopBoundAccessTokensRequired") + ` INTEGER NOT NULL DEFAULT 0,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			` + d.quoteIdent("createdAt") + ` ` + ts + `,
+			` + d.quoteIdent("updatedAt") + ` ` + ts + `,
+			` + d.quoteIdent("policyVersion") + ` INTEGER NOT NULL DEFAULT 1,
+			metadata TEXT
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS oauthResource_identifier_idx ON ` + d.quoteIdent("oauthResource") + ` (identifier)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthClientResource") + ` (
+			id TEXT PRIMARY KEY,
+			` + d.quoteIdent("clientId") + ` TEXT NOT NULL,
+			` + d.quoteIdent("resourceId") + ` TEXT NOT NULL,
+			metadata TEXT,
+			` + d.quoteIdent("createdAt") + ` ` + ts + `
+		)`,
+		`CREATE INDEX IF NOT EXISTS oauthClientResource_clientId_idx ON ` + d.quoteIdent("oauthClientResource") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE INDEX IF NOT EXISTS oauthClientResource_resourceId_idx ON ` + d.quoteIdent("oauthClientResource") + ` (` + d.quoteIdent("resourceId") + `)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS oauthClientResource_pair_idx ON ` + d.quoteIdent("oauthClientResource") + ` (` + d.quoteIdent("clientId") + `, ` + d.quoteIdent("resourceId") + `)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthRefreshToken") + ` (
+			id TEXT PRIMARY KEY,
+			token TEXT NOT NULL,
+			` + d.quoteIdent("clientId") + ` TEXT NOT NULL,
+			` + d.quoteIdent("sessionId") + ` TEXT,
+			` + d.quoteIdent("userId") + ` TEXT NOT NULL,
+			` + d.quoteIdent("referenceId") + ` TEXT,
+			` + d.quoteIdent("authorizationCodeId") + ` TEXT,
+			resources TEXT,
+			` + d.quoteIdent("requestedUserInfoClaims") + ` TEXT,
+			` + d.quoteIdent("expiresAt") + ` ` + ts + ` NOT NULL,
+			` + d.quoteIdent("createdAt") + ` ` + ts + ` NOT NULL,
+			revoked ` + ts + `,
+			` + d.quoteIdent("rotatedAt") + ` ` + ts + `,
+			` + d.quoteIdent("rotationReplayResponse") + ` TEXT,
+			` + d.quoteIdent("rotationReplayExpiresAt") + ` ` + ts + `,
+			` + d.quoteIdent("authTime") + ` ` + ts + `,
+			confirmation TEXT,
+			scopes TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS oauthRefreshToken_token_idx ON ` + d.quoteIdent("oauthRefreshToken") + ` (token)`,
+		`CREATE INDEX IF NOT EXISTS oauthRefreshToken_clientId_idx ON ` + d.quoteIdent("oauthRefreshToken") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE INDEX IF NOT EXISTS oauthRefreshToken_userId_idx ON ` + d.quoteIdent("oauthRefreshToken") + ` (` + d.quoteIdent("userId") + `)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthAccessToken") + ` (
+			id TEXT PRIMARY KEY,
+			token TEXT NOT NULL,
+			` + d.quoteIdent("clientId") + ` TEXT NOT NULL,
+			` + d.quoteIdent("sessionId") + ` TEXT,
+			` + d.quoteIdent("userId") + ` TEXT,
+			` + d.quoteIdent("referenceId") + ` TEXT,
+			` + d.quoteIdent("authorizationCodeId") + ` TEXT,
+			resources TEXT,
+			` + d.quoteIdent("requestedUserInfoClaims") + ` TEXT,
+			` + d.quoteIdent("refreshId") + ` TEXT,
+			` + d.quoteIdent("expiresAt") + ` ` + ts + ` NOT NULL,
+			` + d.quoteIdent("createdAt") + ` ` + ts + ` NOT NULL,
+			revoked ` + ts + `,
+			confirmation TEXT,
+			scopes TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS oauthAccessToken_token_idx ON ` + d.quoteIdent("oauthAccessToken") + ` (token)`,
+		`CREATE INDEX IF NOT EXISTS oauthAccessToken_clientId_idx ON ` + d.quoteIdent("oauthAccessToken") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE INDEX IF NOT EXISTS oauthAccessToken_userId_idx ON ` + d.quoteIdent("oauthAccessToken") + ` (` + d.quoteIdent("userId") + `)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthConsent") + ` (
+			id TEXT PRIMARY KEY,
+			` + d.quoteIdent("clientId") + ` TEXT NOT NULL,
+			` + d.quoteIdent("userId") + ` TEXT,
+			` + d.quoteIdent("referenceId") + ` TEXT,
+			resources TEXT,
+			` + d.quoteIdent("requestedUserInfoClaims") + ` TEXT,
+			scopes TEXT NOT NULL,
+			` + d.quoteIdent("createdAt") + ` ` + ts + ` NOT NULL,
+			` + d.quoteIdent("updatedAt") + ` ` + ts + ` NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS oauthConsent_clientId_idx ON ` + d.quoteIdent("oauthConsent") + ` (` + d.quoteIdent("clientId") + `)`,
+		`CREATE INDEX IF NOT EXISTS oauthConsent_userId_idx ON ` + d.quoteIdent("oauthConsent") + ` (` + d.quoteIdent("userId") + `)`,
+
+		`CREATE TABLE IF NOT EXISTS ` + d.quoteIdent("oauthClientAssertion") + ` (
+			id TEXT PRIMARY KEY,
+			` + d.quoteIdent("expiresAt") + ` ` + ts + ` NOT NULL
+		)`,
 	}
 }
 

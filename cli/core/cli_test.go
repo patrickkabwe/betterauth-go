@@ -68,7 +68,7 @@ func TestGenerateCoreOnly(t *testing.T) {
 		}
 	}
 	// Plugin tables absent without any feature enabled.
-	for _, unexpected := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"deviceCode"`, `"oauthApplication"`} {
+	for _, unexpected := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"deviceCode"`, `"oauthClient"`} {
 		if strings.Contains(sql, unexpected) {
 			t.Fatalf("core-only schema should not contain %q", unexpected)
 		}
@@ -87,7 +87,7 @@ func TestGenerateWithPluginsFlag(t *testing.T) {
 			t.Fatalf("schema missing enabled-plugin table %q", want)
 		}
 	}
-	for _, unexpected := range []string{`"walletAddress"`, `"jwks"`, `"oauthApplication"`, `"deviceCode"`} {
+	for _, unexpected := range []string{`"walletAddress"`, `"jwks"`, `"oauthClient"`, `"deviceCode"`} {
 		if strings.Contains(sql, unexpected) {
 			t.Fatalf("schema should not contain disabled-plugin table %q", unexpected)
 		}
@@ -149,15 +149,15 @@ func TestGenerateAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := readFile(t, filepath.Join(dir, "schema.sql"))
-	for _, want := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"oauthApplication"`, `"deviceCode"`} {
+	for _, want := range []string{`"organization"`, `"twoFactor"`, `"walletAddress"`, `"jwks"`, `"oauthClient"`, `"deviceCode"`} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("--all schema missing %q", want)
 		}
 	}
-	// The shared OAuth app table must appear exactly once even though both
-	// oidc-provider and mcp need it.
-	if n := strings.Count(sql, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
-		t.Fatalf("oauthApplication should be emitted once, got %d", n)
+	// The shared oauth-provider tables must appear exactly once even though both
+	// oidc-provider and mcp need them.
+	if n := strings.Count(sql, `CREATE TABLE IF NOT EXISTS "oauthClient"`); n != 1 {
+		t.Fatalf("oauthClient should be emitted once, got %d", n)
 	}
 }
 

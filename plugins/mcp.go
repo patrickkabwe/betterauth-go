@@ -81,9 +81,9 @@ func MCP(opts MCPOptions) auth.Plugin {
 			clientID, _ := id.Generate(16)
 			secret, _ := id.Generate(32)
 			now := time.Now()
-			_ = ext.CreateOAuthApp(c.R.Context(), &types.OAuthApplication{
+			_ = ext.CreateOAuthClient(c.R.Context(), &types.OAuthClient{
 				ID: clientID, ClientID: clientID, ClientSecret: secret, Name: "mcp-client",
-				Type: constants.OAuthAppTypeMCP, CreatedAt: now, UpdatedAt: now,
+				CreatedAt: now, UpdatedAt: now,
 			})
 			c.WriteJSON(http.StatusOK, map[string]string{"client_id": clientID, "client_secret": secret})
 		}),
