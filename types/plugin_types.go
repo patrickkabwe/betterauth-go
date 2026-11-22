@@ -116,6 +116,8 @@ type JWKSRecord struct {
 	PrivateKey string     `json:"privateKey,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+	Alg        *string    `json:"alg,omitempty"`
+	Crv        *string    `json:"crv,omitempty"`
 }
 
 // OAuthApplication is a registered OAuth client.

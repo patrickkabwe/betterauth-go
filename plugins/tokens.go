@@ -101,8 +101,9 @@ func JWT(opts JWTOptions) auth.Plugin {
 				if len(out) == 0 {
 					kid, _ := id.Generate(8)
 					pub := base64.RawURLEncoding.EncodeToString([]byte(c.Auth.BaseURL()))
+					alg := constants.JWTAlgHS256
 					_ = ext.CreateJWKS(c.R.Context(), &types.JWKSRecord{
-						ID: kid, PublicKey: pub, CreatedAt: time.Now(),
+						ID: kid, PublicKey: pub, CreatedAt: time.Now(), Alg: &alg,
 					})
 					out = append(out, map[string]string{"kid": kid, "kty": constants.JWTKtyOct, "alg": constants.JWTAlgHS256, "k": pub})
 				}

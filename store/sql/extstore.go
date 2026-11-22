@@ -757,13 +757,13 @@ func (s *Store) UpdateDeviceCode(ctx context.Context, id string, userID, status 
 // =========================================================================
 
 func (s *Store) CreateJWKS(ctx context.Context, rec *types.JWKSRecord) error {
-	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("jwks")+` (id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+`) VALUES (?, ?, ?, ?, ?)`),
-		rec.ID, rec.PublicKey, nullStr(rec.PrivateKey), toMillis(rec.CreatedAt), nullMillis(rec.ExpiresAt))
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("jwks")+` (id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+`, alg, crv) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		rec.ID, rec.PublicKey, nullStr(rec.PrivateKey), toMillis(rec.CreatedAt), nullMillis(rec.ExpiresAt), nullStrPtr(rec.Alg), nullStrPtr(rec.Crv))
 	return err
 }
 
 func (s *Store) ListJWKS(ctx context.Context) ([]types.JWKSRecord, error) {
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+` FROM `+s.table("jwks")))
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id, `+s.table("publicKey")+`, `+s.table("privateKey")+`, `+s.table("createdAt")+`, `+s.table("expiresAt")+`, alg, crv FROM `+s.table("jwks")))
 	if err != nil {
 		return nil, err
 	}
@@ -775,13 +775,17 @@ func (s *Store) ListJWKS(ctx context.Context) ([]types.JWKSRecord, error) {
 			privateKey sql.NullString
 			createdAt  int64
 			expiresAt  sql.NullInt64
+			alg        sql.NullString
+			crv        sql.NullString
 		)
-		if err := rows.Scan(&rec.ID, &rec.PublicKey, &privateKey, &createdAt, &expiresAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.PublicKey, &privateKey, &createdAt, &expiresAt, &alg, &crv); err != nil {
 			return nil, err
 		}
 		rec.PrivateKey = privateKey.String
 		rec.CreatedAt = fromMillis(createdAt)
 		rec.ExpiresAt = scanNullMillis(expiresAt)
+		rec.Alg = scanNullStrPtr(alg)
+		rec.Crv = scanNullStrPtr(crv)
 		out = append(out, rec)
 	}
 	return out, rows.Err()

@@ -139,6 +139,23 @@ func nullStr(s string) any {
 	return s
 }
 
+// nullStrPtr returns the string value for a non-nil pointer, else SQL NULL.
+func nullStrPtr(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+// scanNullStrPtr converts a scanned nullable string column into *string.
+func scanNullStrPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	out := v.String
+	return &out
+}
+
 func lowerLike(s string) string { return strings.ToLower(s) }
 
 func marshalAdditional(m map[string]any) (any, error) {
