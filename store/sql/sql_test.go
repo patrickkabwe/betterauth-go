@@ -358,6 +358,47 @@ func TestExtStoreOAuthClient(t *testing.T) {
 	}
 }
 
+func TestExtStoreOAuthTokens(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	must(t, st.CreateOAuthRefreshToken(ctx, &types.OAuthRefreshToken{
+		ID: "rt1", Token: "refresh-1", ClientID: "c1", UserID: "u1", SessionID: "s1",
+		Scopes: []string{"openid", "offline_access"}, Resources: []string{"https://api.example"},
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}))
+	must(t, st.CreateOAuthAccessToken(ctx, &types.OAuthAccessToken{
+		ID: "at1", Token: "access-1", ClientID: "c1", UserID: "u1", SessionID: "s1", RefreshID: "rt1",
+		Scopes: []string{"openid", "offline_access"}, ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}))
+
+	rt, err := st.FindOAuthRefreshToken(ctx, "refresh-1")
+	if err != nil || rt.UserID != "u1" || len(rt.Scopes) != 2 || len(rt.Resources) != 1 || rt.Revoked != nil {
+		t.Fatalf("refresh round-trip failed: %+v err=%v", rt, err)
+	}
+	at, err := st.FindOAuthAccessToken(ctx, "access-1")
+	if err != nil || at.RefreshID != "rt1" || at.Revoked != nil {
+		t.Fatalf("access round-trip failed: %+v err=%v", at, err)
+	}
+
+	// Rotation marks the refresh row revoked and stores the replay response.
+	must(t, st.RotateOAuthRefreshToken(ctx, "rt1", `{"access_token":"x"}`, now.Add(30*time.Second)))
+	rt, _ = st.FindOAuthRefreshToken(ctx, "refresh-1")
+	if rt.Revoked == nil || rt.RotatedAt == nil || rt.RotationReplayResponse == "" || rt.RotationReplayExpiresAt == nil {
+		t.Fatalf("rotation not persisted: %+v", rt)
+	}
+
+	// Family invalidation removes the refresh row and its linked access token.
+	must(t, st.InvalidateOAuthRefreshFamily(ctx, "c1", "u1"))
+	if _, err := st.FindOAuthRefreshToken(ctx, "refresh-1"); err == nil {
+		t.Fatal("refresh token should be gone after family invalidation")
+	}
+	if _, err := st.FindOAuthAccessToken(ctx, "access-1"); err == nil {
+		t.Fatal("linked access token should be gone after family invalidation")
+	}
+}
+
 func TestSchemaScoping(t *testing.T) {
 	core := joinSchema(Schema())
 	for _, want := range []string{`"user"`, `"account"`, `"session"`, `"verification"`} {

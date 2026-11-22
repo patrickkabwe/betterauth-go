@@ -636,6 +636,77 @@ func (s *Store) FindOAuthClientByClientID(_ context.Context, clientID string) (*
 	return &cp, nil
 }
 
+func (s *Store) CreateOAuthAccessToken(_ context.Context, t *types.OAuthAccessToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *t
+	s.oauthAccessTokens[t.Token] = &cp
+	return nil
+}
+
+func (s *Store) FindOAuthAccessToken(_ context.Context, token string) (*types.OAuthAccessToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.oauthAccessTokens[token]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *t
+	return &cp, nil
+}
+
+func (s *Store) CreateOAuthRefreshToken(_ context.Context, t *types.OAuthRefreshToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *t
+	s.oauthRefreshToks[t.Token] = &cp
+	return nil
+}
+
+func (s *Store) FindOAuthRefreshToken(_ context.Context, token string) (*types.OAuthRefreshToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.oauthRefreshToks[token]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *t
+	return &cp, nil
+}
+
+func (s *Store) RotateOAuthRefreshToken(_ context.Context, id string, replayResponse string, replayExpiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for _, t := range s.oauthRefreshToks {
+		if t.ID == id {
+			t.Revoked = &now
+			t.RotatedAt = &now
+			t.RotationReplayResponse = replayResponse
+			exp := replayExpiresAt
+			t.RotationReplayExpiresAt = &exp
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (s *Store) InvalidateOAuthRefreshFamily(_ context.Context, clientID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, t := range s.oauthRefreshToks {
+		if t.ClientID == clientID && t.UserID == userID {
+			delete(s.oauthRefreshToks, key)
+		}
+	}
+	for key, t := range s.oauthAccessTokens {
+		if t.ClientID == clientID && t.UserID == userID && t.RefreshID != "" {
+			delete(s.oauthAccessTokens, key)
+		}
+	}
+	return nil
+}
+
 func (s *Store) CreateWallet(_ context.Context, w *types.WalletAddress) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

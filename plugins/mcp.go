@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -41,24 +42,39 @@ func MCP(opts MCPOptions) auth.Plugin {
 			})
 		}),
 		rt(http.MethodGet, "/mcp/authorize", func(c *auth.Context) {
-			_, user, ok := c.RequireSession()
-			if !ok {
+			sess, user, err := c.GetSession()
+			if err != nil {
 				c.Redirect("/")
 				return
 			}
 			code, _ := id.Generate(32)
-			_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationMCPCode+code, user.ID, 10*time.Minute)
+			data, _ := json.Marshal(oidcCodeData{
+				UserID:    user.ID,
+				ClientID:  c.R.URL.Query().Get("client_id"),
+				SessionID: sess.ID,
+				Scope:     c.R.URL.Query().Get("scope"),
+			})
+			_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationMCPCode+code, string(data), 10*time.Minute)
 			redirectURI := c.R.URL.Query().Get("redirect_uri")
 			state := c.R.URL.Query().Get("state")
 			c.Redirect(redirectURI + "?code=" + code + "&state=" + state)
 		}),
 		rt(http.MethodPost, "/mcp/token", func(c *auth.Context) {
+			ext, ok := requireOAuthStore(c)
+			if !ok {
+				return
+			}
 			var body struct {
-				Code      string `json:"code"`
-				GrantType string `json:"grant_type"`
+				Code         string `json:"code"`
+				GrantType    string `json:"grant_type"`
+				RefreshToken string `json:"refresh_token"`
 			}
 			if err := c.ParseJSON(&body); err != nil {
 				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidRequest))
+				return
+			}
+			if body.GrantType == "refresh_token" {
+				oidcRefreshTokenGrant(c, ext, "", body.RefreshToken)
 				return
 			}
 			v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationMCPCode+body.Code)
@@ -66,11 +82,17 @@ func MCP(opts MCPOptions) auth.Plugin {
 				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
 				return
 			}
-			token, _ := id.Generate(32)
-			_ = c.Auth.CreateVerification(c.R.Context(), constants.VerificationMCPAccess+token, v.Value, time.Hour)
-			c.WriteJSON(http.StatusOK, map[string]any{
-				"access_token": token, "token_type": constants.TokenTypeBearer, "expires_in": 3600,
-			})
+			var data oidcCodeData
+			if err := json.Unmarshal([]byte(v.Value), &data); err != nil {
+				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
+				return
+			}
+			resp, err := issueOAuthGrant(c, ext, data.ClientID, data.UserID, data.SessionID, scopeList(data.Scope))
+			if err != nil {
+				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+				return
+			}
+			c.WriteJSON(http.StatusOK, resp)
 		}),
 		rt(http.MethodPost, "/mcp/register", func(c *auth.Context) {
 			ext, ok := auth.ExtStore(c.Auth.Store())

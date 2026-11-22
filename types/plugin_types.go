@@ -164,6 +164,52 @@ type OAuthClient struct {
 	Metadata                         map[string]any `json:"metadata,omitempty"`
 }
 
+// OAuthAccessToken is an opaque access token issued by the OAuth provider,
+// mirroring Better Auth's oauth-provider `oauthAccessToken` table. Access
+// tokens are linked to a session and (for refresh-issued tokens) a refresh row.
+type OAuthAccessToken struct {
+	ID                      string         `json:"id"`
+	Token                   string         `json:"token"`
+	ClientID                string         `json:"clientId"`
+	SessionID               string         `json:"sessionId,omitempty"`
+	UserID                  string         `json:"userId,omitempty"`
+	ReferenceID             string         `json:"referenceId,omitempty"`
+	AuthorizationCodeID     string         `json:"authorizationCodeId,omitempty"`
+	Resources               []string       `json:"resources,omitempty"`
+	RequestedUserInfoClaims []string       `json:"requestedUserInfoClaims,omitempty"`
+	RefreshID               string         `json:"refreshId,omitempty"`
+	ExpiresAt               time.Time      `json:"expiresAt"`
+	CreatedAt               time.Time      `json:"createdAt"`
+	Revoked                 *time.Time     `json:"revoked,omitempty"`
+	Confirmation            map[string]any `json:"confirmation,omitempty"`
+	Scopes                  []string       `json:"scopes"`
+}
+
+// OAuthRefreshToken is an opaque refresh token issued with the offline_access
+// scope, mirroring Better Auth's oauth-provider `oauthRefreshToken` table. It
+// supports single-use rotation with a short replay window and family
+// invalidation on reuse (RFC 9700 §4.14).
+type OAuthRefreshToken struct {
+	ID                      string         `json:"id"`
+	Token                   string         `json:"token"`
+	ClientID                string         `json:"clientId"`
+	SessionID               string         `json:"sessionId,omitempty"`
+	UserID                  string         `json:"userId"`
+	ReferenceID             string         `json:"referenceId,omitempty"`
+	AuthorizationCodeID     string         `json:"authorizationCodeId,omitempty"`
+	Resources               []string       `json:"resources,omitempty"`
+	RequestedUserInfoClaims []string       `json:"requestedUserInfoClaims,omitempty"`
+	ExpiresAt               time.Time      `json:"expiresAt"`
+	CreatedAt               time.Time      `json:"createdAt"`
+	Revoked                 *time.Time     `json:"revoked,omitempty"`
+	RotatedAt               *time.Time     `json:"rotatedAt,omitempty"`
+	RotationReplayResponse  string         `json:"rotationReplayResponse,omitempty"`
+	RotationReplayExpiresAt *time.Time     `json:"rotationReplayExpiresAt,omitempty"`
+	AuthTime                *time.Time     `json:"authTime,omitempty"`
+	Confirmation            map[string]any `json:"confirmation,omitempty"`
+	Scopes                  []string       `json:"scopes"`
+}
+
 // WalletAddress links a blockchain wallet to a user.
 type WalletAddress struct {
 	ID        string    `json:"id"`

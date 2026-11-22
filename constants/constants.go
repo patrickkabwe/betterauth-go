@@ -78,9 +78,7 @@ const (
 	VerificationOneTimeToken  = "one-time-token:"
 	VerificationSIWENonce     = "siwe-nonce:"
 	VerificationOIDCCode      = "oidc-code:"
-	VerificationOIDCAccess    = "oidc-access:"
 	VerificationMCPCode       = "mcp-code:"
-	VerificationMCPAccess     = "mcp-access:"
 )
 
 // Email OTP types.
@@ -220,6 +218,7 @@ const (
 	CodeInvalidUsername             = "INVALID_USERNAME"
 	CodeInvalidOTP                  = "INVALID_OTP"
 	CodeInvalidCode                 = "INVALID_CODE"
+	CodeInvalidGrant                = "INVALID_GRANT"
 	CodeInvalidSIWE                 = "INVALID_SIWE"
 	CodeInvalidPhone                = "INVALID_PHONE"
 	CodeInvalidCredential           = "INVALID_CREDENTIAL"

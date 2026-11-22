@@ -42,6 +42,8 @@ type Store struct {
 	deviceCodesByUser map[string]string
 	jwks              map[string]*types.JWKSRecord
 	oauthClients      map[string]*types.OAuthClient
+	oauthAccessTokens map[string]*types.OAuthAccessToken
+	oauthRefreshToks  map[string]*types.OAuthRefreshToken
 	wallets           map[string]*types.WalletAddress
 	apiKeys           map[string]*types.APIKey
 	apiKeysByKey      map[string]string
@@ -85,6 +87,8 @@ func New() *Store {
 		deviceCodesByUser:      make(map[string]string),
 		jwks:                   make(map[string]*types.JWKSRecord),
 		oauthClients:           make(map[string]*types.OAuthClient),
+		oauthAccessTokens:      make(map[string]*types.OAuthAccessToken),
+		oauthRefreshToks:       make(map[string]*types.OAuthRefreshToken),
 		wallets:                make(map[string]*types.WalletAddress),
 		apiKeys:                make(map[string]*types.APIKey),
 		apiKeysByKey:           make(map[string]string),

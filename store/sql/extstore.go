@@ -984,6 +984,126 @@ func scanNullBoolPtr(v sql.NullInt64) *bool {
 }
 
 // =========================================================================
+// OAuth tokens (oauth-provider)
+// =========================================================================
+
+var oauthAccessTokenColNames = []string{
+	"id", "token", "clientId", "sessionId", "userId", "referenceId", "authorizationCodeId",
+	"resources", "requestedUserInfoClaims", "refreshId", "expiresAt", "createdAt",
+	"revoked", "confirmation", "scopes",
+}
+
+func (s *Store) CreateOAuthAccessToken(ctx context.Context, t *types.OAuthAccessToken) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthAccessToken")+` (`+s.cols(oauthAccessTokenColNames...)+`) VALUES (`+qMarks(len(oauthAccessTokenColNames))+`)`),
+		t.ID, t.Token, t.ClientID, nullStr(t.SessionID), nullStr(t.UserID), nullStr(t.ReferenceID), nullStr(t.AuthorizationCodeID),
+		jsonList(t.Resources), jsonList(t.RequestedUserInfoClaims), nullStr(t.RefreshID), toMillis(t.ExpiresAt), toMillis(t.CreatedAt),
+		nullMillis(t.Revoked), jsonObj(t.Confirmation), jsonListText(t.Scopes))
+	return err
+}
+
+func (s *Store) FindOAuthAccessToken(ctx context.Context, token string) (*types.OAuthAccessToken, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthAccessTokenColNames...)+` FROM `+s.table("oauthAccessToken")+` WHERE token = ?`), token)
+	var (
+		t                                                     types.OAuthAccessToken
+		sessionID, userID, referenceID, authCodeID, refreshID sql.NullString
+		resources, claims, confirmation                       sql.NullString
+		scopes                                                sql.NullString
+		expiresAt, createdAt                                  int64
+		revoked                                               sql.NullInt64
+	)
+	err := row.Scan(&t.ID, &t.Token, &t.ClientID, &sessionID, &userID, &referenceID, &authCodeID,
+		&resources, &claims, &refreshID, &expiresAt, &createdAt, &revoked, &confirmation, &scopes)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	t.SessionID = sessionID.String
+	t.UserID = userID.String
+	t.ReferenceID = referenceID.String
+	t.AuthorizationCodeID = authCodeID.String
+	t.RefreshID = refreshID.String
+	t.Resources = scanJSONList(resources)
+	t.RequestedUserInfoClaims = scanJSONList(claims)
+	t.Confirmation = scanJSONObj(confirmation)
+	t.Scopes = scanJSONList(scopes)
+	t.ExpiresAt = fromMillis(expiresAt)
+	t.CreatedAt = fromMillis(createdAt)
+	t.Revoked = scanNullMillis(revoked)
+	return &t, nil
+}
+
+var oauthRefreshTokenColNames = []string{
+	"id", "token", "clientId", "sessionId", "userId", "referenceId", "authorizationCodeId",
+	"resources", "requestedUserInfoClaims", "expiresAt", "createdAt", "revoked", "rotatedAt",
+	"rotationReplayResponse", "rotationReplayExpiresAt", "authTime", "confirmation", "scopes",
+}
+
+func (s *Store) CreateOAuthRefreshToken(ctx context.Context, t *types.OAuthRefreshToken) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthRefreshToken")+` (`+s.cols(oauthRefreshTokenColNames...)+`) VALUES (`+qMarks(len(oauthRefreshTokenColNames))+`)`),
+		t.ID, t.Token, t.ClientID, nullStr(t.SessionID), t.UserID, nullStr(t.ReferenceID), nullStr(t.AuthorizationCodeID),
+		jsonList(t.Resources), jsonList(t.RequestedUserInfoClaims), toMillis(t.ExpiresAt), toMillis(t.CreatedAt),
+		nullMillis(t.Revoked), nullMillis(t.RotatedAt), nullStr(t.RotationReplayResponse), nullMillis(t.RotationReplayExpiresAt),
+		nullMillis(t.AuthTime), jsonObj(t.Confirmation), jsonListText(t.Scopes))
+	return err
+}
+
+func (s *Store) FindOAuthRefreshToken(ctx context.Context, token string) (*types.OAuthRefreshToken, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthRefreshTokenColNames...)+` FROM `+s.table("oauthRefreshToken")+` WHERE token = ?`), token)
+	var (
+		t                                           types.OAuthRefreshToken
+		sessionID, referenceID, authCodeID          sql.NullString
+		resources, claims, replayResp, confirmation sql.NullString
+		scopes                                      sql.NullString
+		expiresAt, createdAt                        int64
+		revoked, rotatedAt, replayExp, authTime     sql.NullInt64
+	)
+	err := row.Scan(&t.ID, &t.Token, &t.ClientID, &sessionID, &t.UserID, &referenceID, &authCodeID,
+		&resources, &claims, &expiresAt, &createdAt, &revoked, &rotatedAt, &replayResp, &replayExp, &authTime, &confirmation, &scopes)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	t.SessionID = sessionID.String
+	t.ReferenceID = referenceID.String
+	t.AuthorizationCodeID = authCodeID.String
+	t.Resources = scanJSONList(resources)
+	t.RequestedUserInfoClaims = scanJSONList(claims)
+	t.RotationReplayResponse = replayResp.String
+	t.Confirmation = scanJSONObj(confirmation)
+	t.Scopes = scanJSONList(scopes)
+	t.ExpiresAt = fromMillis(expiresAt)
+	t.CreatedAt = fromMillis(createdAt)
+	t.Revoked = scanNullMillis(revoked)
+	t.RotatedAt = scanNullMillis(rotatedAt)
+	t.RotationReplayExpiresAt = scanNullMillis(replayExp)
+	t.AuthTime = scanNullMillis(authTime)
+	return &t, nil
+}
+
+func (s *Store) RotateOAuthRefreshToken(ctx context.Context, id string, replayResponse string, replayExpiresAt time.Time) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("oauthRefreshToken")+` SET revoked = ?, `+s.table("rotatedAt")+` = ?, `+s.table("rotationReplayResponse")+` = ?, `+s.table("rotationReplayExpiresAt")+` = ? WHERE id = ?`),
+		toMillis(now), toMillis(now), nullStr(replayResponse), toMillis(replayExpiresAt), id)
+	return err
+}
+
+func (s *Store) InvalidateOAuthRefreshFamily(ctx context.Context, clientID, userID string) error {
+	// Delete access tokens linked to the family first so FK children do not
+	// block the refresh-row delete, then the refresh family itself. The two
+	// deletes are not atomic; a concurrent in-flight issuance can briefly
+	// re-create rows (see Better Auth's TODO(invalidate-family-race)).
+	if _, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("oauthAccessToken")+` WHERE `+s.table("clientId")+` = ? AND `+s.table("userId")+` = ? AND `+s.table("refreshId")+` IS NOT NULL`), clientID, userID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("oauthRefreshToken")+` WHERE `+s.table("clientId")+` = ? AND `+s.table("userId")+` = ?`), clientID, userID)
+	return err
+}
+
+// =========================================================================
 // Wallet
 // =========================================================================
 
