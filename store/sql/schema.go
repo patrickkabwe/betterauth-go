@@ -256,7 +256,9 @@ func pluginStatements(d Dialect, pluginIDs ...string) map[string][]string {
 				` + d.quoteIdent("publicKey") + ` TEXT NOT NULL,
 				` + d.quoteIdent("privateKey") + ` TEXT,
 				` + d.quoteIdent("createdAt") + ` ` + d.timestampType() + ` NOT NULL,
-				` + d.quoteIdent("expiresAt") + ` ` + d.timestampType() + `
+				` + d.quoteIdent("expiresAt") + ` ` + d.timestampType() + `,
+				alg TEXT,
+				crv TEXT
 			)`,
 		},
 		// oidc-provider and mcp both persist registered OAuth applications.

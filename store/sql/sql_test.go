@@ -480,6 +480,13 @@ func TestSchemaScoping(t *testing.T) {
 		}
 	}
 
+	jwksTable := tableStatement(t, Schema("jwt"), `"jwks"`)
+	for _, want := range []string{"alg TEXT", "crv TEXT"} {
+		if !contains(jwksTable, want) {
+			t.Fatalf("jwks schema missing Better Auth JS field %q", want)
+		}
+	}
+
 	// oidc-provider and mcp share the oauth app table; it must appear once.
 	shared := joinSchema(Schema("oidc-provider", "mcp"))
 	if n := countSubstr(shared, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
