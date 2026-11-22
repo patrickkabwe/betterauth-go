@@ -321,24 +321,40 @@ func OIDCProvider(opts OIDCProviderOptions) auth.Plugin {
 func oidcMetadataHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
 		base := c.Auth.BaseURL() + c.Auth.BasePath()
+		authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
 		c.WriteJSON(http.StatusOK, map[string]any{
-			"issuer":                                c.Auth.BaseURL(),
-			"authorization_endpoint":                base + "/oauth2/authorize",
-			"token_endpoint":                        base + "/oauth2/token",
-			"introspection_endpoint":                base + "/oauth2/introspect",
-			"revocation_endpoint":                   base + "/oauth2/revoke",
-			"userinfo_endpoint":                     base + "/oauth2/userinfo",
-			"registration_endpoint":                 base + "/oauth2/register",
-			"end_session_endpoint":                  base + "/oauth2/endsession",
-			"jwks_uri":                              c.Auth.BaseURL() + c.Auth.BasePath() + "/jwks",
-			"response_types_supported":              []string{"code"},
-			"subject_types_supported":               []string{"public"},
-			"id_token_signing_alg_values_supported": []string{constants.JWTAlgHS256},
-			"dpop_signing_alg_values_supported":     []string{"EdDSA", "ES256"},
-			"token_endpoint_auth_methods_supported": []string{
-				"client_secret_post", "client_secret_basic", "private_key_jwt", "none",
+			"issuer":                        c.Auth.BaseURL(),
+			"authorization_endpoint":        base + "/oauth2/authorize",
+			"token_endpoint":                base + "/oauth2/token",
+			"introspection_endpoint":        base + "/oauth2/introspect",
+			"revocation_endpoint":           base + "/oauth2/revoke",
+			"userinfo_endpoint":             base + "/oauth2/userinfo",
+			"registration_endpoint":         base + "/oauth2/register",
+			"end_session_endpoint":          base + "/oauth2/endsession",
+			"device_authorization_endpoint": base + "/device/code",
+			"jwks_uri":                      base + "/jwks",
+			"scopes_supported":              []string{"openid", "profile", "email", "offline_access"},
+			"response_types_supported":      []string{"code"},
+			"response_modes_supported":      []string{"query"},
+			"grant_types_supported": []string{
+				constants.OAuthGrantTypeCode,
+				constants.OAuthGrantTypeRefresh,
+				constants.OAuthGrantTypeDeviceCode,
 			},
+			"subject_types_supported":                          []string{"public"},
+			"id_token_signing_alg_values_supported":            []string{constants.JWTAlgHS256},
+			"code_challenge_methods_supported":                 []string{"S256"},
+			"dpop_signing_alg_values_supported":                []string{"EdDSA", "ES256"},
+			"token_endpoint_auth_methods_supported":            authMethods,
 			"token_endpoint_auth_signing_alg_values_supported": oauthcrypto.ClientAssertionAlgorithms(),
+			"introspection_endpoint_auth_methods_supported":    authMethods,
+			"revocation_endpoint_auth_methods_supported":       authMethods,
+			"authorization_response_iss_parameter_supported":   true,
+			"claims_supported":                                 []string{"sub", "email", "email_verified", "name"},
+			"claims_parameter_supported":                       true,
+			"request_parameter_supported":                      false,
+			"request_uri_parameter_supported":                  false,
+			"prompt_values_supported":                          []string{"login", "consent", "none"},
 		})
 	}
 }
@@ -1219,6 +1235,7 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			ClientID            string `json:"client_id"`
 			ClientSecret        string `json:"client_secret"`
 			RefreshToken        string `json:"refresh_token"`
+			DeviceCode          string `json:"device_code"`
 			ClientAssertion     string `json:"client_assertion"`
 			ClientAssertionType string `json:"client_assertion_type"`
 		}
@@ -1247,8 +1264,10 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			dpopJKT = jkt
 		}
 		switch body.GrantType {
-		case "refresh_token":
+		case constants.OAuthGrantTypeRefresh:
 			oidcRefreshTokenGrant(c, ext, opts, clientID, body.RefreshToken, dpopJKT)
+		case constants.OAuthGrantTypeDeviceCode:
+			oidcDeviceCodeGrant(c, ext, opts, clientID, body.DeviceCode, dpopJKT)
 		default: // authorization_code (default preserves prior behaviour)
 			oidcAuthorizationCodeGrant(c, ext, opts, body.Code, clientID, body.ClientAssertion != "", dpopJKT)
 		}
@@ -1323,6 +1342,77 @@ func oidcRefreshTokenGrant(c *auth.Context, ext store.ExtStore, opts OIDCProvide
 	replay, _ := json.Marshal(resp)
 	_ = ext.RotateOAuthRefreshToken(c.R.Context(), rt.ID, string(replay), now.Add(refreshReplayWindow))
 	c.WriteJSON(http.StatusOK, resp)
+}
+
+// oidcDeviceCodeGrant redeems an RFC 8628 device_code for OAuth tokens. It runs
+// the device-authorization polling state machine (shared deviceCode table with
+// the device-authorization plugin): slow_down when polled faster than the
+// interval, expired_token past the deadline, authorization_pending while the
+// user has not acted, access_denied on refusal, and — once approved — issues
+// the client's OAuth tokens and consumes the code so it cannot be replayed.
+func oidcDeviceCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, clientID, deviceCode, dpopJKT string) {
+	if deviceCode == "" {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, constants.MsgInvalidDeviceCode))
+		return
+	}
+	dc, err := ext.FindDeviceCodeByDeviceCode(c.R.Context(), deviceCode)
+	if err != nil {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, constants.MsgInvalidDeviceCode))
+		return
+	}
+	now := time.Now().UTC()
+
+	// RFC 8628 §3.5: reject polls that arrive faster than the interval.
+	if dc.LastPolledAt != nil && dc.Interval > 0 {
+		if now.Sub(dc.LastPolledAt.UTC()) < time.Duration(dc.Interval)*time.Second {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeSlowDown))
+			return
+		}
+	}
+	_ = ext.SetDeviceCodePolled(c.R.Context(), dc.ID, now)
+
+	if now.After(dc.ExpiresAt) {
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeExpiredToken))
+		return
+	}
+
+	// The device code is bound to the client that requested it at /device/code.
+	if dc.ClientID != "" && clientID != "" && dc.ClientID != clientID {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "client id mismatch"))
+		return
+	}
+
+	switch dc.Status {
+	case constants.DeviceStatusPending:
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeAuthorizationPending))
+	case constants.DeviceStatusDenied:
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeAccessDenied))
+	case constants.DeviceStatusApproved:
+		if dc.UserID == "" {
+			c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidGrant))
+			return
+		}
+		effectiveClient := clientID
+		if effectiveClient == "" {
+			effectiveClient = dc.ClientID
+		}
+		// Consume the code before issuing credentials so concurrent polls cannot
+		// both redeem it.
+		_ = ext.DeleteDeviceCode(c.R.Context(), dc.ID)
+		resp, err := issueOAuthGrant(c, ext, oidcGrant{
+			clientID: effectiveClient, userID: dc.UserID,
+			scopes: scopeList(dc.Scope), jwtAccessTokens: opts.JWTAccessTokens, dpopJKT: dpopJKT,
+		})
+		if err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+		c.WriteJSON(http.StatusOK, resp)
+	default:
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "invalid device code status"))
+	}
 }
 
 // oauthVerifyKey loads the provider's EdDSA public key for verifying JWT access
@@ -1417,6 +1507,30 @@ func oidcUserInfoHandler() func(*auth.Context) {
 	}
 }
 
+// registrationAuthMethods are the token_endpoint_auth_method values the provider
+// accepts for a dynamically registered client (RFC 7591).
+var registrationAuthMethods = map[string]bool{
+	"client_secret_basic": true, "client_secret_post": true,
+	"private_key_jwt": true, "none": true,
+}
+
+// registrationGrantTypes are the grant_type values a dynamic registration may
+// request; the server drops any it does not support (RFC 7591 §3.2.1).
+var registrationGrantTypes = map[string]bool{
+	constants.OAuthGrantTypeCode:        true,
+	constants.OAuthGrantTypeRefresh:     true,
+	constants.OAuthGrantTypeClientCreds: true,
+	constants.OAuthGrantTypeDeviceCode:  true,
+}
+
+// oidcRegisterHandler implements RFC 7591 dynamic client registration. It
+// applies the server defaults, validates the requested metadata, persists the
+// client, and returns the client information response (status 201).
+//
+// Deferred vs Better Auth: registration-access-token issuance and the RFC 7592
+// client-management endpoints, software_statement verification, admin/privilege
+// gating, metadata documents, strict native redirect-URI rules, and open vs
+// authenticated registration policy.
 func oidcRegisterHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
 		ext, ok := auth.ExtStore(c.Auth.Store())
@@ -1425,20 +1539,168 @@ func oidcRegisterHandler() func(*auth.Context) {
 			return
 		}
 		var body struct {
-			ClientName   string   `json:"client_name"`
-			RedirectURIs []string `json:"redirect_uris"`
+			ClientName              string         `json:"client_name"`
+			RedirectURIs            []string       `json:"redirect_uris"`
+			GrantTypes              []string       `json:"grant_types"`
+			ResponseTypes           []string       `json:"response_types"`
+			TokenEndpointAuthMethod string         `json:"token_endpoint_auth_method"`
+			ApplicationType         string         `json:"application_type"`
+			Scope                   string         `json:"scope"`
+			ClientURI               string         `json:"client_uri"`
+			LogoURI                 string         `json:"logo_uri"`
+			Contacts                []string       `json:"contacts"`
+			TOSURI                  string         `json:"tos_uri"`
+			PolicyURI               string         `json:"policy_uri"`
+			JWKS                    map[string]any `json:"jwks"`
+			JWKSURI                 string         `json:"jwks_uri"`
+			SoftwareID              string         `json:"software_id"`
+			SoftwareVersion         string         `json:"software_version"`
+			SubjectType             string         `json:"subject_type"`
+			PostLogoutRedirectURIs  []string       `json:"post_logout_redirect_uris"`
+			DPoPBoundAccessTokens   bool           `json:"dpop_bound_access_tokens"`
 		}
-		_ = c.ParseJSON(&body)
+		if err := c.ParseJSON(&body); err != nil {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidClientMetadata, constants.MsgInvalidClientMetadata))
+			return
+		}
+
+		// Server defaults (RFC 7591 §2 / §3.2.1).
+		authMethod := body.TokenEndpointAuthMethod
+		if authMethod == "" {
+			authMethod = "client_secret_basic"
+		}
+		if !registrationAuthMethods[authMethod] {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidClientMetadata, "unsupported token_endpoint_auth_method "+authMethod))
+			return
+		}
+		appType := body.ApplicationType
+		if appType == "" {
+			appType = "web"
+		}
+		if appType != "web" && appType != "native" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidClientMetadata, "application_type must be web or native"))
+			return
+		}
+
+		grants := body.GrantTypes
+		if len(grants) == 0 {
+			grants = []string{constants.OAuthGrantTypeCode}
+		}
+		// Keep only grants the server supports; reject when none are shared.
+		supported := make([]string, 0, len(grants))
+		for _, g := range grants {
+			if registrationGrantTypes[g] {
+				supported = append(supported, g)
+			}
+		}
+		if len(supported) == 0 {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidClientMetadata, "no mutually supported grant_type"))
+			return
+		}
+		grants = supported
+		usesAuthCode := hasScope(grants, constants.OAuthGrantTypeCode)
+
+		responseTypes := body.ResponseTypes
+		if len(responseTypes) == 0 && usesAuthCode {
+			responseTypes = []string{"code"}
+		}
+
+		// authorization_code clients must register at least one valid redirect URI.
+		if usesAuthCode {
+			if len(body.RedirectURIs) == 0 {
+				c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, "redirect_uris is required for authorization_code clients"))
+				return
+			}
+			for _, ru := range body.RedirectURIs {
+				u, err := url.Parse(ru)
+				if err != nil || !u.IsAbs() {
+					c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, "redirect URI must be an absolute URI: "+ru))
+					return
+				}
+			}
+		}
+
+		// private_key_jwt requires a way to resolve the client's public keys.
+		jwksJSON := ""
+		if body.JWKS != nil {
+			if b, err := json.Marshal(body.JWKS); err == nil {
+				jwksJSON = string(b)
+			}
+		}
+		if authMethod == "private_key_jwt" && jwksJSON == "" && body.JWKSURI == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidClientMetadata, "private_key_jwt requires jwks or jwks_uri"))
+			return
+		}
+
 		clientID, _ := id.Generate(16)
-		secret, _ := id.Generate(32)
-		now := time.Now()
-		_ = ext.CreateOAuthClient(c.R.Context(), &types.OAuthClient{
+		secret := ""
+		if authMethod != "none" {
+			secret, _ = id.Generate(32)
+		}
+		now := time.Now().UTC()
+		client := &types.OAuthClient{
 			ID: clientID, ClientID: clientID, ClientSecret: secret, Name: body.ClientName,
-			RedirectURIs: body.RedirectURIs, CreatedAt: now, UpdatedAt: now,
-		})
-		c.WriteJSON(http.StatusOK, map[string]string{
-			"client_id": clientID, "client_secret": secret,
-		})
+			RedirectURIs: body.RedirectURIs, PostLogoutRedirectURIs: body.PostLogoutRedirectURIs,
+			GrantTypes: grants, ResponseTypes: responseTypes,
+			TokenEndpointAuthMethod: authMethod, ApplicationType: appType,
+			Scopes: scopeList(body.Scope),
+			URI:    body.ClientURI, Icon: body.LogoURI, Contacts: body.Contacts,
+			TOS: body.TOSURI, Policy: body.PolicyURI,
+			JWKS: jwksJSON, JWKSURI: body.JWKSURI,
+			SoftwareID: body.SoftwareID, SoftwareVersion: body.SoftwareVersion,
+			SubjectType: body.SubjectType, DPoPBoundAccessTokens: body.DPoPBoundAccessTokens,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := ext.CreateOAuthClient(c.R.Context(), client); err != nil {
+			c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+			return
+		}
+
+		resp := map[string]any{
+			"client_id":                  clientID,
+			"client_id_issued_at":        now.Unix(),
+			"redirect_uris":              body.RedirectURIs,
+			"grant_types":                grants,
+			"token_endpoint_auth_method": authMethod,
+			"application_type":           appType,
+		}
+		if secret != "" {
+			resp["client_secret"] = secret
+			resp["client_secret_expires_at"] = 0 // non-expiring
+		}
+		if len(responseTypes) > 0 {
+			resp["response_types"] = responseTypes
+		}
+		addNonEmpty(resp, "client_name", body.ClientName)
+		addNonEmpty(resp, "scope", body.Scope)
+		addNonEmpty(resp, "client_uri", body.ClientURI)
+		addNonEmpty(resp, "logo_uri", body.LogoURI)
+		addNonEmpty(resp, "tos_uri", body.TOSURI)
+		addNonEmpty(resp, "policy_uri", body.PolicyURI)
+		addNonEmpty(resp, "jwks_uri", body.JWKSURI)
+		addNonEmpty(resp, "software_id", body.SoftwareID)
+		addNonEmpty(resp, "software_version", body.SoftwareVersion)
+		addNonEmpty(resp, "subject_type", body.SubjectType)
+		if len(body.Contacts) > 0 {
+			resp["contacts"] = body.Contacts
+		}
+		if len(body.PostLogoutRedirectURIs) > 0 {
+			resp["post_logout_redirect_uris"] = body.PostLogoutRedirectURIs
+		}
+		if body.JWKS != nil {
+			resp["jwks"] = body.JWKS
+		}
+		if body.DPoPBoundAccessTokens {
+			resp["dpop_bound_access_tokens"] = true
+		}
+		c.WriteJSON(http.StatusCreated, resp)
+	}
+}
+
+// addNonEmpty sets key=val on m only when val is non-empty.
+func addNonEmpty(m map[string]any, key, val string) {
+	if val != "" {
+		m[key] = val
 	}
 }
 
@@ -1458,14 +1720,68 @@ func oidcGetClientHandler() func(*auth.Context) {
 	}
 }
 
+// oidcEndSessionHandler implements OIDC RP-Initiated Logout 1.0. It ends the
+// end-user's session and, when a post_logout_redirect_uri is supplied, redirects
+// only to a URI registered on the identified client (carrying state through).
+//
+// Deferred vs Better Auth: the interactive logout-confirmation page and
+// OIDC Back-Channel Logout (logout_token delivery to registered clients).
 func oidcEndSessionHandler() func(*auth.Context) {
 	return func(c *auth.Context) {
+		param := func(k string) string {
+			if v := c.R.URL.Query().Get(k); v != "" {
+				return v
+			}
+			return c.R.PostFormValue(k)
+		}
+		clientID := param("client_id")
+		postLogout := param("post_logout_redirect_uri")
+		state := param("state")
+
+		// Identify the client from id_token_hint when no client_id is given.
+		if clientID == "" {
+			if hint := param("id_token_hint"); hint != "" {
+				if claims, err := oauthcrypto.UnverifiedClaims(hint); err == nil {
+					clientID, _ = claims["aud"].(string)
+					if clientID == "" {
+						clientID, _ = claims["azp"].(string)
+					}
+				}
+			}
+		}
+
 		c.Auth.ClearSessionCookie(c)
-		postLogout := c.R.URL.Query().Get("post_logout_redirect_uri")
-		if postLogout != "" {
-			c.Redirect(postLogout)
+
+		if postLogout == "" {
+			c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
 			return
 		}
-		c.WriteJSON(http.StatusOK, map[string]bool{"success": true})
+
+		// A post-logout redirect is honoured only when it is registered on an
+		// enabled client that opted into end-session.
+		ext, ok := auth.ExtStore(c.Auth.Store())
+		if !ok || clientID == "" {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, constants.MsgInvalidRedirectURI))
+			return
+		}
+		client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
+		if err != nil || client.Disabled || client.EnableEndSession == nil || !*client.EnableEndSession {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, constants.MsgInvalidRedirectURI))
+			return
+		}
+		if !hasScope(client.PostLogoutRedirectURIs, postLogout) {
+			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRedirectURI, "post_logout_redirect_uri is not registered"))
+			return
+		}
+		target := postLogout
+		if state != "" {
+			if u, err := url.Parse(postLogout); err == nil {
+				q := u.Query()
+				q.Set("state", state)
+				u.RawQuery = q.Encode()
+				target = u.String()
+			}
+		}
+		c.Redirect(target)
 	}
 }

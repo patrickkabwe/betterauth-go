@@ -329,6 +329,20 @@ func TestExtStoreDeviceCode(t *testing.T) {
 	if dc.UserID != "u1" || dc.Status != "approved" {
 		t.Fatalf("device update: %+v", dc)
 	}
+
+	// SetDeviceCodePolled records a fresh poll timestamp (slow_down gate).
+	poll := now.Add(2 * time.Minute).UTC()
+	must(t, st.SetDeviceCodePolled(ctx, "d1", poll))
+	dc, _ = st.FindDeviceCodeByDeviceCode(ctx, "dev")
+	if dc.LastPolledAt == nil || dc.LastPolledAt.Unix() != poll.Unix() {
+		t.Fatalf("lastPolledAt not updated: %+v", dc)
+	}
+
+	// DeleteDeviceCode consumes the code (one-time redemption / cleanup).
+	must(t, st.DeleteDeviceCode(ctx, "d1"))
+	if _, err := st.FindDeviceCodeByDeviceCode(ctx, "dev"); err == nil {
+		t.Fatal("expected device code to be deleted")
+	}
 }
 
 func TestExtStoreOAuthClient(t *testing.T) {

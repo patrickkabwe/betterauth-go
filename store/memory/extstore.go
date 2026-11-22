@@ -599,6 +599,32 @@ func (s *Store) UpdateDeviceCode(_ context.Context, id string, userID, status st
 	return ErrNotFound
 }
 
+func (s *Store) SetDeviceCodePolled(_ context.Context, id string, t time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, dc := range s.deviceCodes {
+		if dc.ID == id {
+			tt := t
+			dc.LastPolledAt = &tt
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (s *Store) DeleteDeviceCode(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for code, dc := range s.deviceCodes {
+		if dc.ID == id {
+			delete(s.deviceCodes, code)
+			delete(s.deviceCodesByUser, dc.UserCode)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
 func (s *Store) CreateJWKS(_ context.Context, rec *types.JWKSRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
