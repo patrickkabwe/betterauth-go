@@ -780,6 +780,105 @@ func (s *Store) DeleteOAuthConsent(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) CreateOAuthResource(_ context.Context, r *types.OAuthResource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *r
+	s.oauthResources[r.Identifier] = &cp
+	return nil
+}
+
+func (s *Store) FindOAuthResource(_ context.Context, identifier string) (*types.OAuthResource, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.oauthResources[identifier]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *r
+	return &cp, nil
+}
+
+func (s *Store) ListOAuthResources(_ context.Context) ([]types.OAuthResource, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.OAuthResource, 0, len(s.oauthResources))
+	for _, r := range s.oauthResources {
+		out = append(out, *r)
+	}
+	return out, nil
+}
+
+func (s *Store) UpdateOAuthResource(_ context.Context, r *types.OAuthResource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthResources[r.Identifier]; !ok {
+		return ErrNotFound
+	}
+	cp := *r
+	cp.UpdatedAt = time.Now().UTC()
+	s.oauthResources[r.Identifier] = &cp
+	return nil
+}
+
+func (s *Store) DeleteOAuthResource(_ context.Context, identifier string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthResources[identifier]; !ok {
+		return ErrNotFound
+	}
+	delete(s.oauthResources, identifier)
+	return nil
+}
+
+func (s *Store) LinkOAuthClientResource(_ context.Context, l *types.OAuthClientResource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.oauthClientRes {
+		if e.ClientID == l.ClientID && e.ResourceID == l.ResourceID {
+			return ErrAlreadyExists
+		}
+	}
+	cp := *l
+	s.oauthClientRes = append(s.oauthClientRes, &cp)
+	return nil
+}
+
+func (s *Store) UnlinkOAuthClientResource(_ context.Context, clientID, resourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.oauthClientRes {
+		if e.ClientID == clientID && e.ResourceID == resourceID {
+			s.oauthClientRes = append(s.oauthClientRes[:i], s.oauthClientRes[i+1:]...)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (s *Store) IsOAuthClientLinkedToResource(_ context.Context, clientID, resourceID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.oauthClientRes {
+		if e.ClientID == clientID && e.ResourceID == resourceID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *Store) ListOAuthClientResources(_ context.Context, clientID string) ([]types.OAuthClientResource, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.OAuthClientResource, 0)
+	for _, e := range s.oauthClientRes {
+		if e.ClientID == clientID {
+			out = append(out, *e)
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) CreateWallet(_ context.Context, w *types.WalletAddress) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -99,6 +99,18 @@ type ExtStore interface {
 	ListOAuthConsentsByUser(ctx context.Context, userID string) ([]types.OAuthConsent, error)
 	DeleteOAuthConsent(ctx context.Context, id string) error
 
+	// OAuth resources (oauth-provider, RFC 8707)
+	CreateOAuthResource(ctx context.Context, resource *types.OAuthResource) error
+	FindOAuthResource(ctx context.Context, identifier string) (*types.OAuthResource, error)
+	ListOAuthResources(ctx context.Context) ([]types.OAuthResource, error)
+	UpdateOAuthResource(ctx context.Context, resource *types.OAuthResource) error
+	DeleteOAuthResource(ctx context.Context, identifier string) error
+	// Client-resource linkage
+	LinkOAuthClientResource(ctx context.Context, link *types.OAuthClientResource) error
+	UnlinkOAuthClientResource(ctx context.Context, clientID, resourceID string) error
+	IsOAuthClientLinkedToResource(ctx context.Context, clientID, resourceID string) (bool, error)
+	ListOAuthClientResources(ctx context.Context, clientID string) ([]types.OAuthClientResource, error)
+
 	// Wallet
 	CreateWallet(ctx context.Context, w *types.WalletAddress) error
 	FindWalletByAddress(ctx context.Context, address string, chainID int) (*types.WalletAddress, error)

@@ -87,7 +87,10 @@ func MCP(opts MCPOptions) auth.Plugin {
 				c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
 				return
 			}
-			resp, err := issueOAuthGrant(c, ext, data.ClientID, data.UserID, data.SessionID, scopeList(data.Scope))
+			resp, err := issueOAuthGrant(c, ext, oidcGrant{
+				clientID: data.ClientID, userID: data.UserID, sessionID: data.SessionID,
+				scopes: scopeList(data.Scope), resources: data.Resources,
+			})
 			if err != nil {
 				c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
 				return
