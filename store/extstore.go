@@ -83,6 +83,8 @@ type ExtStore interface {
 	FindOAuthAccessToken(ctx context.Context, token string) (*types.OAuthAccessToken, error)
 	CreateOAuthRefreshToken(ctx context.Context, token *types.OAuthRefreshToken) error
 	FindOAuthRefreshToken(ctx context.Context, token string) (*types.OAuthRefreshToken, error)
+	// RevokeOAuthAccessToken marks an access token revoked (RFC 7009).
+	RevokeOAuthAccessToken(ctx context.Context, token string) error
 	// RotateOAuthRefreshToken marks a refresh row rotated: sets revoked and
 	// rotatedAt and stores a short-lived replay response for retry races.
 	RotateOAuthRefreshToken(ctx context.Context, id string, replayResponse string, replayExpiresAt time.Time) error

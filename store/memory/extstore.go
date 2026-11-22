@@ -674,6 +674,16 @@ func (s *Store) FindOAuthRefreshToken(_ context.Context, token string) (*types.O
 	return &cp, nil
 }
 
+func (s *Store) RevokeOAuthAccessToken(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.oauthAccessTokens[token]; ok {
+		now := time.Now().UTC()
+		t.Revoked = &now
+	}
+	return nil
+}
+
 func (s *Store) RotateOAuthRefreshToken(_ context.Context, id string, replayResponse string, replayExpiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
