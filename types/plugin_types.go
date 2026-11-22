@@ -187,13 +187,15 @@ type SSOProvider struct {
 
 // Passkey stores a WebAuthn credential for a user.
 type Passkey struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"userId"`
-	Name           string    `json:"name,omitempty"`
-	CredentialID   string    `json:"credentialID"`
-	CredentialJSON string    `json:"-"`
-	Transports     string    `json:"transports,omitempty"`
-	BackedUp       bool      `json:"backedUp"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name,omitempty"`
+	PublicKey    string    `json:"publicKey"`
+	UserID       string    `json:"userId"`
+	CredentialID string    `json:"credentialID"`
+	Counter      uint32    `json:"counter"`
+	DeviceType   string    `json:"deviceType"`
+	BackedUp     bool      `json:"backedUp"`
+	Transports   string    `json:"transports,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	AAGUID       string    `json:"aaguid,omitempty"`
 }

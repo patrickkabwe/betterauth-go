@@ -134,9 +134,8 @@ type SSOProviderUpdate struct {
 
 // PasskeyUpdate describes mutable passkey fields.
 type PasskeyUpdate struct {
-	Name           *string
-	CredentialJSON *string
-	Transports     *string
-	BackedUp       *bool
-	UpdatedAt      *time.Time
+	Name       *string
+	Counter    *uint32
+	BackedUp   *bool
+	Transports *string
 }

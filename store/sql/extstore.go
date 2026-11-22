@@ -1170,15 +1170,16 @@ func (s *Store) scanSSOProvider(row interface{ Scan(...any) error }) (*types.SSO
 // =========================================================================
 
 var passkeyColNames = []string{
-	"id", "userId", "name", "credentialID", "credentialJSON", "transports", "backedUp", "createdAt", "updatedAt",
+	"id", "name", "publicKey", "userId", "credentialID", "counter", "deviceType", "backedUp", "transports", "createdAt", "aaguid",
 }
 
 func (s *Store) CreatePasskey(ctx context.Context, passkey *types.Passkey) error {
 	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO `+s.table("passkey")+` (`+s.cols(passkeyColNames...)+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		passkey.ID, passkey.UserID, nullStr(passkey.Name), passkey.CredentialID, passkey.CredentialJSON,
-		nullStr(passkey.Transports), boolToInt(passkey.BackedUp), toMillis(passkey.CreatedAt), toMillis(passkey.UpdatedAt))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		passkey.ID, nullStr(passkey.Name), passkey.PublicKey, passkey.UserID, passkey.CredentialID,
+		int64(passkey.Counter), passkey.DeviceType, boolToInt(passkey.BackedUp), nullStr(passkey.Transports),
+		toMillis(passkey.CreatedAt), nullStr(passkey.AAGUID))
 	return err
 }
 
@@ -1211,8 +1212,8 @@ func (s *Store) UpdatePasskey(ctx context.Context, id string, update store.Passk
 	if update.Name != nil {
 		passkey.Name = *update.Name
 	}
-	if update.CredentialJSON != nil {
-		passkey.CredentialJSON = *update.CredentialJSON
+	if update.Counter != nil {
+		passkey.Counter = *update.Counter
 	}
 	if update.Transports != nil {
 		passkey.Transports = *update.Transports
@@ -1220,16 +1221,11 @@ func (s *Store) UpdatePasskey(ctx context.Context, id string, update store.Passk
 	if update.BackedUp != nil {
 		passkey.BackedUp = *update.BackedUp
 	}
-	if update.UpdatedAt != nil {
-		passkey.UpdatedAt = *update.UpdatedAt
-	} else {
-		passkey.UpdatedAt = time.Now().UTC()
-	}
 	_, err = s.db.ExecContext(ctx, s.q(`
-		UPDATE `+s.table("passkey")+` SET name = ?, `+s.table("credentialJSON")+` = ?, transports = ?,
-		`+s.table("backedUp")+` = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
-		nullStr(passkey.Name), passkey.CredentialJSON, nullStr(passkey.Transports),
-		boolToInt(passkey.BackedUp), toMillis(passkey.UpdatedAt), id)
+		UPDATE `+s.table("passkey")+` SET name = ?, counter = ?, transports = ?,
+		`+s.table("backedUp")+` = ? WHERE id = ?`),
+		nullStr(passkey.Name), int64(passkey.Counter), nullStr(passkey.Transports),
+		boolToInt(passkey.BackedUp), id)
 	if err != nil {
 		return nil, err
 	}
@@ -1255,12 +1251,14 @@ func (s *Store) scanPasskey(row interface{ Scan(...any) error }) (*types.Passkey
 	var (
 		passkey    types.Passkey
 		name       sql.NullString
+		counter    int64
+		deviceType sql.NullString
 		transports sql.NullString
+		aaguid     sql.NullString
 		backedUp   int
 		createdAt  int64
-		updatedAt  int64
 	)
-	err := row.Scan(&passkey.ID, &passkey.UserID, &name, &passkey.CredentialID, &passkey.CredentialJSON, &transports, &backedUp, &createdAt, &updatedAt)
+	err := row.Scan(&passkey.ID, &name, &passkey.PublicKey, &passkey.UserID, &passkey.CredentialID, &counter, &deviceType, &backedUp, &transports, &createdAt, &aaguid)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, berrors.ErrNotFound
@@ -1268,10 +1266,12 @@ func (s *Store) scanPasskey(row interface{ Scan(...any) error }) (*types.Passkey
 		return nil, err
 	}
 	passkey.Name = name.String
+	passkey.Counter = uint32(counter)
+	passkey.DeviceType = deviceType.String
 	passkey.Transports = transports.String
+	passkey.AAGUID = aaguid.String
 	passkey.BackedUp = backedUp != 0
 	passkey.CreatedAt = fromMillis(createdAt)
-	passkey.UpdatedAt = fromMillis(updatedAt)
 	return &passkey, nil
 }
 

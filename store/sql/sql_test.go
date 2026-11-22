@@ -461,6 +461,18 @@ func TestSchemaScoping(t *testing.T) {
 		}
 	}
 
+	passkeyTable := tableStatement(t, Schema("passkey"), `"passkey"`)
+	for _, want := range []string{`"publicKey"`, "counter INTEGER", `"deviceType"`, "aaguid TEXT"} {
+		if !contains(passkeyTable, want) {
+			t.Fatalf("passkey schema missing Better Auth JS field %q", want)
+		}
+	}
+	for _, unexpected := range []string{`"credentialJSON"`, `"updatedAt"`} {
+		if contains(passkeyTable, unexpected) {
+			t.Fatalf("passkey schema should not contain non-JS field %q", unexpected)
+		}
+	}
+
 	// oidc-provider and mcp share the oauth app table; it must appear once.
 	shared := joinSchema(Schema("oidc-provider", "mcp"))
 	if n := countSubstr(shared, `CREATE TABLE IF NOT EXISTS "oauthApplication"`); n != 1 {
