@@ -255,6 +255,16 @@ type OAuthConsent struct {
 	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
+// OAuthClientAssertion is a consumed RFC 7523 private_key_jwt client-assertion
+// jti, mirroring Better Auth's oauth-provider `oauthClientAssertion` table. The
+// id is a deterministic digest of the namespaced jti; its presence marks the
+// assertion as already used, so a replay inserts a duplicate primary key and
+// fails atomically. ExpiresAt bounds how long the tombstone is retained.
+type OAuthClientAssertion struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
 // WalletAddress links a blockchain wallet to a user.
 type WalletAddress struct {
 	ID        string    `json:"id"`

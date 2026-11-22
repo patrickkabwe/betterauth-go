@@ -435,6 +435,32 @@ func TestExtStoreOAuthConsent(t *testing.T) {
 	}
 }
 
+func TestExtStoreOAuthClientAssertion(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	exp := time.Now().Add(5 * time.Minute).UTC()
+
+	// First consume of a jti tombstone succeeds.
+	must(t, st.CreateOAuthClientAssertion(ctx, &types.OAuthClientAssertion{ID: "jti-digest-1", ExpiresAt: exp}))
+
+	got, err := st.FindOAuthClientAssertion(ctx, "jti-digest-1")
+	if err != nil || got.ID != "jti-digest-1" {
+		t.Fatalf("find: %+v err=%v", got, err)
+	}
+
+	// Re-inserting the same id (replay) is rejected with ErrAlreadyExists.
+	if err := st.CreateOAuthClientAssertion(ctx, &types.OAuthClientAssertion{ID: "jti-digest-1", ExpiresAt: exp}); !errors.Is(err, berrors.ErrAlreadyExists) {
+		t.Fatalf("replay should return ErrAlreadyExists, got %v", err)
+	}
+
+	// A distinct id is independent.
+	must(t, st.CreateOAuthClientAssertion(ctx, &types.OAuthClientAssertion{ID: "jti-digest-2", ExpiresAt: exp}))
+
+	if _, err := st.FindOAuthClientAssertion(ctx, "missing"); !errors.Is(err, berrors.ErrNotFound) {
+		t.Fatalf("missing should return ErrNotFound, got %v", err)
+	}
+}
+
 func TestExtStoreOAuthResource(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

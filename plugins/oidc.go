@@ -1,7 +1,12 @@
 package plugins
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,11 +15,19 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/patrickkabwe/betterauth-go/auth"
 	"github.com/patrickkabwe/betterauth-go/constants"
+	berrors "github.com/patrickkabwe/betterauth-go/errors"
 	"github.com/patrickkabwe/betterauth-go/internal/apierror"
 	"github.com/patrickkabwe/betterauth-go/internal/id"
 	"github.com/patrickkabwe/betterauth-go/internal/oauthcrypto"
 	"github.com/patrickkabwe/betterauth-go/store"
 	"github.com/patrickkabwe/betterauth-go/types"
+)
+
+// RFC 7523 private_key_jwt client-assertion constants, mirroring Better Auth's
+// oauth-provider CLIENT_ASSERTION_TYPE and assertion-lifetime defaults.
+const (
+	clientAssertionType  = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+	assertionMaxLifetime = 300 * time.Second
 )
 
 const dpopProofMaxAge = time.Minute
@@ -322,6 +335,10 @@ func oidcMetadataHandler() func(*auth.Context) {
 			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{constants.JWTAlgHS256},
 			"dpop_signing_alg_values_supported":     []string{"EdDSA", "ES256"},
+			"token_endpoint_auth_methods_supported": []string{
+				"client_secret_post", "client_secret_basic", "private_key_jwt", "none",
+			},
+			"token_endpoint_auth_signing_alg_values_supported": oauthcrypto.ClientAssertionAlgorithms(),
 		})
 	}
 }
@@ -766,6 +783,273 @@ func authenticateOAuthClient(c *auth.Context, ext store.ExtStore, clientID, clie
 	return client, true
 }
 
+// resolveOAuthClient authenticates the request's client. When a client_assertion
+// is present it uses RFC 7523 private_key_jwt (verifyClientAssertion); otherwise
+// it falls back to client_secret (authenticateOAuthClient). On failure it writes
+// the error and returns ok=false.
+func resolveOAuthClient(c *auth.Context, ext store.ExtStore, clientID, clientSecret, assertion, assertionType string) (*types.OAuthClient, bool) {
+	if assertion != "" {
+		return verifyClientAssertion(c, ext, assertion, assertionType, clientID)
+	}
+	return authenticateOAuthClient(c, ext, clientID, clientSecret)
+}
+
+// verifyClientAssertion authenticates a confidential client with an RFC 7523
+// private_key_jwt assertion. It mirrors Better Auth's verifyClientAssertion +
+// consumeClientAssertion: it checks the assertion type and signing algorithm,
+// looks the client up by the assertion's sub/iss, verifies the signature against
+// the client's registered JWK set, enforces the iss/sub/aud/exp/iat claims, and
+// consumes the jti once (replay protection via oauthClientAssertion). On any
+// failure it writes an invalid_client error and returns ok=false.
+func verifyClientAssertion(c *auth.Context, ext store.ExtStore, assertion, assertionType, clientIDHint string) (*types.OAuthClient, bool) {
+	fail := func(msg string) (*types.OAuthClient, bool) {
+		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, msg))
+		return nil, false
+	}
+	if assertionType != clientAssertionType {
+		return fail("unsupported client_assertion_type")
+	}
+
+	// Read sub/iss from the unverified payload to find the client (and its keys).
+	unverified, err := oauthcrypto.UnverifiedClaims(assertion)
+	if err != nil {
+		return fail("malformed client assertion")
+	}
+	clientID, _ := unverified["sub"].(string)
+	if clientID == "" {
+		clientID, _ = unverified["iss"].(string)
+	}
+	if clientID == "" {
+		return fail("client assertion must contain sub or iss claim identifying the client")
+	}
+	if clientIDHint != "" && clientIDHint != clientID {
+		return fail("client_id in body does not match assertion sub/iss")
+	}
+
+	client, err := ext.FindOAuthClientByClientID(c.R.Context(), clientID)
+	if err != nil {
+		return fail("client not found")
+	}
+	if client.Disabled {
+		return fail("client is disabled")
+	}
+	if client.TokenEndpointAuthMethod != "private_key_jwt" {
+		return fail("client is not registered for private_key_jwt authentication")
+	}
+
+	keys, err := clientAssertionKeys(client)
+	if err != nil {
+		return fail(err.Error())
+	}
+	claims, err := oauthcrypto.VerifyJWSWithJWKS(assertion, keys, oauthcrypto.ClientAssertionAlgorithms())
+	if err != nil {
+		return fail("client assertion signature verification failed")
+	}
+
+	// RFC 7523 §3: iss and sub both identify the client.
+	if iss, _ := claims["iss"].(string); iss != clientID {
+		return fail("client assertion iss must equal the client id")
+	}
+	if sub, _ := claims["sub"].(string); sub != clientID {
+		return fail("client assertion sub must equal the client id")
+	}
+	if !consumeClientAssertion(c, ext, claims, clientID) {
+		return nil, false
+	}
+	return client, true
+}
+
+// clientAssertionKeys resolves the client's public JWK set for signature
+// verification: an inline `jwks` JSON Web Key Set, or a `jwks_uri` fetched over
+// HTTPS. It returns the key list (RFC 7517 `keys` array as maps).
+func clientAssertionKeys(client *types.OAuthClient) ([]map[string]any, error) {
+	if client.JWKS != "" {
+		keys, err := parseJWKSet([]byte(client.JWKS))
+		if err != nil {
+			return nil, stderrors.New("invalid client jwks")
+		}
+		return keys, nil
+	}
+	if client.JWKSURI != "" {
+		body, err := fetchClientJWKSURI(client.JWKSURI)
+		if err != nil {
+			return nil, stderrors.New("failed to fetch client JWKS")
+		}
+		keys, err := parseJWKSet(body)
+		if err != nil {
+			return nil, stderrors.New("invalid client jwks")
+		}
+		return keys, nil
+	}
+	return nil, stderrors.New("client has no JWKS configured")
+}
+
+// maxClientJWKSBytes bounds a fetched client JWKS document (RFC 7517 sets are
+// small; this matches Better Auth's 64 KiB cap).
+const maxClientJWKSBytes = 64 * 1024
+
+// fetchClientJWKSURI fetches a client's JWK set from its jwks_uri. It is an
+// SSRF-guarded HTTPS GET: HTTPS only, no redirects, a private/reserved host is
+// rejected, the body is size-bounded, and a JSON media type is required. (A
+// simplified port of Better Auth's fetchJwksFromUri — no cross-origin discovery
+// hooks and no stale-if-error cache.)
+func fetchClientJWKSURI(jwksURI string) ([]byte, error) {
+	parsed, err := url.Parse(jwksURI)
+	if err != nil || parsed.Scheme != "https" {
+		return nil, stderrors.New("jwks_uri must use HTTPS")
+	}
+	if parsed.User != nil || strings.Contains(jwksURI, "#") {
+		return nil, stderrors.New("jwks_uri must not contain credentials or a fragment")
+	}
+	if isPrivateJWKSHost(parsed.Hostname()) {
+		return nil, stderrors.New("jwks_uri must not point to a private or reserved address")
+	}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return stderrors.New("jwks_uri must not redirect")
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, jwksURI, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, stderrors.New("jwks_uri returned a non-200 status")
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "json") {
+		return nil, stderrors.New("jwks_uri response must use a JSON media type")
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxClientJWKSBytes+1))
+}
+
+// isPrivateJWKSHost reports whether a hostname is not publicly routable — a
+// syntactic SSRF check for loopback, private, link-local and reserved targets.
+func isPrivateJWKSHost(host string) bool {
+	host = strings.Trim(host, "[]")
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") ||
+		strings.HasSuffix(lower, ".local") || strings.HasSuffix(lower, ".internal") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false // a public name whose DNS is not resolved here
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		ip.Equal(net.ParseIP("169.254.169.254"))
+}
+
+// parseJWKSet parses an RFC 7517 `{"keys":[...]}` document into a slice of JWK
+// maps, rejecting an empty set.
+func parseJWKSet(raw []byte) ([]map[string]any, error) {
+	var set struct {
+		Keys []map[string]any `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &set); err != nil {
+		return nil, err
+	}
+	if len(set.Keys) == 0 {
+		return nil, stderrors.New("empty jwk set")
+	}
+	return set.Keys, nil
+}
+
+// consumeClientAssertion enforces the RFC 7523 §3 assertion-hygiene claims
+// (aud/exp/iat) and single-use jti replay protection, mirroring Better Auth's
+// consumeClientAssertion. The jti tombstone id is a digest of the namespaced
+// jti, inserted under the primary key so a cross-worker replay fails atomically.
+func consumeClientAssertion(c *auth.Context, ext store.ExtStore, claims jwt.MapClaims, clientID string) bool {
+	fail := func(msg string) bool {
+		c.WriteError(apierror.New(http.StatusUnauthorized, constants.CodeInvalidClient, msg))
+		return false
+	}
+
+	// aud MUST include the token endpoint (or the issuer).
+	accepted := map[string]bool{
+		endpointURL(c, "/oauth2/token"): true,
+		c.Auth.BaseURL():                true,
+	}
+	audOK := false
+	for _, a := range audienceValues(claims["aud"]) {
+		if accepted[a] {
+			audOK = true
+			break
+		}
+	}
+	if !audOK {
+		return fail("client assertion aud does not match the endpoint")
+	}
+
+	now := time.Now().Unix()
+	maxLifetime := int64(assertionMaxLifetime / time.Second)
+	expF, ok := claims["exp"].(float64)
+	if !ok {
+		return fail("client assertion must include exp claim")
+	}
+	exp := int64(expF)
+	if exp <= now {
+		return fail("client assertion has expired")
+	}
+	if exp-now > maxLifetime {
+		return fail("client assertion exp is too far in the future")
+	}
+	if iatF, ok := claims["iat"].(float64); ok {
+		if now-int64(iatF) > maxLifetime {
+			return fail("client assertion iat is too far in the past")
+		}
+	}
+
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		return fail("client assertion must include jti claim")
+	}
+
+	// Single-use: the id is a digest of `private_key_jwt:<clientId>:<jti>`, so the
+	// same jti can recur across clients but never within one. A duplicate primary
+	// key means replay.
+	sum := sha256.Sum256([]byte("private_key_jwt:" + clientID + ":" + jti))
+	jtiID := hex.EncodeToString(sum[:])
+	err := ext.CreateOAuthClientAssertion(c.R.Context(), &types.OAuthClientAssertion{
+		ID:        jtiID,
+		ExpiresAt: time.Unix(exp, 0).UTC(),
+	})
+	if stderrors.Is(err, berrors.ErrAlreadyExists) {
+		return fail("client assertion jti has already been used")
+	}
+	if err != nil {
+		c.WriteError(apierror.WithCode(http.StatusInternalServerError, constants.CodeInternalServerError))
+		return false
+	}
+	return true
+}
+
+// audienceValues normalizes a JWT `aud` claim (a string or array of strings)
+// into a slice.
+func audienceValues(aud any) []string {
+	switch v := aud.(type) {
+	case string:
+		return []string{v}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, a := range v {
+			if s, ok := a.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // oauthClientMayIntrospect reports whether the introspecting client is allowed
 // to see a token's metadata: it issued the token, or it is linked to one of the
 // token's audience resources. Otherwise the caller gets {active:false}.
@@ -790,16 +1074,18 @@ func oidcIntrospectHandler() func(*auth.Context) {
 			return
 		}
 		var body struct {
-			Token         string `json:"token"`
-			TokenTypeHint string `json:"token_type_hint"`
-			ClientID      string `json:"client_id"`
-			ClientSecret  string `json:"client_secret"`
+			Token               string `json:"token"`
+			TokenTypeHint       string `json:"token_type_hint"`
+			ClientID            string `json:"client_id"`
+			ClientSecret        string `json:"client_secret"`
+			ClientAssertion     string `json:"client_assertion"`
+			ClientAssertionType string `json:"client_assertion_type"`
 		}
 		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
 			return
 		}
-		client, ok := authenticateOAuthClient(c, ext, body.ClientID, body.ClientSecret)
+		client, ok := resolveOAuthClient(c, ext, body.ClientID, body.ClientSecret, body.ClientAssertion, body.ClientAssertionType)
 		if !ok {
 			return
 		}
@@ -887,16 +1173,18 @@ func oidcRevokeHandler() func(*auth.Context) {
 			return
 		}
 		var body struct {
-			Token         string `json:"token"`
-			TokenTypeHint string `json:"token_type_hint"`
-			ClientID      string `json:"client_id"`
-			ClientSecret  string `json:"client_secret"`
+			Token               string `json:"token"`
+			TokenTypeHint       string `json:"token_type_hint"`
+			ClientID            string `json:"client_id"`
+			ClientSecret        string `json:"client_secret"`
+			ClientAssertion     string `json:"client_assertion"`
+			ClientAssertionType string `json:"client_assertion_type"`
 		}
 		if err := c.ParseJSON(&body); err != nil || body.Token == "" {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidRequestBody))
 			return
 		}
-		client, ok := authenticateOAuthClient(c, ext, body.ClientID, body.ClientSecret)
+		client, ok := resolveOAuthClient(c, ext, body.ClientID, body.ClientSecret, body.ClientAssertion, body.ClientAssertionType)
 		if !ok {
 			return
 		}
@@ -926,15 +1214,27 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 			return
 		}
 		var body struct {
-			Code         string `json:"code"`
-			GrantType    string `json:"grant_type"`
-			ClientID     string `json:"client_id"`
-			ClientSecret string `json:"client_secret"`
-			RefreshToken string `json:"refresh_token"`
+			Code                string `json:"code"`
+			GrantType           string `json:"grant_type"`
+			ClientID            string `json:"client_id"`
+			ClientSecret        string `json:"client_secret"`
+			RefreshToken        string `json:"refresh_token"`
+			ClientAssertion     string `json:"client_assertion"`
+			ClientAssertionType string `json:"client_assertion_type"`
 		}
 		if err := c.ParseJSON(&body); err != nil {
 			c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidRequest, constants.MsgInvalidTokenRequest))
 			return
+		}
+		// RFC 7523: a client_assertion authenticates the client via
+		// private_key_jwt. The authenticated client id then binds the grant.
+		clientID := body.ClientID
+		if body.ClientAssertion != "" {
+			client, ok := verifyClientAssertion(c, ext, body.ClientAssertion, body.ClientAssertionType, body.ClientID)
+			if !ok {
+				return
+			}
+			clientID = client.ClientID
 		}
 		// RFC 9449: a DPoP proof on the token request sender-constrains the token.
 		dpopJKT := ""
@@ -948,14 +1248,14 @@ func oidcTokenHandler(opts OIDCProviderOptions) func(*auth.Context) {
 		}
 		switch body.GrantType {
 		case "refresh_token":
-			oidcRefreshTokenGrant(c, ext, opts, body.ClientID, body.RefreshToken, dpopJKT)
+			oidcRefreshTokenGrant(c, ext, opts, clientID, body.RefreshToken, dpopJKT)
 		default: // authorization_code (default preserves prior behaviour)
-			oidcAuthorizationCodeGrant(c, ext, opts, body.Code, dpopJKT)
+			oidcAuthorizationCodeGrant(c, ext, opts, body.Code, clientID, body.ClientAssertion != "", dpopJKT)
 		}
 	}
 }
 
-func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, code, dpopJKT string) {
+func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCProviderOptions, code, authedClientID string, assertionAuthed bool, dpopJKT string) {
 	v, err := c.Auth.ConsumeVerification(c.R.Context(), constants.VerificationOIDCCode+code)
 	if err != nil {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
@@ -964,6 +1264,12 @@ func oidcAuthorizationCodeGrant(c *auth.Context, ext store.ExtStore, opts OIDCPr
 	var data oidcCodeData
 	if err := json.Unmarshal([]byte(v.Value), &data); err != nil {
 		c.WriteError(apierror.WithCode(http.StatusBadRequest, constants.CodeInvalidCode))
+		return
+	}
+	// When the client authenticated with a private_key_jwt assertion, the code
+	// must have been issued to that same client (RFC 6749 §4.1.3).
+	if assertionAuthed && authedClientID != "" && data.ClientID != authedClientID {
+		c.WriteError(apierror.New(http.StatusBadRequest, constants.CodeInvalidGrant, "authorization code was not issued to this client"))
 		return
 	}
 	resp, err := issueOAuthGrant(c, ext, oidcGrant{

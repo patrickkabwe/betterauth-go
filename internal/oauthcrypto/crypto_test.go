@@ -1,8 +1,13 @@
 package oauthcrypto
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -112,5 +117,102 @@ func TestVerifyDPoPProof(t *testing.T) {
 	r2, err := VerifyDPoPProof(withAth, "GET", "https://issuer/oauth2/userinfo", now, time.Minute)
 	if err != nil || r2.ATH != ath {
 		t.Fatalf("ath should round-trip: %+v err=%v", r2, err)
+	}
+}
+
+func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+// TestVerifyJWSWithJWKS exercises client-assertion signature verification across
+// the key types private_key_jwt accepts: RSA, EC P-256, and OKP Ed25519.
+func TestVerifyJWSWithJWKS(t *testing.T) {
+	algs := ClientAssertionAlgorithms()
+	claims := jwt.MapClaims{"iss": "c1", "sub": "c1", "jti": "j1"}
+
+	t.Run("EdDSA/OKP", func(t *testing.T) {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		tok.Header["kid"] = "k-okp"
+		s, err := tok.SignedString(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jwk := map[string]any{"kty": "OKP", "crv": "Ed25519", "kid": "k-okp", "x": b64u(pub)}
+		if _, err := VerifyJWSWithJWKS(s, []map[string]any{jwk}, algs); err != nil {
+			t.Fatalf("OKP verify: %v", err)
+		}
+	})
+
+	t.Run("ES256/EC", func(t *testing.T) {
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		tok.Header["kid"] = "k-ec"
+		s, err := tok.SignedString(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jwk := map[string]any{
+			"kty": "EC", "crv": "P-256", "kid": "k-ec",
+			"x": b64u(key.X.Bytes()), "y": b64u(key.Y.Bytes()),
+		}
+		if _, err := VerifyJWSWithJWKS(s, []map[string]any{jwk}, algs); err != nil {
+			t.Fatalf("EC verify: %v", err)
+		}
+	})
+
+	t.Run("RS256/RSA", func(t *testing.T) {
+		key, _ := rsa.GenerateKey(rand.Reader, 2048)
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tok.Header["kid"] = "k-rsa"
+		s, err := tok.SignedString(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eBytes := big.NewInt(int64(key.E)).Bytes()
+		jwk := map[string]any{
+			"kty": "RSA", "kid": "k-rsa",
+			"n": b64u(key.N.Bytes()), "e": b64u(eBytes),
+		}
+		if _, err := VerifyJWSWithJWKS(s, []map[string]any{jwk}, algs); err != nil {
+			t.Fatalf("RSA verify: %v", err)
+		}
+	})
+
+	t.Run("wrong key rejected", func(t *testing.T) {
+		_, priv, _ := ed25519.GenerateKey(rand.Reader)
+		tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		s, _ := tok.SignedString(priv)
+		otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+		jwk := map[string]any{"kty": "OKP", "crv": "Ed25519", "x": b64u(otherPub)}
+		if _, err := VerifyJWSWithJWKS(s, []map[string]any{jwk}, algs); err == nil {
+			t.Fatal("expected verification against the wrong key to fail")
+		}
+	})
+
+	t.Run("kid selects the matching key", func(t *testing.T) {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+		tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+		tok.Header["kid"] = "right"
+		s, _ := tok.SignedString(priv)
+		keys := []map[string]any{
+			{"kty": "OKP", "crv": "Ed25519", "kid": "wrong", "x": b64u(otherPub)},
+			{"kty": "OKP", "crv": "Ed25519", "kid": "right", "x": b64u(pub)},
+		}
+		if _, err := VerifyJWSWithJWKS(s, keys, algs); err != nil {
+			t.Fatalf("kid selection: %v", err)
+		}
+	})
+}
+
+func TestUnverifiedClaims(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"sub": "abc", "iss": "abc"})
+	s, _ := tok.SignedString(priv)
+	claims, err := UnverifiedClaims(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub, _ := claims["sub"].(string); sub != "abc" {
+		t.Fatalf("sub = %v", claims["sub"])
 	}
 }

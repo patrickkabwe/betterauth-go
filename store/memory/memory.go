@@ -47,6 +47,7 @@ type Store struct {
 	oauthConsents     map[string]*types.OAuthConsent
 	oauthResources    map[string]*types.OAuthResource // keyed by identifier
 	oauthClientRes    []*types.OAuthClientResource
+	oauthClientAssert map[string]*types.OAuthClientAssertion // keyed by jti digest id
 	wallets           map[string]*types.WalletAddress
 	apiKeys           map[string]*types.APIKey
 	apiKeysByKey      map[string]string
@@ -94,6 +95,7 @@ func New() *Store {
 		oauthRefreshToks:       make(map[string]*types.OAuthRefreshToken),
 		oauthConsents:          make(map[string]*types.OAuthConsent),
 		oauthResources:         make(map[string]*types.OAuthResource),
+		oauthClientAssert:      make(map[string]*types.OAuthClientAssertion),
 		wallets:                make(map[string]*types.WalletAddress),
 		apiKeys:                make(map[string]*types.APIKey),
 		apiKeysByKey:           make(map[string]string),
