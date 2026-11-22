@@ -707,6 +707,79 @@ func (s *Store) InvalidateOAuthRefreshFamily(_ context.Context, clientID, userID
 	return nil
 }
 
+func (s *Store) CreateOAuthConsent(_ context.Context, cs *types.OAuthConsent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *cs
+	s.oauthConsents[cs.ID] = &cp
+	return nil
+}
+
+func (s *Store) FindOAuthConsent(_ context.Context, clientID, userID string) (*types.OAuthConsent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest *types.OAuthConsent
+	for _, cs := range s.oauthConsents {
+		if cs.ClientID == clientID && cs.UserID == userID {
+			if latest == nil || cs.CreatedAt.After(latest.CreatedAt) {
+				latest = cs
+			}
+		}
+	}
+	if latest == nil {
+		return nil, ErrNotFound
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (s *Store) FindOAuthConsentByID(_ context.Context, id string) (*types.OAuthConsent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cs, ok := s.oauthConsents[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *cs
+	return &cp, nil
+}
+
+func (s *Store) UpdateOAuthConsent(_ context.Context, id string, scopes, resources, claims []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cs, ok := s.oauthConsents[id]
+	if !ok {
+		return ErrNotFound
+	}
+	cs.Scopes = scopes
+	cs.Resources = resources
+	cs.RequestedUserInfoClaims = claims
+	cs.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (s *Store) ListOAuthConsentsByUser(_ context.Context, userID string) ([]types.OAuthConsent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]types.OAuthConsent, 0)
+	for _, cs := range s.oauthConsents {
+		if cs.UserID == userID {
+			out = append(out, *cs)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) DeleteOAuthConsent(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthConsents[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.oauthConsents, id)
+	return nil
+}
+
 func (s *Store) CreateWallet(_ context.Context, w *types.WalletAddress) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

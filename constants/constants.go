@@ -219,6 +219,7 @@ const (
 	CodeInvalidOTP                  = "INVALID_OTP"
 	CodeInvalidCode                 = "INVALID_CODE"
 	CodeInvalidGrant                = "INVALID_GRANT"
+	CodeNotFound                    = "NOT_FOUND"
 	CodeInvalidSIWE                 = "INVALID_SIWE"
 	CodeInvalidPhone                = "INVALID_PHONE"
 	CodeInvalidCredential           = "INVALID_CREDENTIAL"

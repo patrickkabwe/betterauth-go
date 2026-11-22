@@ -91,6 +91,14 @@ type ExtStore interface {
 	// token reuse detection (RFC 9700 §4.14).
 	InvalidateOAuthRefreshFamily(ctx context.Context, clientID, userID string) error
 
+	// OAuth consent (oauth-provider)
+	CreateOAuthConsent(ctx context.Context, consent *types.OAuthConsent) error
+	FindOAuthConsent(ctx context.Context, clientID, userID string) (*types.OAuthConsent, error)
+	FindOAuthConsentByID(ctx context.Context, id string) (*types.OAuthConsent, error)
+	UpdateOAuthConsent(ctx context.Context, id string, scopes, resources, claims []string) error
+	ListOAuthConsentsByUser(ctx context.Context, userID string) ([]types.OAuthConsent, error)
+	DeleteOAuthConsent(ctx context.Context, id string) error
+
 	// Wallet
 	CreateWallet(ctx context.Context, w *types.WalletAddress) error
 	FindWalletByAddress(ctx context.Context, address string, chainID int) (*types.WalletAddress, error)

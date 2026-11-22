@@ -399,6 +399,42 @@ func TestExtStoreOAuthTokens(t *testing.T) {
 	}
 }
 
+func TestExtStoreOAuthConsent(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	must(t, st.CreateOAuthConsent(ctx, &types.OAuthConsent{
+		ID: "cs1", ClientID: "c1", UserID: "u1",
+		Scopes: []string{"openid", "email"}, Resources: []string{"https://api.example"},
+		CreatedAt: now, UpdatedAt: now,
+	}))
+
+	got, err := st.FindOAuthConsent(ctx, "c1", "u1")
+	if err != nil || got.ID != "cs1" || len(got.Scopes) != 2 || len(got.Resources) != 1 {
+		t.Fatalf("find by client/user: %+v err=%v", got, err)
+	}
+	if byID, err := st.FindOAuthConsentByID(ctx, "cs1"); err != nil || byID.UserID != "u1" {
+		t.Fatalf("find by id: %+v err=%v", byID, err)
+	}
+
+	must(t, st.UpdateOAuthConsent(ctx, "cs1", []string{"openid"}, nil, nil))
+	got, _ = st.FindOAuthConsentByID(ctx, "cs1")
+	if len(got.Scopes) != 1 || got.Scopes[0] != "openid" || len(got.Resources) != 0 {
+		t.Fatalf("update not applied: %+v", got)
+	}
+
+	list, err := st.ListOAuthConsentsByUser(ctx, "u1")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list by user: %d err=%v", len(list), err)
+	}
+
+	must(t, st.DeleteOAuthConsent(ctx, "cs1"))
+	if _, err := st.FindOAuthConsentByID(ctx, "cs1"); err == nil {
+		t.Fatal("consent should be gone after delete")
+	}
+}
+
 func TestSchemaScoping(t *testing.T) {
 	core := joinSchema(Schema())
 	for _, want := range []string{`"user"`, `"account"`, `"session"`, `"verification"`} {

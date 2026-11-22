@@ -210,6 +210,20 @@ type OAuthRefreshToken struct {
 	Scopes                  []string       `json:"scopes"`
 }
 
+// OAuthConsent records a user's consent for a client to access a set of
+// scopes, mirroring Better Auth's oauth-provider `oauthConsent` table.
+type OAuthConsent struct {
+	ID                      string    `json:"id"`
+	ClientID                string    `json:"clientId"`
+	UserID                  string    `json:"userId,omitempty"`
+	ReferenceID             string    `json:"referenceId,omitempty"`
+	Resources               []string  `json:"resources,omitempty"`
+	RequestedUserInfoClaims []string  `json:"requestedUserInfoClaims,omitempty"`
+	Scopes                  []string  `json:"scopes"`
+	CreatedAt               time.Time `json:"createdAt"`
+	UpdatedAt               time.Time `json:"updatedAt"`
+}
+
 // WalletAddress links a blockchain wallet to a user.
 type WalletAddress struct {
 	ID        string    `json:"id"`

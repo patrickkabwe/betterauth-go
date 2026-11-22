@@ -44,6 +44,7 @@ type Store struct {
 	oauthClients      map[string]*types.OAuthClient
 	oauthAccessTokens map[string]*types.OAuthAccessToken
 	oauthRefreshToks  map[string]*types.OAuthRefreshToken
+	oauthConsents     map[string]*types.OAuthConsent
 	wallets           map[string]*types.WalletAddress
 	apiKeys           map[string]*types.APIKey
 	apiKeysByKey      map[string]string
@@ -89,6 +90,7 @@ func New() *Store {
 		oauthClients:           make(map[string]*types.OAuthClient),
 		oauthAccessTokens:      make(map[string]*types.OAuthAccessToken),
 		oauthRefreshToks:       make(map[string]*types.OAuthRefreshToken),
+		oauthConsents:          make(map[string]*types.OAuthConsent),
 		wallets:                make(map[string]*types.WalletAddress),
 		apiKeys:                make(map[string]*types.APIKey),
 		apiKeysByKey:           make(map[string]string),

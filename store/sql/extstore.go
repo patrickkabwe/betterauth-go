@@ -1103,6 +1103,85 @@ func (s *Store) InvalidateOAuthRefreshFamily(ctx context.Context, clientID, user
 	return err
 }
 
+var oauthConsentColNames = []string{
+	"id", "clientId", "userId", "referenceId", "resources", "requestedUserInfoClaims", "scopes", "createdAt", "updatedAt",
+}
+
+func (s *Store) CreateOAuthConsent(ctx context.Context, cs *types.OAuthConsent) error {
+	_, err := s.db.ExecContext(ctx, s.q(`INSERT INTO `+s.table("oauthConsent")+` (`+s.cols(oauthConsentColNames...)+`) VALUES (`+qMarks(len(oauthConsentColNames))+`)`),
+		cs.ID, cs.ClientID, nullStr(cs.UserID), nullStr(cs.ReferenceID), jsonList(cs.Resources), jsonList(cs.RequestedUserInfoClaims),
+		jsonListText(cs.Scopes), toMillis(cs.CreatedAt), toMillis(cs.UpdatedAt))
+	return err
+}
+
+func (s *Store) scanOAuthConsent(row interface{ Scan(...any) error }) (*types.OAuthConsent, error) {
+	var (
+		cs                        types.OAuthConsent
+		userID, referenceID       sql.NullString
+		resources, claims, scopes sql.NullString
+		createdAt, updatedAt      int64
+	)
+	err := row.Scan(&cs.ID, &cs.ClientID, &userID, &referenceID, &resources, &claims, &scopes, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, berrors.ErrNotFound
+		}
+		return nil, err
+	}
+	cs.UserID = userID.String
+	cs.ReferenceID = referenceID.String
+	cs.Resources = scanJSONList(resources)
+	cs.RequestedUserInfoClaims = scanJSONList(claims)
+	cs.Scopes = scanJSONList(scopes)
+	cs.CreatedAt = fromMillis(createdAt)
+	cs.UpdatedAt = fromMillis(updatedAt)
+	return &cs, nil
+}
+
+func (s *Store) FindOAuthConsent(ctx context.Context, clientID, userID string) (*types.OAuthConsent, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthConsentColNames...)+` FROM `+s.table("oauthConsent")+` WHERE `+s.table("clientId")+` = ? AND `+s.table("userId")+` = ? ORDER BY `+s.table("createdAt")+` DESC`), clientID, userID)
+	return s.scanOAuthConsent(row)
+}
+
+func (s *Store) FindOAuthConsentByID(ctx context.Context, id string) (*types.OAuthConsent, error) {
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT `+s.cols(oauthConsentColNames...)+` FROM `+s.table("oauthConsent")+` WHERE id = ?`), id)
+	return s.scanOAuthConsent(row)
+}
+
+func (s *Store) UpdateOAuthConsent(ctx context.Context, id string, scopes, resources, claims []string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE `+s.table("oauthConsent")+` SET scopes = ?, resources = ?, `+s.table("requestedUserInfoClaims")+` = ?, `+s.table("updatedAt")+` = ? WHERE id = ?`),
+		jsonListText(scopes), jsonList(resources), jsonList(claims), toMillis(time.Now().UTC()), id)
+	return err
+}
+
+func (s *Store) ListOAuthConsentsByUser(ctx context.Context, userID string) ([]types.OAuthConsent, error) {
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT `+s.cols(oauthConsentColNames...)+` FROM `+s.table("oauthConsent")+` WHERE `+s.table("userId")+` = ?`), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.OAuthConsent, 0)
+	for rows.Next() {
+		cs, err := s.scanOAuthConsent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *cs)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteOAuthConsent(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, s.q(`DELETE FROM `+s.table("oauthConsent")+` WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return berrors.ErrNotFound
+	}
+	return nil
+}
+
 // =========================================================================
 // Wallet
 // =========================================================================
